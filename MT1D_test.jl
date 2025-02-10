@@ -7,7 +7,7 @@ h = [2000.0, 1000.0]      # Thicknesses (m)
 f = 10 .^ range(-3, 2, length=100)  
 
 
-ρa, φ = compute_MT_response(f, ρ, h)
+ρa, φ = MT1D_response(f, ρ, h)
 
 
 p1 = plot(f, ρa, xscale=:log10, yscale=:log10, linewidth=2, xflip=true,
