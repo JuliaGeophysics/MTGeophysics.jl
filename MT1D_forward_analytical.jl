@@ -4,6 +4,10 @@ The implementation is based on the equations from the book:
 Ward, S. H., & Hohmann, G. W. (1988). Electromagnetic Theory for Geophysical Applications. In M. N. Nabighian (Ed.), 
 Electromagnetic Methods in Applied Geophysics, Volume 1: Theory. Society of Exploration Geophysicists.
 
+Author: Pankaj K Mishra (pankaj.mishra@gtk.fi)
+Date: 2025-02-10
+
+
 # Arguments
 - `frequencies`: Vector of frequencies (Hz)
 - `resistivities`: Vector of resistivities (Ω·m)
