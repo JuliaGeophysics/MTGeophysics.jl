@@ -17,7 +17,7 @@ Date: 2025-02-10
 - `ρa`: Apparent resistivity (Ω·m)
 - `φ`: Phase (degrees)
 """
-function compute_MT_response(frequencies, resistivities, thicknesses)
+function MT1D_response(frequencies, resistivities, thicknesses)
     μ0 = 4π * 1e-7  # Free-space permeability (H/m) (Ward and Hohmann, 1988, Eq. 3.96)
     m = length(resistivities)          
     σ = 1.0 ./ resistivities           
