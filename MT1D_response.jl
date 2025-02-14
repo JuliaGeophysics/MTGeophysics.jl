@@ -37,3 +37,4 @@ function MT1D_response(frequencies, resistivities, thicknesses)
     φ = atan.(imag.(Z), real.(Z)) .* (180 / π)  
     return ρa, φ
 end 
+
