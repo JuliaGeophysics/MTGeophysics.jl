@@ -1,11 +1,11 @@
-"""
+#=
 This function computes the magnetotelluric (MT) response given resistivity and thickness vectors.
 The implementation is based on the equations from the book:
 Ward, S. H., & Hohmann, G. W. (1988). Electromagnetic Theory for Geophysical Applications. In M. N. Nabighian (Ed.), 
 Electromagnetic Methods in Applied Geophysics, Volume 1: Theory. Society of Exploration Geophysicists.
 
-Author: Pankaj K Mishra (pankaj.mishra@gtk.fi)
-Date: 2025-02-10
+Author: pankajkmishra 
+Last Edit: 2025-02-21
 
 
 # Arguments
@@ -16,7 +16,8 @@ Date: 2025-02-10
 # Returns
 - `ρa`: Apparent resistivity (Ω·m)
 - `φ`: Phase (degrees)
-"""
+=#
+
 function MT1D_response(frequencies, resistivities, thicknesses)
     μ0 = 4π * 1e-7  # Free-space permeability (H/m) (Ward and Hohmann, 1988, Eq. 3.96)
     m = length(resistivities)          
