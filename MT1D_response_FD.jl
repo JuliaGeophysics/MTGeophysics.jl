@@ -1,4 +1,4 @@
-"""
+#=
 This function computes the magnetotelluric (MT) response given resistivity and thickness vectors.
 The implementation is based on Finite-difference method 
 
@@ -17,10 +17,9 @@ Date: 2025-02-14
 - `ρa`: Apparent resistivity (Ω·m)
 - `φ`: Phase (degrees) 
 
-TODO: compute default dz and z_max based on the input resistivities and thicknesses 
-TODO: replace solver to LinearSolve.jl for better performance 
+=# 
 
-"""	
+
 function MT1D_response_FD(frequencies, resistivities, thicknesses; dz=5.0, z_max=6000.0)
     μ0 = 4π * 1e-7
     ω = 2π .* frequencies
