@@ -6,36 +6,33 @@ Electromagnetic Methods in Applied Geophysics, Volume 1: Theory. Society of Expl
 
 Author: pankajkmishra 
 Last Edit: 2025-02-21
-
-
-# Arguments
-- `frequencies`: Vector of frequencies (Hz)
-- `resistivities`: Vector of resistivities (Ω·m)
-- `thicknesses`: Vector of thicknesses (m)
-
-# Returns
-- `ρa`: Apparent resistivity (Ω·m)
-- `φ`: Phase (degrees)
 =#
 
-function MT1D_response(frequencies, resistivities, thicknesses)
-    μ0 = 4π * 1e-7  # Free-space permeability (H/m) (Ward and Hohmann, 1988, Eq. 3.96)
-    m = length(resistivities)          
-    σ = 1.0 ./ resistivities           
-    ω = 2π .* frequencies              
+function MT1D_response(frequencies, mesh, resistivities)
+    μ0 = 4π * 1e-7  # Free-space permeability (H/m) (Eq. 3.96)
+    N = length(mesh)
+    
+    if length(resistivities) != N - 1
+        error("Length of resistivities must be equal to length(mesh) - 1")
+    end
 
-    k = sqrt.(-1im .* ω .* μ0 .* σ[end])  
-    Z = (ω .* μ0) ./ k  # impedance (Eq. 3.96)
+    thicknesses = diff(mesh)  # Compute thickness from mesh
+    σ = 1.0 ./ resistivities  # Conductivity (Eq. 3.2)
+    ω = 2π .* frequencies  # Angular frequency (Eq. 3.96)
 
-    for i in (m-1):-1:1
-        k_i = sqrt.(-1im .* ω .* μ0 .* σ[i])  # Wave number (Eq. 3.96)
-        Z_i = (ω .* μ0) ./ k_i  # Intrinsic impedance (Eq. 3.96)
-        tanh_term = tanh.(1im .* k_i .* thicknesses[i])  
+    k = sqrt.(-1im .* ω .* μ0 .* σ[end])  # Wavenumber for bottom half-space (Eq. 3.96)
+    Z = (ω .* μ0) ./ k  # Intrinsic impedance for last layer (Eq. 3.96)
+
+    for i in (N-2):-1:1
+        k_i = sqrt.(-1im .* ω .* μ0 .* σ[i])  # Wavenumber in layer (Eq. 3.96)
+        Z_i = (ω .* μ0) ./ k_i  # Intrinsic impedance of layer (Eq. 3.96)
+        tanh_term = tanh.(1im .* k_i .* thicknesses[i])  # Tangent hyperbolic term (Eq. 3.121)
         Z = Z_i .* (Z .+ Z_i .* tanh_term) ./ (Z_i .+ Z .* tanh_term)  # Recursive impedance (Eq. 3.121)
     end
 
     ρa = abs.(Z).^2 ./ (ω .* μ0)  # Apparent resistivity (Eq. 3.149)
-    φ = atan.(imag.(Z), real.(Z)) .* (180 / π)  
+    φ = atan.(imag.(Z), real.(Z)) .* (180 / π)  # Impedance phase (Eq. 3.150)
+    
     return ρa, φ
 end 
 
