@@ -1,5 +1,4 @@
-using LinearAlgebra
-using Statistics
+# LinearAlgebra and Statistics imported from main module
 
 mutable struct ModEMData
     T::Vector{Float64}

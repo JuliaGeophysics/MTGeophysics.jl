@@ -3,7 +3,7 @@ This is a FD solver for the 1D magnetotelluric (MT) response. This reads a UBC 1
 mesh and model file and computes the apparent resistivity and phase response. 
 - @pankajkmishra  
 =#
-using LinearSolve
+# LinearSolve conditionally imported from main module
 function MT1D_response_FD(frequencies, mesh, model)
     μ0 = 4π * 1e-7  
     N = length(mesh)

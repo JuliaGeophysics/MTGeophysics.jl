@@ -1,4 +1,4 @@
-using DelimitedFiles
+# DelimitedFiles imported from main module
 
 # Function to create UBC 1D format mesh and model files
 function UBC_1D(model_boundaries::Vector{Float64}, resistivities::Vector{Float64};
