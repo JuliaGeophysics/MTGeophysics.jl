@@ -1,5 +1,5 @@
 name = "MTGeophysics"
-uuid = "e1c8d8b8-7b5e-4e5e-8e8e-8e8e8e8e8e8e"
+uuid = "71b12eb5-90c3-4985-b1e7-1ec075583b1e"
 authors = ["JuliaGeophysics community", "Pankaj K Mishra <pankajkmishra@example.com>", "and contributors"]
 version = "0.1.0"
 
