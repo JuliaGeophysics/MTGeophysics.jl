@@ -1,5 +1,3 @@
-.
-
 struct _Chi2RMS
     chi2::Float64
     rms::Float64

@@ -1,5 +1,4 @@
-using GLMakie
-using Statistics
+# GLMakie and Statistics conditionally imported from main module
 
 # --- helpers ---------------------------------------------------------------
 
