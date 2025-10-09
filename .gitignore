@@ -1,0 +1,12 @@
+# Documentation build
+docs/build/
+docs/site/
+
+# Julia temporary files
+*.jl.*.cov
+*.jl.cov
+*.jl.mem
+/Manifest.toml
+
+# Temporary directories
+/tmp/
