@@ -1,7 +1,7 @@
 name = "MTGeophysics"
 uuid = "71b12eb5-90c3-4985-b1e7-1ec075583b1e"
 authors = ["JuliaGeophysics community", "Pankaj K Mishra <pankajkmishra@example.com>", "and contributors"]
-version = "0.1.0"
+version = "0.1.1"
 
 [deps]
 DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
@@ -15,7 +15,7 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 GLMakie = "0.10"
 LinearSolve = "2"
 Plots = "1"
-julia = "1.6"
+julia = "1.10"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
