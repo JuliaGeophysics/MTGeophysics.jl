@@ -1,0 +1,15 @@
+_build/
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+.ipynb_checkpoints/
+docs/build/
+docs/site/
+coverage/
+*.jl.cov
+*.jl.mem
+tmp/
+logs/
+*.bak
