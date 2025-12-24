@@ -1,4 +1,5 @@
 # MTGeophysics
+This repository is under development, don't use it yet! 
 Julia codes for magnetotelluric geophysics research and applications 
 
 
@@ -8,4 +9,5 @@ Julia codes for magnetotelluric geophysics research and applications
 
 
 ![Alt text](images/MT1D_comparison.png) 
-![Alt text](images/Model3D.png)
+![Alt text](images/Model3D.png) 
+
