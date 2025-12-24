@@ -28,6 +28,7 @@ using DelimitedFiles
 # Include submodules
 include("data/ModEMData.jl")
 include("model/ModEMModel.jl") 
+include("forward/MT1D.jl")  # Unified MT1D forward modeling
 include("forward/MT1D_response.jl")
 include("forward/MT1D_response_FDD.jl")
 include("forward/UBC_1D.jl")
@@ -65,6 +66,7 @@ export load_data_modem, make_nan_data, calc_rho_pha
 export read_mackie3d_model, load_model_modem
 
 # Export forward modeling functions
+export MT1D, MT1DMethod, Analytical, FiniteDifference, FD
 export MT1D_response, MT1D_response_FDD
 
 # Conditionally export LinearSolve-dependent functions
