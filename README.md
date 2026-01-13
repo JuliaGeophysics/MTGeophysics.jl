@@ -1,9 +1,9 @@
 # MTGeophysics
 Julia codes for magnetotelluric geophysics research and applications 
 
-### 3D stochastic inversion codes for MT is coming soon in this repo ... 
+### 3D stochastic inversion functionality for MT is coming soon in this repo ... 
 
-This repository is under development, don't use it yet! But if you don't like warnings here is what should work 
+This repository is under development. But if you don't like warnings here is what should work 
 
 - create a new directory 
 - start Julia 
