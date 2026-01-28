@@ -36,10 +36,11 @@ include("examples/01_mt1d_forward.jl") # 1D forward modeling example
 
 ## Gallery
 
-<p align="center">
-	<img src="images/MT1D_comparison.png" alt="MT1D Comparison" width="300"/>
-	<img src="images/Model3D.png" alt="3D Model" width="300"/>
-	<img src="images/data_2d.png" alt="2D Data" width="300"/>
-	<img src="images/model_2d.png" alt="2D Model" width="300"/>
-</p>
+
+<div align="center">
+  <img src="images/MT1D_comparison.png" alt="MT1D Comparison" style="width:100%; max-width:800px; display:block; margin-bottom:20px;"/>
+  <img src="images/Model3D.png" alt="3D Model" style="width:100%; max-width:800px; display:block; margin-bottom:20px;"/>
+  <img src="images/data_2d.png" alt="2D Data" style="width:100%; max-width:800px; display:block; margin-bottom:20px;"/>
+  <img src="images/model_2d.png" alt="2D Model" style="width:100%; max-width:800px; display:block; margin-bottom:20px;"/>
+</div>
 
