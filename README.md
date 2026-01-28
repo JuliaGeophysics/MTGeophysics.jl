@@ -1,29 +1,45 @@
-# MTGeophysics
-Julia codes for magnetotelluric geophysics research and applications 
-
-### 3D stochastic inversion functionality for MT is coming soon in this repo ... 
-
-This repository is under development. But if you don't like warnings here is what should work 
-
-- create a new directory 
-- start Julia 
-- using Pkg; Pkg.activate (.); Pkg.instantiate 
--  add MTGeophysics 
-- include("examples/01_mt1d_forward.jl")
-The last line will run 1D forward modeling example. 
 
 
-If you want to plot ModEM model and interactively visualise it, you need GLMakie 
-check out the src/viz directory which has running instruction in the source code. I will creating a running version in the example directory soon. 
+<h1 align="center">MTGeophysics.jl</h1>
+
+<p align="center">
+	<b>Julia codes for magnetotelluric geophysics research and applications</b>
+</p>
+
+<p align="center">
+	<em>3D stochastic inversion functionality for MT is coming soon!</em>
+</p>
+
+---
 
 
+## Quick Start
+
+```julia
+# In a new directory:
+using Pkg; Pkg.activate("."); Pkg.instantiate()
+Pkg.add("MTGeophysics")
+include("examples/01_mt1d_forward.jl") # 1D forward modeling example
+```
+
+---
 
 
-# What's here now 
-- MT 1D forward modeling with analytical and FD methods 
-- Model file and mesh in UBC format 
+## Visualization
+
+- For interactive ModEM model visualization, install <b>GLMakie</b>.
+- See <code>src/viz</code> for code and instructions.
+- A runnable example will be added to <code>examples/</code> soon.
+
+---
 
 
-![Alt text](images/MT1D_comparison.png) 
-![Alt text](images/Model3D.png) 
+## Gallery
+
+<p align="center">
+	<img src="images/MT1D_comparison.png" alt="MT1D Comparison" width="300"/>
+	<img src="images/Model3D.png" alt="3D Model" width="300"/>
+	<img src="images/data_2d.png" alt="2D Data" width="300"/>
+	<img src="images/model_2d.png" alt="2D Model" width="300"/>
+</p>
 

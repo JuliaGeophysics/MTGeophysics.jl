@@ -15,16 +15,16 @@ using LinearAlgebra
 using Statistics
 
 # Include submodules
-include("io/ModEMData.jl")
-include("io/ModEMModel.jl")
-include("fwd/MT1D.jl")
-include("inv/Chi2RMS.jl")
+include("ModEMData.jl")
+include("ModEMModel.jl")
+include("MT1D.jl")
+include("Chi2RMS.jl")
 
 # Conditionally include visualization if GLMakie is available
 has_visualization = false
 try
     using GLMakie
-    include("viz/PlotModel.jl")
+    include("PlotModel.jl")
     global has_visualization = true
     export gl_modem_viewer
 catch LoadError
