@@ -12,7 +12,7 @@ using Dates
 include(joinpath(dirname(@__DIR__), "src", "Model.jl"))
 include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
 
-model_file = joinpath(@__DIR__, "cascadiaInv", "model.mean")
+model_file = joinpath(@__DIR__, ".", "I_NLCG_140.rho")
 log10_scale = true          
 colormap = Reverse(:turbo)   
 with_padding = true          

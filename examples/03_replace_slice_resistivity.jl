@@ -1,4 +1,4 @@
-# Example: replace deep resistivity values below a cutoff depth.
+# Example: replace deep resistivity values below a cutoff layer.
 # Author: @pankajkmishra
 # This script applies bulk edits to deeper layers and opens the depth-slice viewer for review.
 # Use it for quick scenario edits before saving a modified model.
@@ -13,11 +13,11 @@ include(joinpath(dirname(@__DIR__), "src", "Model.jl"))
 include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
 include(joinpath(@__DIR__, "02_plot_depth_slices.jl"))
 
-model_file = joinpath(@__DIR__, "cascadiaInv", "cascad_half_inverse.ws")
+model_file = joinpath(@__DIR__, ".", "I_NLCG_140.rho")
 
-cutoff_depth = 40000.0
+cutoff_layer = 42
 target_resistivity = 10000.0
-transition_layers = 1
+transition_layers = 0
 
 log10_scale = true
 colormap = Reverse(:turbo)
@@ -30,32 +30,18 @@ grid_linewidth = 0.5
 grid_alpha = 0.3
 pad_tol = 0.5
 
-function get_layer_depths(z_centers::AbstractVector)
-    z_edges = edges_from_centers(z_centers)
-    cumsum(diff(z_edges))
-end
-
-function find_cutoff_layer(layer_depths::AbstractVector, cutoff_depth::Real)
-    idx = findfirst(>=(cutoff_depth), layer_depths)
-    isnothing(idx) ? length(layer_depths) + 1 : idx
-end
-
-function modify_deep_resistivity!(A::Array{<:Real,3}, z_centers::AbstractVector;
-                                   cutoff_depth::Real = 100000.0,
+function modify_deep_resistivity!(A::Array{<:Real,3};
+                                   cutoff_layer::Int = 1,
                                    target_resistivity::Real = 1000.0,
                                    transition_layers::Int = 3)
-    layer_depths = get_layer_depths(z_centers)
-    cutoff_layer = find_cutoff_layer(layer_depths, cutoff_depth)
-
     nz = size(A, 3)
 
-    if cutoff_layer > nz
-        println("Warning: cutoff_depth $(cutoff_depth) m is deeper than model. No modification made.")
-        return A, cutoff_layer, layer_depths
+    if cutoff_layer < 1 || cutoff_layer > nz
+        println("Warning: cutoff_layer $(cutoff_layer) is outside model layers (1:$(nz)). No modification made.")
+        return A, cutoff_layer, false
     end
 
     println("Modifying resistivity:")
-    println("  Cutoff depth: $(cutoff_depth) m")
     println("  Cutoff layer: $(cutoff_layer) / $(nz)")
     println("  Target resistivity: $(target_resistivity) ohm-m")
     println("  Transition layers: $(transition_layers)")
@@ -76,7 +62,7 @@ function modify_deep_resistivity!(A::Array{<:Real,3}, z_centers::AbstractVector;
     end
     println("  Replaced layers $(cutoff_layer) - $(nz) with target value")
 
-    return A, cutoff_layer, layer_depths
+    return A, cutoff_layer, true
 end
 
 function main()
@@ -93,9 +79,9 @@ function main()
 
     A_modified = copy(M.A)
 
-    A_modified, cutoff_layer, layer_depths = modify_deep_resistivity!(
-        A_modified, M.cz;
-        cutoff_depth = cutoff_depth,
+    A_modified, cutoff_layer_used, modification_applied = modify_deep_resistivity!(
+        A_modified;
+        cutoff_layer = cutoff_layer,
         target_resistivity = target_resistivity,
         transition_layers = transition_layers
     )
@@ -132,13 +118,20 @@ function main()
     Label(save_grid[1, 2], save_label, fontsize = 12, color = :green)
 
     on(btn_save.clicks) do _
-        outname = splitext(model_file)[1] * "_modified.rho"
+        cutoff_tag = "layer$(cutoff_layer)"
+        rho_tag = "rho$(Int(round(target_resistivity)))"
+        trans_tag = "tr$(transition_layers)"
+        outname = splitext(model_file)[1] * "_modified_$(cutoff_tag)_$(rho_tag)_$(trans_tag).rho"
         write_model_modem(outname, M.dx, M.dy, M.dz, A_modified, M.origin)
         save_label[] = "Saved: $(basename(outname))"
     end
 
     println("\nViewer ready!")
-    println("  Cutoff at layer $(cutoff_layer), depth $(round(cutoff_depth/1000, digits=1)) km")
+    if modification_applied
+        println("  Cutoff at layer $(cutoff_layer_used)")
+    else
+        println("  No modification applied because cutoff_layer $(cutoff_layer) is outside 1:$(M.nz)")
+    end
     println("  Click 'Save Model' to write the modified model to disk.")
 
     screen = display(fig)

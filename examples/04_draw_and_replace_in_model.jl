@@ -273,10 +273,6 @@ function zone_editor(M_input; model_name="model", M=M_input, replacement_resisti
         set_close_to!(sl, min(length(z), sl.value[] + 1))
     end
 
-    on(depth_toggle.active) do active
-        depth_toggle_label[] = active ? "All depths" : "Current layer"
-    end
-
     y_min, y_max = extrema(y_all)
     x_min, x_max = extrema(x_all)
 
@@ -433,7 +429,37 @@ function zone_editor(M_input; model_name="model", M=M_input, replacement_resisti
     Label(save_grid[1, 2], save_label, fontsize = 12, color = :green)
 
     on(btn_save.clicks) do _
-        outname = splitext(M.name)[1] * "_edited.rho"
+        repl_val = try
+            parse(Float64, resistivity_tb.stored_string[])
+        catch
+            replacement_resistivity
+        end
+
+        n_above = try
+            parse(Int, above_tb.stored_string[])
+        catch
+            layers_above
+        end
+
+        n_below = try
+            parse(Int, below_tb.stored_string[])
+        catch
+            layers_below
+        end
+
+        n_trans = try
+            parse(Int, trans_tb.stored_string[])
+        catch
+            transition_layers
+        end
+
+        mode_tag = depth_toggle.active[] ? "allz" : "layer$(current_layer[])"
+        rho_tag = "rho$(Int(round(repl_val)))"
+        above_tag = "ab$(n_above)"
+        below_tag = "bl$(n_below)"
+        trans_tag = "tr$(n_trans)"
+
+        outname = splitext(M.name)[1] * "_edited_$(rho_tag)_$(above_tag)_$(below_tag)_$(trans_tag)_$(mode_tag).rho"
         write_model_modem(outname, M.dx, M.dy, M.dz, A_working, M.origin)
         save_label[] = "Saved: $(basename(outname))"
         status_text[] = "Model saved to: $outname"

@@ -4,7 +4,7 @@
 # Use it to explore overall 3D model geometry and resistivity trends.
 
 using Pkg
-Pkg.activate(dirname(@__DIR__))
+#Pkg.activate(dirname(@__DIR__))
 
 using GLMakie
 using Statistics
@@ -27,64 +27,14 @@ show_padding = false
 
 pad_tolerance = 0.2
 
-function edges_from_centers(c::AbstractVector)
-    n = length(c)
-    n < 2 && return [c[1] - 0.5; c[1] + 0.5]
-    mids = (c[1:end-1] .+ c[2:end]) ./ 2
-    first_edge = c[1] - (c[2] - c[1]) / 2
-    last_edge  = c[end] + (c[end] - c[end-1]) / 2
-    vcat(first_edge, mids, last_edge)
-end
-
-function core_indices(c::AbstractVector; tol::Real = 0.2)
-    e = edges_from_centers(c)
-    w = abs.(diff(e))
-    n = length(w)
-    n <= 4 && return 1:n
-    s = max(1, round(Int, 0.2n))
-    t = min(n, round(Int, 0.8n))
-    w_ref = median(@view w[(s+1):t])
-    is_core = abs.(w .- w_ref) .<= tol * w_ref
-    best_i, best_len = 1, 0
-    i = 1
-    while i <= n
-        if is_core[i]
-            j = i
-            while j <= n && is_core[j]; j += 1; end
-            if (j - i) > best_len
-                best_i, best_len = i, (j - i)
-            end
-            i = j
-        else
-            i += 1
-        end
-    end
-    best_len > 0 ? (best_i:(best_i + best_len - 1)) : (1:n)
-end
-
-function z_indices_for_max_depth(zc::AbstractVector, max_depth::Real)
-    e = edges_from_centers(zc)
-    dz = abs.(diff(e))
-    cum = cumsum(dz)
-    if max_depth <= cum[1]
-        return 1:1
-    elseif max_depth >= cum[end]
-        return 1:length(zc)
-    else
-        k = findfirst(>=(max_depth), cum)::Int
-        if k > 1 && (max_depth - cum[k-1]) < (cum[k] - max_depth)
-            return 1:(k-1)
-        else
-            return 1:k
-        end
-    end
-end
+default_view_direction = Vec3f(-0.90f0, 0.95f0, 0.75f0)
+default_view_scale = 1.15f0
 
 function modem_3d_viewer(
     M;
     log10scale::Bool = true,
     cmap = Reverse(:turbo),
-    figsize = (1200, 800),
+    figsize = (1800, 920),
     withPadding::Bool = true,
     max_depth::Union{Nothing, Real} = nothing,
     pad_tol::Real = 0.2,
@@ -106,7 +56,7 @@ function modem_3d_viewer(
         iy = iy_full
     else
         ix = ix_core
-        iy = iy_core
+        iy = iy_core 
     end
 
     x = x_all[ix]
@@ -157,15 +107,16 @@ function modem_3d_viewer(
 
     fig = Figure(size = figsize)
 
-    left_panel = fig[1, 1] = GridLayout(valign = :top)
-    controls = left_panel[1, 1] = GridLayout()
-
-    ax = LScene(fig[1, 2], show_axis = false)
+    ax = LScene(fig[1, 1], show_axis = false)
+    controls = fig[2, 1] = GridLayout()
+    axis_bar = fig[3, 1] = GridLayout()
 
     cb_label = log10scale ? "log₁₀ ρ (Ω·m)" : "ρ (Ω·m)"
 
-    colsize!(fig.layout, 1, Fixed(180))
-    colsize!(fig.layout, 2, Auto())
+    rowsize!(fig.layout, 1, Relative(0.82))
+    rowsize!(fig.layout, 2, Auto(56))
+    rowsize!(fig.layout, 3, Auto(28))
+    colsize!(fig.layout, 1, Relative(0.96))
 
     plt = volumeslices!(ax, current_x[], current_y[], current_z[], current_R[]; 
                         colormap = current_colormap[], 
@@ -176,77 +127,142 @@ function modem_3d_viewer(
 
     cam3d!(ax.scene, projectiontype = Makie.Perspective)
 
-    cb = Colorbar(fig[1, 3], current_heatmaps[].xy, label = cb_label, width = 15)
-    colsize!(fig.layout, 3, Fixed(60))
+    cb = Colorbar(fig[1, 2], current_heatmaps[].xy, label = cb_label, width = 16)
+    colsize!(fig.layout, 2, Relative(0.04))
 
-    row = 1
+    function fit_camera!(xv, yv, zv)
+        xmin, xmax = extrema(xv)
+        ymin, ymax = extrema(yv)
+        zmin, zmax = extrema(zv)
+        center = Vec3f((xmin + xmax) / 2, (ymin + ymax) / 2, (zmin + zmax) / 2)
+        spanx = Float32(xmax - xmin)
+        spany = Float32(ymax - ymin)
+        spanz = Float32(zmax - zmin)
+        horiz = max(spanx, spany)
+        zlift = max(spanz, 0.45f0 * horiz)
+        dir_norm = sqrt(default_view_direction[1]^2 + default_view_direction[2]^2 + default_view_direction[3]^2)
+        dirx = default_view_direction[1] / dir_norm
+        diry = default_view_direction[2] / dir_norm
+        dirz = default_view_direction[3] / dir_norm
+        eye = center + Vec3f(default_view_scale * dirx * horiz,
+                             default_view_scale * diry * horiz,
+                             default_view_scale * dirz * zlift)
+        update_cam!(ax.scene, eye, center, Vec3f(0, 0, 1))
+    end
 
-    Label(controls[row, 1], "X:", halign = :right, fontsize = 12)
-    sl_yz = Slider(controls[row, 2], range = 1:length(x), startvalue = round(Int, length(x) / 2), width = 120)
-    tog_yz = Toggle(controls[row, 3], active = true)
-    row += 1
-    lbl_yz = Label(controls[row, 1:3], "$(round(x[sl_yz.value[]], digits=0)) m", fontsize = 11, color = :gray30)
-    row += 1
+    fit_camera!(current_x[], current_y[], current_z[])
 
-    Label(controls[row, 1], "Y:", halign = :right, fontsize = 12)
-    sl_xz = Slider(controls[row, 2], range = 1:length(y), startvalue = round(Int, length(y) / 2), width = 120)
-    tog_xz = Toggle(controls[row, 3], active = true)
-    row += 1
-    lbl_xz = Label(controls[row, 1:3], "$(round(y[sl_xz.value[]], digits=0)) m", fontsize = 11, color = :gray30)
-    row += 1
+    Label(controls[1, 1], "X:", halign = :right, fontsize = 12)
+    btn_prev_yz = Button(controls[1, 2], label = "Prev", fontsize = 10)
+    sl_yz = Slider(controls[1, 3], range = 1:length(x), startvalue = round(Int, length(x) / 2), width = 180)
+    btn_next_yz = Button(controls[1, 4], label = "Next", fontsize = 10)
+    tog_yz = Toggle(controls[1, 5], active = true)
+    lbl_yz = Label(controls[1, 6], "$(round(x[sl_yz.value[]], digits=0)) m", fontsize = 10, color = :gray35)
 
-    Label(controls[row, 1], "Z:", halign = :right, fontsize = 12)
-    sl_xy = Slider(controls[row, 2], range = 1:length(z), startvalue = round(Int, length(z) / 2), width = 120)
-    tog_xy = Toggle(controls[row, 3], active = true)
-    row += 1
-    lbl_xy = Label(controls[row, 1:3], "Depth: $(round(-z[sl_xy.value[]], digits=0)) m", fontsize = 11, color = :gray30)
-    row += 1
+    Label(controls[1, 7], "Y:", halign = :right, fontsize = 12)
+    btn_prev_xz = Button(controls[1, 8], label = "Prev", fontsize = 10)
+    sl_xz = Slider(controls[1, 9], range = 1:length(y), startvalue = round(Int, length(y) / 2), width = 180)
+    btn_next_xz = Button(controls[1, 10], label = "Next", fontsize = 10)
+    tog_xz = Toggle(controls[1, 11], active = true)
+    lbl_xz = Label(controls[1, 12], "$(round(y[sl_xz.value[]], digits=0)) m", fontsize = 10, color = :gray35)
 
-    btn_toggle = Button(controls[row, 1:3], label = show_full_model[] ? "Show Core" : "Show Full", fontsize = 11)
-    row += 1
+    Label(controls[1, 13], "Z:", halign = :right, fontsize = 12)
+    btn_prev_xy = Button(controls[1, 14], label = "Prev", fontsize = 10)
+    sl_xy = Slider(controls[1, 15], range = 1:length(z), startvalue = round(Int, length(z) / 2), width = 180)
+    btn_next_xy = Button(controls[1, 16], label = "Next", fontsize = 10)
+    tog_xy = Toggle(controls[1, 17], active = true)
+    lbl_xy = Label(controls[1, 18], "Depth: $(round(-z[sl_xy.value[]], digits=0)) m", fontsize = 10, color = :gray35)
 
-    btn_reset = Button(controls[row, 1:3], label = "Reset View", fontsize = 11)
-    row += 1
+    btn_toggle = Button(controls[1, 19], label = show_full_model[] ? "Show Core" : "Show Full", fontsize = 10)
+    btn_reset = Button(controls[1, 20], label = "Reset View", fontsize = 10)
+    btn_export = Button(controls[1, 21], label = "Export", fontsize = 10)
 
-    btn_export = Button(controls[row, 1:3], label = "Export", fontsize = 11)
-    row += 1
+    axis_info = Observable("")
+    Label(axis_bar[1, 1], axis_info, fontsize = 11, color = :gray30, halign = :left, tellwidth = false)
 
     rowgap!(controls, 2)
-    colgap!(controls, 2)
+    colgap!(controls, 6)
+
+    function update_axis_info!()
+        xv = current_x[]
+        yv = current_y[]
+        zv = current_z[]
+        sx = xv[sl_yz.value[]]
+        sy = yv[sl_xz.value[]]
+        sz = -zv[sl_xy.value[]]
+        axis_info[] = "X: [$(round(minimum(xv), digits=0)), $(round(maximum(xv), digits=0))] m   Y: [$(round(minimum(yv), digits=0)), $(round(maximum(yv), digits=0))] m   Depth: [0, $(round(maximum(-zv), digits=0))] m   |   Slice: X=$(round(sx, digits=0)) m, Y=$(round(sy, digits=0)) m, Depth=$(round(sz, digits=0)) m"
+    end
+
+    function apply_plane_visibility!()
+        yz_on = tog_yz.active[]
+        xz_on = tog_xz.active[]
+        xy_on = tog_xy.active[]
+        if !yz_on && !xz_on && !xy_on
+            tog_xy.active[] = true
+            yz_on = false
+            xz_on = false
+            xy_on = true
+        end
+        if current_heatmaps[].yz !== nothing
+            current_heatmaps[].yz.visible[] = yz_on
+        end
+        if current_heatmaps[].xz !== nothing
+            current_heatmaps[].xz.visible[] = xz_on
+        end
+        if current_heatmaps[].xy !== nothing
+            current_heatmaps[].xy.visible[] = xy_on
+        end
+    end
 
     on(sl_yz.value) do v
         if current_plt[] !== nothing
             current_plt[][:update_yz][](v)
         end
         lbl_yz.text[] = "$(round(current_x[][v], digits=0)) m"
+        update_axis_info!()
     end
     on(sl_xz.value) do v
         if current_plt[] !== nothing
             current_plt[][:update_xz][](v)
         end
         lbl_xz.text[] = "$(round(current_y[][v], digits=0)) m"
+        update_axis_info!()
     end
     on(sl_xy.value) do v
         if current_plt[] !== nothing
             current_plt[][:update_xy][](v)
         end
         lbl_xy.text[] = "Depth: $(round(-current_z[][v], digits=0)) m"
+        update_axis_info!()
+    end
+
+    on(btn_prev_yz.clicks) do _
+        set_close_to!(sl_yz, max(1, sl_yz.value[] - 1))
+    end
+    on(btn_next_yz.clicks) do _
+        set_close_to!(sl_yz, min(length(current_x[]), sl_yz.value[] + 1))
+    end
+    on(btn_prev_xz.clicks) do _
+        set_close_to!(sl_xz, max(1, sl_xz.value[] - 1))
+    end
+    on(btn_next_xz.clicks) do _
+        set_close_to!(sl_xz, min(length(current_y[]), sl_xz.value[] + 1))
+    end
+    on(btn_prev_xy.clicks) do _
+        set_close_to!(sl_xy, max(1, sl_xy.value[] - 1))
+    end
+    on(btn_next_xy.clicks) do _
+        set_close_to!(sl_xy, min(length(current_z[]), sl_xy.value[] + 1))
     end
 
     on(tog_yz.active) do a
-        if current_heatmaps[].yz !== nothing
-            current_heatmaps[].yz.visible = a
-        end
+        apply_plane_visibility!()
     end
     on(tog_xz.active) do a
-        if current_heatmaps[].xz !== nothing
-            current_heatmaps[].xz.visible = a
-        end
+        apply_plane_visibility!()
     end
     on(tog_xy.active) do a
-        if current_heatmaps[].xy !== nothing
-            current_heatmaps[].xy.visible = a
-        end
+        apply_plane_visibility!()
     end
 
     function rebuild_plot!(new_x, new_y, new_z, new_R, new_cmap)
@@ -271,9 +287,7 @@ function modem_3d_viewer(
         set_close_to!(sl_xz, round(Int, length(new_y) / 2))
         set_close_to!(sl_xy, round(Int, length(new_z) / 2))
 
-        current_heatmaps[].yz.visible = tog_yz.active[]
-        current_heatmaps[].xz.visible = tog_xz.active[]
-        current_heatmaps[].xy.visible = tog_xy.active[]
+        apply_plane_visibility!()
 
         cb.colormap[] = new_cmap
 
@@ -283,6 +297,7 @@ function modem_3d_viewer(
         lbl_yz.text[] = "$(round(new_x[mid_x], digits=0)) m"
         lbl_xz.text[] = "$(round(new_y[mid_y], digits=0)) m"
         lbl_xy.text[] = "Depth: $(round(-new_z[mid_z], digits=0)) m"
+        update_axis_info!()
 
         return new_plt
     end
@@ -306,15 +321,18 @@ function modem_3d_viewer(
 
         current_x[] = new_x
         current_y[] = new_y
+        current_z[] = new_z
         current_R[] = new_R
 
         rebuild_plot!(new_x, new_y, new_z, new_R, current_colormap[])
+        fit_camera!(current_x[], current_y[], current_z[])
     end
 
     on(btn_reset.clicks) do _
-
-        update_cam!(ax.scene, Vec3f(1, 1, 0.5), Vec3f(0, 0, 0), Vec3f(0, 0, 1))
+        fit_camera!(current_x[], current_y[], current_z[])
     end
+
+    update_axis_info!()
 
     function export_figure()
 
@@ -340,20 +358,63 @@ function modem_3d_viewer(
         Label(export_fig[1, 1:2], "3D View | XY at $depth_str, X=$(round(x_val, digits=0))m, Y=$(round(y_val, digits=0))m", 
               fontsize = 18, font = :bold)
 
-        export_ax = LScene(export_fig[2, 1], show_axis = true)
+        xedges_export = edges_from_centers(cur_x)
+        yedges_export = edges_from_centers(cur_y)
+        zedges_export = edges_from_centers(cur_z)
+        xlims_export = extrema(xedges_export)
+        ylims_export = extrema(yedges_export)
+        zlims_export = extrema(zedges_export)
+
+        export_ax = Axis3(export_fig[2, 1];
+            xlabel = "x",
+            ylabel = "y",
+            zlabel = "z",
+            limits = (xlims_export, ylims_export, zlims_export),
+            xautolimitmargin = (0.0f0, 0.0f0),
+            yautolimitmargin = (0.0f0, 0.0f0),
+            zautolimitmargin = (0.0f0, 0.0f0),
+            aspect = :data,
+            xgridvisible = false,
+            ygridvisible = false,
+            zgridvisible = false,
+            xticksize = 5,
+            yticksize = 5,
+            zticksize = 5,
+            xticklabelsize = 13,
+            yticklabelsize = 13,
+            zticklabelsize = 13,
+            xticklabelfont = :bold,
+            yticklabelfont = :bold,
+            zticklabelfont = :bold,
+            xlabelsize = 14,
+            ylabelsize = 14,
+            zlabelsize = 14,
+            xlabelfont = :bold,
+            ylabelfont = :bold,
+            zlabelfont = :bold,
+            xticklabelcolor = :gray70,
+            yticklabelcolor = :gray70,
+            zticklabelcolor = :gray70,
+            xtickcolor = :gray70,
+            ytickcolor = :gray70,
+            ztickcolor = :gray70,
+            xlabelcolor = :gray65,
+            ylabelcolor = :gray65,
+            zlabelcolor = :gray65
+        )
 
         export_plt = volumeslices!(export_ax, cur_x, cur_y, cur_z, current_R[]; 
                                    colormap = current_colormap[], 
                                    colorrange = (cmin, cmax), 
-                                   bbox_visible = true)
+                       bbox_visible = false)
 
         export_plt[:update_yz][](ix_pos)
         export_plt[:update_xz][](iy_pos)
         export_plt[:update_xy][](iz_pos)
 
-        export_plt[:heatmap_yz][].visible = tog_yz.active[]
-        export_plt[:heatmap_xz][].visible = tog_xz.active[]
-        export_plt[:heatmap_xy][].visible = tog_xy.active[]
+        export_plt[:heatmap_yz][].visible[] = tog_yz.active[]
+        export_plt[:heatmap_xz][].visible[] = tog_xz.active[]
+        export_plt[:heatmap_xy][].visible[] = tog_xy.active[]
 
         cb_lbl = log10scale ? "log₁₀ ρ (Ω·m)" : "ρ (Ω·m)"
         Colorbar(export_fig[2, 2], export_plt[:heatmap_xy][], label = cb_lbl, labelsize = 14)
@@ -418,12 +479,11 @@ function main()
     println("  - Drag: Rotate view")
     println("  - Scroll: Zoom in/out")
     println("  - Right-drag: Pan")
-    println("  - Sliders: Move slice planes")
+    println("  - Prev/Next + sliders: Step or move slice planes")
     println("  - Toggles: Show/hide planes")
     println("  - 'Show Core/Full': Toggle padding cells")
     println("  - 'Reset View': Reset camera angle")
     println("  - 'Export Figure': Save high-quality PNG")
-    println("  - Colormap dropdown: Change color scheme")
 
     screen = display(fig)
     println("\nViewer is open. Close the window to exit.")
