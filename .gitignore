@@ -2,14 +2,39 @@ _build/
 .DS_Store
 .vscode/
 .idea/
+
+# Model and data files (ModEM outputs)
+*.rho
+*.mod
+*.dat
+*.ws
+*.mean
+*.median
+*.std
+
+# Cascadia inversion directory
+cascadia/
+cascadiaInv/
+examples/cascadiaInv/
+
+# Editor swap files
 *.swp
 *.swo
+*.bak
+
+# Jupyter
 .ipynb_checkpoints/
+
+# Docs build artifacts
 docs/build/
 docs/site/
+
+# Coverage
 coverage/
 *.jl.cov
 *.jl.mem
+
+# Temp
 tmp/
 logs/
-*.bak
+

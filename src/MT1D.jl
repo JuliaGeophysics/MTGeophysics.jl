@@ -1,4 +1,7 @@
-# Author: Pankaj K Mishra (@pankajmishra), Last Updated: December 24, 2025 
+# 1D MT forward modeling solvers.
+# Author: @pankajkmishra
+# This file provides both analytical and finite-difference methods for layered-earth MT responses.
+# It returns apparent resistivity and phase across frequencies.
 
 abstract type MT1DMethod end
 struct Analytical <: MT1DMethod end
@@ -15,7 +18,7 @@ function _mt1d_forward(frequencies::Vector{Float64}, ρ::Vector{Float64}, mesh::
     μ0 = 4π * 1e-7
     N = length(mesh)
     length(ρ) != N - 1 && error("Length of ρ must equal length(mesh) - 1")
-    
+
     thicknesses = diff(mesh)
     σ = 1.0 ./ ρ
     ω = 2π .* frequencies
@@ -39,13 +42,11 @@ function _mt1d_forward(frequencies::Vector{Float64}, ρ::Vector{Float64}, mesh::
     mesh[1] != 0.0 && error("The depth mesh must start at 0 for finite-difference method")
     length(ρ) != length(mesh) - 1 && error("Length of ρ must equal length(mesh) - 1")
 
-    # Generate fine mesh for FD (refine between layer boundaries)
     fine_mesh, fine_ρ = _refine_mesh(mesh, ρ)
     N = length(fine_mesh)
 
-    # Assign conductivity at each mesh node
     interfaces = fine_mesh[2:end-1]
-    sigma = zeros(ComplexF64, N)
+    σ = zeros(ComplexF64, N)
     for (i, z_val) in enumerate(fine_mesh)
         if isempty(interfaces) || z_val < interfaces[1]
             cell_index = 1
@@ -53,7 +54,7 @@ function _mt1d_forward(frequencies::Vector{Float64}, ρ::Vector{Float64}, mesh::
             cell_index = searchsortedfirst(interfaces, z_val)
             cell_index > length(fine_ρ) && (cell_index = length(fine_ρ))
         end
-        sigma[i] = 1 / fine_ρ[cell_index]
+        σ[i] = 1 / fine_ρ[cell_index]
     end
 
     ω = 2π .* frequencies
@@ -61,31 +62,31 @@ function _mt1d_forward(frequencies::Vector{Float64}, ρ::Vector{Float64}, mesh::
 
     for (j, f_val) in enumerate(frequencies)
         ω_val = 2π * f_val
-        k2 = -1im * ω_val * μ0 .* sigma
+        k² = -1im * ω_val * μ0 .* σ
         n_unknowns = N - 1
         A = zeros(ComplexF64, n_unknowns, n_unknowns)
         b = zeros(ComplexF64, n_unknowns)
 
         if N >= 3
             h1, h2 = fine_mesh[2] - fine_mesh[1], fine_mesh[3] - fine_mesh[2]
-            A[1,1] = -2/(h1*h2) + k2[2]
+            A[1,1] = -2/(h1*h2) + k²[2]
             n_unknowns > 1 && (A[1,2] = 2/(h2*(h1+h2)))
             b[1] = -2/(h1*(h1+h2))
             for i in 3:(N-1)
                 j_idx = i - 1
                 h_prev, h_next = fine_mesh[i] - fine_mesh[i-1], fine_mesh[i+1] - fine_mesh[i]
                 A[j_idx, j_idx-1] = 2/(h_prev*(h_prev+h_next))
-                A[j_idx, j_idx]   = -2/(h_prev*h_next) + k2[i]
+                A[j_idx, j_idx]   = -2/(h_prev*h_next) + k²[i]
                 A[j_idx, j_idx+1] = 2/(h_next*(h_prev+h_next))
             end
         else
             h = fine_mesh[2] - fine_mesh[1]
-            A[1,1] = 1/h + 1im*sqrt(-1im*ω_val*μ0*sigma[end])
+            A[1,1] = 1/h + 1im*sqrt(-1im*ω_val*μ0*σ[end])
             b[1] = -1/h
         end
 
         h_last = fine_mesh[end] - fine_mesh[end-1]
-        k_bottom = sqrt(-1im * ω_val * μ0 * sigma[end])
+        k_bottom = sqrt(-1im * ω_val * μ0 * σ[end])
         A[end, end-1] = -1/h_last
         A[end, end] = 1/h_last + 1im*k_bottom
         b[end] = 0.0
@@ -106,13 +107,11 @@ end
 function _refine_mesh(mesh::Vector{Float64}, ρ::Vector{Float64}; d0=1.0, r=1.05, npad=20)
     fine_mesh = Float64[0.0]
     fine_ρ = Float64[]
-    
-    # Refine each layer with geometric spacing
+
     for i in 1:length(ρ)
         z_start, z_end = mesh[i], mesh[i+1]
         thickness = z_end - z_start
-        
-        # Generate geometrically spaced points within layer
+
         dz = d0
         z = z_start + dz
         while z < z_end
@@ -124,15 +123,14 @@ function _refine_mesh(mesh::Vector{Float64}, ρ::Vector{Float64}; d0=1.0, r=1.05
         push!(fine_mesh, z_end)
         push!(fine_ρ, ρ[i])
     end
-    
-    # Add padding below (extend half-space)
+
     dz = fine_mesh[end] - fine_mesh[end-1]
     for _ in 1:npad
         dz *= r
         push!(fine_mesh, fine_mesh[end] + dz)
         push!(fine_ρ, ρ[end])
     end
-    
+
     return fine_mesh, fine_ρ
 end
 

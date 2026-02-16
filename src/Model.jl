@@ -1,6 +1,11 @@
+# ModEM model reader/writer and model grid preparation.
+# Author: @pankajkmishra
+# This file loads WS3d/ModEM models, builds mesh coordinates, and computes helper arrays for plotting/editing.
+# It also writes models back to LOGE format with ModEM-compatible layout.
 
+using Printf
 
-mutable struct ModEMModel
+mutable struct Model
     A::Array{Float64,3}
     dx::Vector{Float64}
     dy::Vector{Float64}
@@ -24,6 +29,8 @@ mutable struct ModEMModel
     name::String
     niter::String
 end
+
+const ModEMModel = Model
 
 meshgrid(ax::AbstractVector, ay::AbstractVector) = (repeat(reshape(ax, 1, :), length(ay), 1), repeat(reshape(ay, :, 1), 1, length(ax)))
 
@@ -125,9 +132,9 @@ function read_mackie3d_model(fname::AbstractString, block::Bool=true)
 end
 
 function load_model_modem(name::AbstractString)
-    # This part is inspired by what was originally written in MATLAB repo (10.5281/zenodo.6784201)
+
     dx, dy, dz, A, nzAir, type, origin, rotation = read_mackie3d_model(name, true)
-    m = ModEMModel(A, dx, dy, dz, size(A,1), size(A,2), size(A,3), Float64[], Float64[], Float64[], collect(origin), Float64[], Float64[], Float64[], zeros(0,0), zeros(0,0), zeros(0,0), zeros(0,0), zeros(0,0), (0,0), String(name), "")
+    m = Model(A, dx, dy, dz, size(A,1), size(A,2), size(A,3), Float64[], Float64[], Float64[], collect(origin), Float64[], Float64[], Float64[], zeros(0,0), zeros(0,0), zeros(0,0), zeros(0,0), zeros(0,0), (0,0), String(name), "")
     if type == "LOGE"
         m.A = exp.(m.A)
     end
@@ -166,4 +173,42 @@ function load_model_modem(name::AbstractString)
     return m
 end
 
+function write_model_modem(outputfile::AbstractString, m::Model)
+    write_model_modem(outputfile, m.dx, m.dy, m.dz, m.A, m.origin)
+end
 
+function write_model_modem(outputfile::AbstractString,
+                           dx::AbstractVector, dy::AbstractVector, dz::AbstractVector,
+                           A::Array{<:Real,3}, origin::AbstractVector;
+                           rotation::Real = 0.0)
+    nx, ny, nz = size(A)
+
+    Aw = copy(Float64.(A))
+    Aw[isnan.(Aw)] .= 1e17
+    Aw .= log.(Aw)
+
+    open(outputfile, "w") do io
+        println(io, "# Written by MTGeophysics.jl write_model_modem")
+        println(io, "$nx $ny $nz 0 LOGE")
+
+        for v in dx; print(io, "$v "); end; println(io)
+        for v in dy; print(io, "$v "); end; println(io)
+        for v in dz; print(io, "$v "); end; println(io)
+
+        for k in 1:nz
+            println(io)
+            for j in 1:ny
+                for i in nx:-1:1
+                    @printf(io, "%15.5E", Aw[i, j, k])
+                end
+                println(io)
+            end
+        end
+
+        println(io, "$(origin[1]) $(origin[2]) $(origin[3])")
+        println(io, "$rotation")
+    end
+
+    println("Model written to: $outputfile")
+    return outputfile
+end

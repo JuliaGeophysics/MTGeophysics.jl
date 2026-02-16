@@ -1,9 +1,13 @@
+# Misfit metrics for observed vs predicted MT data.
+# Author: @pankajkmishra
+# This file computes weighted χ² and RMS using impedance/tipper components from ModEM-style files.
+# Use it to quickly assess inversion fit quality.
+
 struct _Chi2RMS
-    chi2::Float64
+    χ²::Float64
     rms::Float64
 end
 
-# Internal: accumulate chi^2 over complex arrays (Re & Im counted separately)
 function _accumulate_chi2!(accχ2::Base.RefValue{Float64}, accN::Base.RefValue{Int},
                            Zo::AbstractArray{ComplexF64}, Zp::AbstractArray{ComplexF64}, Ze::AbstractArray{ComplexF64})
     @assert size(Zo) == size(Zp) == size(Ze)
@@ -24,15 +28,6 @@ function _accumulate_chi2!(accχ2::Base.RefValue{Float64}, accN::Base.RefValue{I
     return nothing
 end
 
-"""
-    chi2_and_rms(dobs_path::AbstractString, dpred_path::AbstractString;
-                 use_impedance::Bool=true, use_tipper::Bool=true,
-                 components::Vector{String}=String[])
-
-Load observed & predicted ModEM ASCII files and return **(chi2_total, rms_total)**
-using σ from the observed file as weights. `components` (e.g. ["ZXY","ZYX"]) restricts
-impedance terms; tipper is included/excluded via `use_tipper`.
-"""
 function chi2_and_rms(dobs_path::AbstractString, dpred_path::AbstractString;
                       use_impedance::Bool=true, use_tipper::Bool=true,
                       components::Vector{String}=String[])
@@ -56,8 +51,3 @@ function chi2_and_rms(dobs_path::AbstractString, dpred_path::AbstractString;
     rms = N[] > 0 ? sqrt(χ2[] / N[]) : NaN
     return _Chi2RMS(χ2[], rms)
 end
-
-# Example:
-# s = chi2_and_rms("dobs.dat", "dpred.dat";
-#                  use_impedance=true, use_tipper=false, components=["ZXY","ZYX"])
-# @show s.chi2 s.rms

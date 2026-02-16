@@ -1,6 +1,9 @@
-# LinearAlgebra and Statistics imported from main module
+# ModEM data reader and data container definitions.
+# Author: @pankajkmishra
+# This file loads MT data/response files, normalizes units and conventions, and computes derived fields.
+# It is the main place for Data structure creation plus resistivity/phase calculations.
 
-mutable struct ModEMData
+mutable struct Data
     T::Vector{Float64}
     f::Vector{Float64}
     zrot::Matrix{Float64}
@@ -13,10 +16,10 @@ mutable struct ModEMData
     responses::Vector{String}
     Z::Array{ComplexF64,3}
     Zerr::Array{ComplexF64,3}
-    rho::Array{Float64,3}
-    rhoerr::Array{Float64,3}
-    pha::Array{Float64,3}
-    phaerr::Array{Float64,3}
+    ρ::Array{Float64,3}
+    ρerr::Array{Float64,3}
+    φ::Array{Float64,3}
+    φerr::Array{Float64,3}
     tip::Array{ComplexF64,3}
     tiperr::Array{ComplexF64,3}
     x::Vector{Float64}
@@ -28,7 +31,7 @@ mutable struct ModEMData
 end
 
 function make_nan_data()
-    return ModEMData(
+    return Data(
         Float64[], Float64[], Matrix{Float64}(undef, 0, 0), Matrix{Float64}(undef, 0, 0),
         String[], Matrix{Float64}(undef, 0, 0), 0, 0, 0, String[],
         Array{ComplexF64}(undef, 0, 0, 0), Array{ComplexF64}(undef, 0, 0, 0),
@@ -39,7 +42,8 @@ function make_nan_data()
     )
 end
 
-# -------------------- small helpers --------------------
+const ModEMData = Data
+
 strip_gt(s::AbstractString) = begin
     t = strip(s)
     startswith(t, ">") ? strip(t[2:end]) : t
@@ -56,7 +60,6 @@ is_dataline(line::AbstractString) = begin
     occursin(r"^[\s\+\-\.0-9]", t)
 end
 
-# -------------------- main loader ----------------------
 function load_data_modem(path::AbstractString)
     println("Loading ModEM Data File: $path")
 
@@ -66,7 +69,6 @@ function load_data_modem(path::AbstractString)
     d.niter = ""
     d.name  = path
 
-    # collectors
     T          = Float64[]
     site       = String[]
     loc_lat    = Float64[]
@@ -114,7 +116,7 @@ function load_data_modem(path::AbstractString)
                 olat = length(otok)>=1 ? safeparsefloat(otok[1]) : 0.0
                 olon = length(otok)>=2 ? safeparsefloat(otok[2]) : 0.0
                 push!(origins, (olat, olon))
-                # nf/ns line exists at hdr[6], but we don't need it here
+
             elseif is_dataline(t)
                 parts = split(t)
                 if length(parts) >= 11
@@ -136,7 +138,6 @@ function load_data_modem(path::AbstractString)
         end
     end
 
-    # unique sites (stable)
     uniq_sites = unique(site)
     inds = [findfirst(==(s), site) for s in uniq_sites]
     d.site = uniq_sites
@@ -154,13 +155,12 @@ function load_data_modem(path::AbstractString)
     d.responses = unique(responses)
     d.nr        = length(d.responses)
 
-    # allocate
     d.Z      = fill(ComplexF64(NaN, NaN), d.nf, 4, d.ns)
     d.Zerr   = fill(ComplexF64(NaN, NaN), d.nf, 4, d.ns)
-    d.rho    = fill(NaN, d.nf, 4, d.ns)
-    d.rhoerr = fill(NaN, d.nf, 4, d.ns)
-    d.pha    = fill(NaN, d.nf, 4, d.ns)
-    d.phaerr = fill(NaN, d.nf, 4, d.ns)
+    d.ρ    = fill(NaN, d.nf, 4, d.ns)
+    d.ρerr = fill(NaN, d.nf, 4, d.ns)
+    d.φ    = fill(NaN, d.nf, 4, d.ns)
+    d.φerr = fill(NaN, d.nf, 4, d.ns)
     d.tip    = fill(ComplexF64(NaN, NaN), d.nf, 2, d.ns)
     d.tiperr = fill(ComplexF64(NaN, NaN), d.nf, 2, d.ns)
 
@@ -181,7 +181,6 @@ function load_data_modem(path::AbstractString)
         end
     end
 
-    # Units: convert mV/km/nT to SI if present (case/space-insensitive)
     for u in header_units
         lu = lowercase(replace(strip(u), " " => ""))
         if lu == "[mv/km]/[nt]"
@@ -193,7 +192,6 @@ function load_data_modem(path::AbstractString)
         end
     end
 
-    # Consistency checks
     if !isempty(isign) && !all(==(isign[1]), isign)
         error("Sign convention is inconsistent between data blocks.")
     end
@@ -208,7 +206,6 @@ function load_data_modem(path::AbstractString)
         end
     end
 
-    # store rotations/origin
     if !isempty(rotation)
         if rotation[1] != 0
             @warn "Caution: non-zero rotation in ModEM data file may cause issues." rotation=rotation[1]
@@ -226,7 +223,6 @@ function load_data_modem(path::AbstractString)
         d.origin = [0.0, 0.0, 0.0]
     end
 
-    # sign convention
     if !isempty(isign)
         if isign[1] == -1
             d.Z   .= conj.(d.Z)
@@ -236,7 +232,6 @@ function load_data_modem(path::AbstractString)
         end
     end
 
-    # Huge errors → NaN (check only finite magnitudes)
     magsZ = abs.(d.Zerr)
     finiteZ = isfinite.(magsZ)
     if any(finiteZ) && all(magsZ[finiteZ] .> 1e10)
@@ -248,7 +243,7 @@ function load_data_modem(path::AbstractString)
         d.tiperr .= ComplexF64(NaN, NaN)
     end
 
-    d.rho, d.pha, d.rhoerr, d.phaerr = calc_rho_pha(d.Z, d.Zerr, d.T)
+    d.ρ, d.φ, d.ρerr, d.φerr = calc_rho_pha(d.Z, d.Zerr, d.T)
     return d
 end
 
@@ -256,10 +251,10 @@ function calc_rho_pha(Z::Array{ComplexF64,3}, Zerr::Array{ComplexF64,3}, T::Vect
     nf, ncomp, ns = size(Z)
     μ0 = 4π * 1e-7
 
-    rho    = fill(NaN, nf, ncomp, ns)
-    pha    = fill(NaN, nf, ncomp, ns)
-    rhoerr = fill(NaN, nf, ncomp, ns)
-    phaerr = fill(NaN, nf, ncomp, ns)
+    ρ    = fill(NaN, nf, ncomp, ns)
+    φ    = fill(NaN, nf, ncomp, ns)
+    ρerr = fill(NaN, nf, ncomp, ns)
+    φerr = fill(NaN, nf, ncomp, ns)
 
     for i in 1:nf
         ω = 2π / T[i]
@@ -267,23 +262,23 @@ function calc_rho_pha(Z::Array{ComplexF64,3}, Zerr::Array{ComplexF64,3}, T::Vect
             for k in 1:ns
                 zval = Z[i,j,k]
                 if !isnan(real(zval)) && !isnan(imag(zval))
-                    ρa  = abs(zval)^2 / (ω * μ0)
-                    phi = rad2deg(angle(zval))
-                    rho[i,j,k] = ρa
-                    pha[i,j,k] = phi
+                    ρₐ  = abs(zval)^2 / (ω * μ0)
+                    φₐ  = rad2deg(angle(zval))
+                    ρ[i,j,k] = ρₐ
+                    φ[i,j,k] = φₐ
 
                     zerr = Zerr[i,j,k]
                     if !isnan(real(zerr)) && !isnan(imag(zerr))
-                        Z_abs    = abs(zval)
-                        Zerr_abs = abs(zerr)
-                        if Z_abs > 0
-                            rhoerr[i,j,k] = 2 * ρa * (Zerr_abs / Z_abs)
-                            phaerr[i,j,k] = rad2deg(Zerr_abs / Z_abs)
+                        Zₐ = abs(zval)
+                        δZ = abs(zerr)
+                        if Zₐ > 0
+                            ρerr[i,j,k] = 2 * ρₐ * (δZ / Zₐ)
+                            φerr[i,j,k] = rad2deg(δZ / Zₐ)
                         end
                     end
                 end
             end
         end
     end
-    return rho, pha, rhoerr, phaerr
+    return ρ, φ, ρerr, φerr
 end

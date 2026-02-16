@@ -1,9 +1,12 @@
-#= Compares the analytical vs FD solver for 1D MT - @Pankajkmishra =#
+# Example: compare analytical and FD 1D MT responses.
+# Author: @pankajkmishra
+# This script runs both solvers on a layered model and plots apparent resistivity/phase comparisons.
+# Use it as a quick sanity-check example for MT1D behavior.
+
 using Plots
 cd(@__DIR__)
-include("../src/fwd/MT1D.jl") 
+include(joinpath(dirname(@__DIR__), "src", "MT1D.jl"))
 
-# Define layer boundaries and resistivities
 mesh = [0.0, 1000.0, 1500.0, 3000.0, 5000.0, 8000.0]
 ρ = [1000.0, 100.0, 1200.0, 200.0, 900.0]
 frequencies = 10 .^ range(-3, 3, length=40)
@@ -11,7 +14,6 @@ frequencies = 10 .^ range(-3, 3, length=40)
 ρa_ana, φ_ana = MT1D(frequencies, ρ, mesh, :analytical)
 ρa_FD, φ_FD = MT1D(frequencies, ρ, mesh, :fd)
 
-# Plot
 p1 = plot(frequencies, ρa_ana, xscale=:log10, yscale=:log10, xflip=true,  xlabel="Frequency (Hz)", ylabel="Apparent Resistivity (Ω·m)", lw=3, label="Analytical")
 plot!(p1, frequencies, ρa_FD, lw=2, ls=:dash, label="FD")
 xlims!(p1, 1e-3, 1e3); ylims!(p1, 1, 1e5)
