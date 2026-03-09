@@ -1,0 +1,1181 @@
+﻿{
+  "type": "CIMLayerDocument",
+  "version": "3.2.0",
+  "build": 49743,
+  "layers": [
+    "CIMPATH=map/mtslices.xml"
+  ],
+  "layerDefinitions": [
+    {
+      "type": "CIMFeatureLayer",
+      "name": "MTSlices",
+      "uRI": "CIMPATH=map/mtslices.xml",
+      "sourceModifiedTime": {
+        "type": "TimeInstant"
+      },
+      "useSourceMetadata": true,
+      "description": "Magnetotelluric depth slice - log10 resistivity (rho_vis clamped 0-4)",
+      "layerElevation": {
+        "type": "CIMLayerElevationSurface"
+      },
+      "expanded": true,
+      "layerType": "Operational",
+      "showLegends": true,
+      "visibility": true,
+      "displayCacheType": "Permanent",
+      "maxDisplayCacheAge": 5,
+      "showPopups": true,
+      "serviceLayerID": -1,
+      "autoGenerateFeatureTemplates": true,
+      "featureTable": {
+        "type": "CIMFeatureTable",
+        "displayField": "rho_vis",
+        "editable": true,
+        "dataConnection": {
+          "type": "CIMStandardDataConnection",
+          "workspaceConnectionString": "DATABASE=.",
+          "workspaceFactory": "Shapefile",
+          "dataset": "MTSlices",
+          "datasetType": "esriDTFeatureClass"
+        },
+        "studyAreaSpatialRel": "esriSpatialRelUndefined",
+        "searchOrder": "esriSearchOrderSpatial"
+      },
+      "renderer": {
+        "type": "CIMClassBreaksRenderer",
+        "barrierWeight": "High",
+        "classBreakType": "GraduatedColor",
+        "classificationMethod": "EqualInterval",
+        "field": "rho_vis",
+        "minimumBreak": 0,
+        "numberFormat": {
+          "type": "CIMNumericFormat",
+          "alignmentOption": "esriAlignLeft",
+          "alignmentWidth": 0,
+          "roundingOption": "esriRoundNumberOfDecimals",
+          "roundingValue": 2
+        },
+        "showClassGaps": false,
+        "showInAscendingOrder": true,
+        "useDefaultSymbol": false,
+        "colorRamp": {
+          "type": "CIMLinearContinuousColorRamp",
+          "colorSpace": {
+            "type": "CIMICCColorSpace",
+            "url": "Default RGB"
+          },
+          "fromColor": {
+            "type": "CIMRGBColor",
+            "values": [215, 25, 28, 100]
+          },
+          "toColor": {
+            "type": "CIMRGBColor",
+            "values": [43, 131, 186, 100]
+          }
+        },
+        "breaks": [
+    {
+      "type": "CIMClassBreak",
+      "label": "0 - 0.08",
+      "patch": "Default",
+      "upperBound": 0.08,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [215, 25, 28, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "0.08 - 0.16",
+      "patch": "Default",
+      "upperBound": 0.16,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [218, 37, 34, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "0.16 - 0.24",
+      "patch": "Default",
+      "upperBound": 0.24,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [221, 49, 39, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "0.24 - 0.32",
+      "patch": "Default",
+      "upperBound": 0.32,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [224, 61, 45, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "0.32 - 0.4",
+      "patch": "Default",
+      "upperBound": 0.4,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [227, 74, 51, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "0.4 - 0.48",
+      "patch": "Default",
+      "upperBound": 0.48,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [231, 86, 56, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "0.48 - 0.56",
+      "patch": "Default",
+      "upperBound": 0.56,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [234, 98, 62, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "0.56 - 0.64",
+      "patch": "Default",
+      "upperBound": 0.64,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [237, 110, 67, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "0.64 - 0.72",
+      "patch": "Default",
+      "upperBound": 0.72,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [240, 122, 73, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "0.72 - 0.8",
+      "patch": "Default",
+      "upperBound": 0.8,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [243, 134, 79, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "0.8 - 0.88",
+      "patch": "Default",
+      "upperBound": 0.88,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [246, 147, 84, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "0.88 - 0.96",
+      "patch": "Default",
+      "upperBound": 0.96,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [249, 159, 90, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "0.96 - 1.04",
+      "patch": "Default",
+      "upperBound": 1.04,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [252, 171, 96, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "1.04 - 1.12",
+      "patch": "Default",
+      "upperBound": 1.12,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [253, 179, 103, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "1.12 - 1.2",
+      "patch": "Default",
+      "upperBound": 1.2,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [253, 186, 110, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "1.2 - 1.28",
+      "patch": "Default",
+      "upperBound": 1.28,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [253, 192, 118, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "1.28 - 1.36",
+      "patch": "Default",
+      "upperBound": 1.36,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [254, 199, 126, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "1.36 - 1.44",
+      "patch": "Default",
+      "upperBound": 1.44,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [254, 205, 133, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "1.44 - 1.52",
+      "patch": "Default",
+      "upperBound": 1.52,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [254, 212, 141, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "1.52 - 1.6",
+      "patch": "Default",
+      "upperBound": 1.6,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [254, 219, 149, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "1.6 - 1.68",
+      "patch": "Default",
+      "upperBound": 1.68,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [254, 225, 156, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "1.68 - 1.76",
+      "patch": "Default",
+      "upperBound": 1.76,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [254, 232, 164, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "1.76 - 1.84",
+      "patch": "Default",
+      "upperBound": 1.84,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [255, 238, 172, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "1.84 - 1.92",
+      "patch": "Default",
+      "upperBound": 1.92,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [255, 245, 179, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "1.92 - 2",
+      "patch": "Default",
+      "upperBound": 2,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [255, 252, 187, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "2 - 2.08",
+      "patch": "Default",
+      "upperBound": 2.08,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [252, 254, 190, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "2.08 - 2.16",
+      "patch": "Default",
+      "upperBound": 2.16,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [245, 251, 188, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "2.16 - 2.24",
+      "patch": "Default",
+      "upperBound": 2.24,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [238, 248, 185, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "2.24 - 2.32",
+      "patch": "Default",
+      "upperBound": 2.32,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [231, 245, 183, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "2.32 - 2.4",
+      "patch": "Default",
+      "upperBound": 2.4,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [224, 243, 181, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "2.4 - 2.48",
+      "patch": "Default",
+      "upperBound": 2.48,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [217, 240, 179, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "2.48 - 2.56",
+      "patch": "Default",
+      "upperBound": 2.56,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [210, 237, 177, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "2.56 - 2.64",
+      "patch": "Default",
+      "upperBound": 2.64,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [204, 234, 174, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "2.64 - 2.72",
+      "patch": "Default",
+      "upperBound": 2.72,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [197, 231, 172, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "2.72 - 2.8",
+      "patch": "Default",
+      "upperBound": 2.8,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [190, 229, 170, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "2.8 - 2.88",
+      "patch": "Default",
+      "upperBound": 2.88,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [183, 226, 168, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "2.88 - 2.96",
+      "patch": "Default",
+      "upperBound": 2.96,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [176, 223, 166, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "2.96 - 3.04",
+      "patch": "Default",
+      "upperBound": 3.04,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [168, 219, 164, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "3.04 - 3.12",
+      "patch": "Default",
+      "upperBound": 3.12,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [158, 212, 166, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "3.12 - 3.2",
+      "patch": "Default",
+      "upperBound": 3.2,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [147, 204, 168, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "3.2 - 3.28",
+      "patch": "Default",
+      "upperBound": 3.28,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [137, 197, 170, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "3.28 - 3.36",
+      "patch": "Default",
+      "upperBound": 3.36,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [127, 190, 172, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "3.36 - 3.44",
+      "patch": "Default",
+      "upperBound": 3.44,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [116, 182, 173, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "3.44 - 3.52",
+      "patch": "Default",
+      "upperBound": 3.52,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [106, 175, 175, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "3.52 - 3.6",
+      "patch": "Default",
+      "upperBound": 3.6,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [95, 168, 177, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "3.6 - 3.68",
+      "patch": "Default",
+      "upperBound": 3.68,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [85, 160, 179, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "3.68 - 3.76",
+      "patch": "Default",
+      "upperBound": 3.76,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [74, 153, 181, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "3.76 - 3.84",
+      "patch": "Default",
+      "upperBound": 3.84,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [64, 146, 182, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "3.84 - 3.92",
+      "patch": "Default",
+      "upperBound": 3.92,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [53, 138, 184, 100]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "CIMClassBreak",
+      "label": "3.92 - 4",
+      "patch": "Default",
+      "upperBound": 4,
+      "symbol": {
+        "type": "CIMSymbolReference",
+        "symbol": {
+          "type": "CIMPolygonSymbol",
+          "symbolLayers": [
+            {
+              "type": "CIMSolidFill",
+              "enable": true,
+              "color": {
+                "type": "CIMRGBColor",
+                "values": [43, 131, 186, 100]
+              }
+            }
+          ]
+        }
+      }
+    }
+        ]
+      }
+    }
+  ]
+}
