@@ -8,9 +8,10 @@ module MTGeophysics
 using LinearAlgebra
 using Statistics
 
+#----- 3-D ModEM I/O and misfit (existing code) ---------------------------#
+
 include("Data.jl")
 include("Model.jl")
-include("MT1D.jl")
 include("Chi2RMS.jl")
 
 has_visualization = false
@@ -24,14 +25,77 @@ catch LoadError
     @warn "GLMakie not available, interactive visualization functionality disabled"
 end
 
+#----- 1-D / 2-D forward, I/O, plotting, and inversion (patch) -----------#
+
+include("MTGeophysics1D.jl")
+include("MTGeophysics2D.jl")
+include("VFSA2DMT.jl")
+
+#----- Exports: 3-D ModEM ------------------------------------------------#
+
 export Data, Model, ModEMData, ModEMModel
-
 export load_data_modem, make_nan_data, calc_rho_pha
-
 export read_mackie3d_model, load_model_modem, write_model_modem
-
-export MT1D, MT1DMethod, Analytical, FiniteDifference
-
 export chi2_and_rms
+
+#----- Exports: 1-D / 2-D ------------------------------------------------#
+
+export MT1DMesh
+export MT2DMesh
+export MT1DDataSpec
+export MT1DResponse
+export MT2DResponse
+export ModelFile2D
+export DataFile2D
+export FitSummary2D
+export VFSA2DMTConfig
+export VFSA2DMTParams
+
+export BuildMesh1D
+export BuildMesh2D
+export MakeMesh1D
+export MakeMesh2D
+
+export Forward1D
+export Forward2D
+export ForwardSolve1D
+export ForwardSolve2D
+
+export load_mt1d_model
+export write_mt1d_model
+export load_mt1d_data_spec
+export write_mt1d_data_template
+export load_mt1d_observed_data
+export write_mt1d_observed_data
+export mt1d_layered_model
+export solve_mt1d_analytical
+export solve_mt1d_fd
+
+export load_model2d
+export write_model2d
+export build_mesh_from_model2d
+export build_default_mt2d_mesh
+export build_mt2d_halfspace_model
+export build_mt2d_data_template
+export write_mt2d_data_template
+export load_data2d
+export write_data2d
+export data_from_response2d
+export data_to_response2d
+export chi2_rms2d
+export run_mt2d_forward
+
+export plot_mt1d_data
+export plot_mt1d_model
+export plot_mt2d_data_maps
+export plot_mt2d_site_curves
+export plot_mt2d_model
+export PlotData1D
+export PlotModel1D
+export PlotData2D
+export PlotModel2D
+
+export AnalyseEnsemble2D
+export VFSA2DMT
 
 end

@@ -3,6 +3,12 @@ _build/
 .vscode/
 .idea/
 
+# Generated results / output directories
+Results/
+Models/
+Data/
+Manifest.toml
+
 # Model and data files (ModEM outputs)
 *.rho
 *.mod
