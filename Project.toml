@@ -1,6 +1,6 @@
 name = "MTGeophysics"
 uuid = "71b12eb5-90c3-4985-b1e7-1ec075583b1e"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["JuliaGeophysics community", "Pankaj K Mishra <pankajkmishra@example.com>", "and contributors"]
 
 [deps]
