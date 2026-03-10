@@ -1,10 +1,13 @@
+name: Draft JOSS paper
 on:
   push:
     paths:
       - paper/**
+      - .github/workflows/draft-paper.yml
   pull_request:
     paths:
       - paper/**
+  workflow_dispatch:
 
 jobs:
   paper:
