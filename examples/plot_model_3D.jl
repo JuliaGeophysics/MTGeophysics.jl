@@ -19,14 +19,17 @@ include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
 # =========================
 # User controls (edit here)
 # =========================
-model_file = joinpath(@__DIR__, "I_NLCG_070.rho")
-data_file = joinpath(@__DIR__, "I_NLCG_140.dat")
+model_file = joinpath(@__DIR__, "Cascadia", "cascad_half_inverse.ws")
+data_file  = joinpath(@__DIR__, "Cascadia", "cascad_errfl5.dat")   # needed for EPSG:3067 / EPSG:4326
+
+# you can add your shapefiles here 
+shapefile_path = []
 shapefile_path = joinpath(@__DIR__, "gis", "Tnew", "Tnew.shp")
 
 log10_scale = true
 colormap = :Spectral
 resistivity_range = (1.0, 4.0)
-max_depth = 50000.0
+max_depth = 400000.0
 show_padding = false
 pad_tolerance = 0.2
 

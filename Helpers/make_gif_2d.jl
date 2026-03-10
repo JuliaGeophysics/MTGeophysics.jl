@@ -20,7 +20,7 @@ Options:
 =#
 
 using Pkg
-Pkg.activate(dirname(@__DIR__))
+#Pkg.activate(dirname(@__DIR__))
 using MTGeophysics
 using CairoMakie
 

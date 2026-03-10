@@ -7,7 +7,7 @@ _build/
 Results/
 Models/
 Data/
-Manifest.toml
+Manifest.toml 
 
 # Model and data files (ModEM outputs)
 *.rho

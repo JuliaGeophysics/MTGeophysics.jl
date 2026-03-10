@@ -24,8 +24,8 @@ include(joinpath(dirname(@__DIR__), "src", "Data.jl"))
 include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
 
 # ---------- Model & data files ----------
-model_file = joinpath(@__DIR__, ".", "I_NLCG_140.rho")
-data_file  = joinpath(@__DIR__, ".", "I_NLCG_140.dat")   # needed for EPSG:3067 / EPSG:4326
+model_file = joinpath(@__DIR__, "Cascadia", "cascad_half_inverse.ws")
+data_file  = joinpath(@__DIR__, "Cascadia", "cascad_errfl5.dat")   # needed for EPSG:3067 / EPSG:4326
 
 # ---------- Coordinate system ----------
 #   "EPSG:3067"  — ETRS-TM35FIN (Easting / Northing in metres)  ← default
