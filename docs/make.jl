@@ -5,7 +5,7 @@ makedocs(;
     authors  = "JuliaGeophysics community, Pankaj K Mishra, and contributors",
     format   = Documenter.HTML(;
         prettyurls = get(ENV, "CI", nothing) == "true",
-        canonical  = "https://pankajkmishra.github.io/MTGeophysics.jl",
+        canonical  = "https://juliageophysics.github.io/MTGeophysics.jl",
         assets     = ["assets/custom.css"],
         collapselevel = 1,
     ),
@@ -21,7 +21,7 @@ makedocs(;
 )
 
 deploydocs(;
-    repo = "github.com/pankajkmishra/MTGeophysics.jl.git",
+    repo = "github.com/JuliaGeophysics/MTGeophysics.jl.git",
     devbranch = "main",
     push_preview = true,
 )
