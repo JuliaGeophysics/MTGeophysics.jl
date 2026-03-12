@@ -6,7 +6,6 @@ makedocs(;
     format   = Documenter.HTML(;
         prettyurls = get(ENV, "CI", nothing) == "true",
         canonical  = "https://juliageophysics.github.io/MTGeophysics.jl",
-        assets     = ["assets/custom.css"],
         collapselevel = 1,
     ),
     pages = [
