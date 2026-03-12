@@ -1,0 +1,139 @@
+/* MTGeophysics.jl custom theme */
+
+/* ---- Sidebar ---- */
+#documenter .docs-sidebar {
+    background-color: #1a1a2e;
+    border-right: 2px solid #e94560;
+}
+
+#documenter .docs-sidebar .docs-logo > img {
+    max-height: 6rem;
+}
+
+#documenter .docs-sidebar ul.docs-menu li a {
+    color: #c4c4d8;
+}
+
+#documenter .docs-sidebar ul.docs-menu li a:hover {
+    color: #ffffff;
+    background-color: #16213e;
+}
+
+#documenter .docs-sidebar ul.docs-menu li.is-active > a {
+    color: #ffffff;
+    background-color: #0f3460;
+    border-left: 3px solid #e94560;
+}
+
+#documenter .docs-sidebar .docs-package-name .docs-autofit {
+    color: #ffffff;
+    font-weight: 700;
+}
+
+/* ---- Top navbar ---- */
+nav.navbar {
+    background-color: #0f3460;
+    border-bottom: 2px solid #e94560;
+}
+
+nav.navbar .navbar-brand a.navbar-item {
+    color: #ffffff;
+    font-weight: 700;
+}
+
+/* ---- Content area ---- */
+.content h1 {
+    color: #0f3460;
+    border-bottom: 2px solid #e94560;
+    padding-bottom: 0.3em;
+}
+
+.content h2 {
+    color: #16213e;
+    border-bottom: 1px solid #e0e0e0;
+    padding-bottom: 0.2em;
+}
+
+.content h3 {
+    color: #1a1a2e;
+}
+
+/* ---- Code blocks ---- */
+.content pre {
+    background-color: #f5f5fa;
+    border: 1px solid #d0d0e0;
+    border-radius: 6px;
+}
+
+.content code {
+    background-color: #f0f0f8;
+    color: #0f3460;
+    border-radius: 3px;
+    padding: 0.1em 0.3em;
+}
+
+.content pre code {
+    background-color: transparent;
+    color: inherit;
+    padding: 0;
+}
+
+/* ---- Tables ---- */
+.content table thead {
+    background-color: #0f3460;
+}
+
+.content table thead th {
+    color: #ffffff;
+}
+
+.content table tbody tr:nth-child(even) {
+    background-color: #f5f5fa;
+}
+
+.content table {
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+/* ---- Admonitions ---- */
+.content .admonition.is-info {
+    background-color: #e8f4fd;
+    border-left-color: #0f3460;
+}
+
+.content .admonition.is-warning {
+    border-left-color: #e94560;
+}
+
+/* ---- Links ---- */
+.content a {
+    color: #0f3460;
+}
+
+.content a:hover {
+    color: #e94560;
+}
+
+/* ---- Footer ---- */
+footer.footer {
+    background-color: #1a1a2e;
+    color: #c4c4d8;
+}
+
+/* ---- Images ---- */
+.content img {
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    margin: 1em 0;
+}
+
+/* ---- Scrollbar (webkit) ---- */
+#documenter .docs-sidebar::-webkit-scrollbar {
+    width: 6px;
+}
+
+#documenter .docs-sidebar::-webkit-scrollbar-thumb {
+    background-color: #0f3460;
+    border-radius: 3px;
+}
