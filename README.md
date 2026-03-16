@@ -74,17 +74,9 @@ julia --project=. Helpers/run_statistics_2d.jl
 julia --project=. Helpers/make_gif_2d.jl
 ```
 
-### 2D VFSA results
+# Research using this code 
 
-![2D VFSA convergence animation](images/vfsa2d_convergence.gif)
+- Mishra, P. K., Kamm, J., Patzer, C., Autio, U., and Sen, M. K.: Building uncertainty-aware subsurface models with 3D magnetotelluric inversion, EGU General Assembly 2026, Vienna, Austria, 3–8 May 2026, EGU26-4367, https://doi.org/10.5194/egusphere-egu26-4367, 2026. 
 
-![2D VFSA convergence diagnostics](images/vfsa2d_plot_convergence.png)
 
-![2D VFSA data fit maps](images/vfsa2d_plot_data_obs_maps.png)
-
-![2D VFSA chain-mean model](images/vfsa2d_plot_model_mean.png)
-
-## License
-
-[MIT](LICENSE.md)
 
