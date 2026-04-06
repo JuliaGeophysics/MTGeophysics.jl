@@ -22,6 +22,7 @@ Manifest.toml
 cascadia/
 cascadiaInv/
 examples/cascadiaInv/
+examples/Cascadia/
 
 # Editor swap files
 *.swp

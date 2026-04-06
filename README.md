@@ -46,6 +46,47 @@
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
 
+## Repository structure
+
+```
+MTGeophysics.jl/
+├── src/                        # Package source
+│   ├── MTGeophysics.jl         # Main module (includes & exports)
+│   ├── MTGeophysics1D.jl       # 1D forward solvers
+│   ├── MTGeophysics2D.jl       # 2D forward solvers
+│   ├── VFSA2DMT.jl             # 2D VFSA inversion engine
+│   ├── VFSA3DMT.jl             # 3D VFSA inversion engine
+│   ├── Model.jl                # ModEM 3D model I/O
+│   ├── Data.jl                 # ModEM 3D data I/O
+│   ├── WS3DModel.jl            # WS3D model format I/O
+│   ├── CoreUtils3D.jl          # Core/padding detection utilities
+│   ├── PlotModel.jl            # Visualization helpers (GLMakie)
+│   └── Chi2RMS.jl              # Misfit statistics
+├── examples/                   # Runnable example scripts
+│   ├── response_1d.jl          # 1D forward response
+│   ├── response_2d.jl          # 2D forward response
+│   ├── run_vfsa2dmt.jl         # 2D VFSA inversion
+│   ├── run_vfsa3dmt.jl         # 3D VFSA inversion (requires ModEM)
+│   ├── plot_model_3D.jl        # Interactive 3D slice viewer
+│   ├── plot_XY_slices.jl       # XY depth-slice viewer
+│   ├── plot_XZ_slices.jl       # XZ cross-section viewer
+│   ├── plot_YZ_slices.jl       # YZ cross-section viewer
+│   ├── replace_slice_resistivity_scope.jl  # Bulk resistivity editing
+│   ├── draw_and_replace_in_model.jl        # Polygon zone editing
+│   └── Cascadia/               # Example data (not tracked)
+├── Helpers/                    # Benchmark generation & post-processing
+│   ├── benchmarks_1d.jl        # Generate 1D benchmarks
+│   ├── benchmarks_2d.jl        # Generate 2D benchmarks
+│   ├── run_statistics_2d.jl    # 2D ensemble statistics
+│   ├── run_statistics_3D.jl    # 3D ensemble statistics
+│   └── make_gif_2d.jl          # 2D convergence animation
+├── docs/                       # Documenter.jl site
+├── test/                       # Unit tests
+├── paper/                      # JOSS paper
+├── Project.toml
+└── README.md
+```
+
 ## Quick example: 2D VFSA inversion
 
 > Note: This is a quick demonstration workflow. For production-quality inversion, tune key settings such as the number of VFSA iterations, number of chains, cooling schedule, regularization choices, and uncertainty/ensemble controls for your survey and model size.

@@ -4,17 +4,16 @@
 # Use it for targeted interactive edits with visual feedback.
 
 using Pkg
-Pkg.activate(dirname(@__DIR__))
 
 using GLMakie
 using Statistics
 using Dates
 
 include(joinpath(dirname(@__DIR__), "src", "Model.jl"))
+include(joinpath(dirname(@__DIR__), "src", "CoreUtils3D.jl"))
 include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
-include(joinpath(@__DIR__, "02_plot_depth_slices.jl"))
 
-model_file = joinpath(@__DIR__, "cascadiaInv", "chain15.rho")
+model_file = joinpath(@__DIR__, "Cascadia", "cascad_half_inverse.ws")
 
 replacement_resistivity = 10000.0
 layers_above = 2

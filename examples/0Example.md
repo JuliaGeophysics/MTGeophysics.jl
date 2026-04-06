@@ -185,7 +185,21 @@ to one of:
 - `"EPSG:4326"`
 - `"model"`
 
-## 8. Experimental editing scripts
+## 8. Replace slice resistivity
+
+Interactively replace resistivity below a chosen depth layer, with scope
+control (core-only or full model including padding):
+
+```powershell
+julia --project=. .\examples\replace_slice_resistivity_scope.jl
+```
+
+Use the depth slider to pick a cutoff layer, enter a target resistivity and
+optional blend percentage, then click **Apply Changes**. Toggle between
+core-only and full-model scope with the **Show Core Model / Show Full Model**
+button. Click **Save Model** to write the edited model to disk.
+
+## 9. Experimental editing scripts
 
 The repository also contains interactive editing scripts for manual model
 modification:
@@ -196,7 +210,7 @@ modification:
 These are currently more development-oriented than the main workflows and may
 need local path adjustment before use.
 
-## 9. Recommended first session
+## 10. Recommended first session
 
 If you are using the repository for the first time, this is the safest path:
 

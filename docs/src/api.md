@@ -12,8 +12,11 @@
 | `ModelFile2D` | Parsed 2D model file |
 | `DataFile2D` | Parsed 2D data file |
 | `FitSummary2D` | Misfit summary (χ², RMS, count) |
-| `VFSA2DMTConfig` | VFSA inversion parameters |
-| `VFSA2DMTParams` | VFSA run paths and configuration |
+| `VFSA2DMTConfig` | VFSA 2D inversion parameters |
+| `VFSA2DMTParams` | VFSA 2D run paths and configuration |
+| `VFSA3DMTConfig` | VFSA 3D inversion parameters |
+| `WS3DModel` | 3D resistivity model in WS3D format |
+| `RBFMap` | Gaussian-RBF mapping for 3D parameterization |
 | `Data` / `Model` | 3D data and model containers |
 
 ## 1D Functions
@@ -52,8 +55,11 @@
 
 | Function | Description |
 |:---------|:------------|
-| `VFSA2DMT(params)` | Run the full inversion workflow |
-| `AnalyseEnsemble2D(chains)` | Compute ensemble statistics |
+| `VFSA2DMT(params)` | Run the 2D VFSA inversion workflow |
+| `AnalyseEnsemble2D(chains)` | Compute 2D ensemble statistics |
+| `VFSA3DMT(model; dobs_path, cfg)` | Run the 3D VFSA inversion workflow |
+| `AnalyseEnsemble3D(dir)` | Compute 3D ensemble mean/median/std |
+| `core_statistics(cores)` | Element-wise mean, median, std over 3D cubes |
 
 ## 3D Functions
 
@@ -63,3 +69,25 @@
 | `load_model_modem(path)` | Load 3D model file |
 | `write_model_modem(path, model)` | Write 3D model file |
 | `chi2_and_rms(obs, pred)` | Compute 3D misfit |
+
+## WS3D Model I/O
+
+| Function / Type | Description |
+|:---------|:------------|
+| `WS3DModel` | 3D resistivity model in WS3D format (log₁₀ internal) |
+| `load_ws3d_model(path)` | Load a WS3D model file |
+| `read_ws3d_model(path)` | Alias for `load_ws3d_model` |
+| `write_ws3d_model(path, ...)` | Write a WS3D model file |
+
+## Core Utilities
+
+| Function | Description |
+|:---------|:------------|
+| `edges_from_centers(c)` | Cell-edge coordinates from cell centres |
+| `core_indices(c; tol)` | Index range of the unpadded core cells |
+| `z_indices_for_max_depth(zc, d)` | Depth-limited vertical index range |
+| `lateral_core_ranges(m; tol)` | `(ix, iy)` core ranges for a model |
+| `core_view(m; tol)` | View into the core resistivity block |
+| `RBFMap` | Gaussian-RBF mapping structure |
+| `build_rbf_map(m, ix, iy, n, rng)` | Build a 3D RBF control-point map |
+| `apply_rbf_map!(delta, rbf, params)` | Apply RBF perturbations to a 3D field |

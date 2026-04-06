@@ -14,12 +14,21 @@ include("Data.jl")
 include("Model.jl")
 include("Chi2RMS.jl")
 
+#----- Headless core/padding utilities (always available) ------------------#
+
+include("CoreUtils3D.jl")
+
+#----- WS3D format model I/O (log10 internal) -----------------------------#
+
+include("WS3DModel.jl")
+
+#----- Visualization (optional, requires GLMakie) -------------------------#
+
 has_visualization = false
 try
     using GLMakie
     include("PlotModel.jl")
     global has_visualization = true
-    export edges_from_centers, core_indices, z_indices_for_max_depth
     export compute_colorrange, prepare_model_arrays
 catch LoadError
     @warn "GLMakie not available, interactive visualization functionality disabled"
@@ -31,12 +40,34 @@ include("MTGeophysics1D.jl")
 include("MTGeophysics2D.jl")
 include("VFSA2DMT.jl")
 
+#----- 3-D VFSA inversion and ensemble statistics -------------------------#
+
+include("VFSA3DMT.jl")
+
 #----- Exports: 3-D ModEM ------------------------------------------------#
 
 export Data, Model, ModEMData, ModEMModel
 export load_data_modem, make_nan_data, calc_rho_pha
 export read_mackie3d_model, load_model_modem, write_model_modem
 export chi2_and_rms
+
+#----- Exports: Core utilities (always available) -------------------------#
+
+export edges_from_centers, core_indices, z_indices_for_max_depth
+export lateral_core_ranges, core_view
+
+#----- Exports: WS3D model I/O -------------------------------------------#
+
+export WS3DModel
+export load_ws3d_model, read_ws3d_model, write_ws3d_model
+
+#----- Exports: 3-D VFSA inversion ---------------------------------------#
+
+export VFSA3DMTConfig
+export VFSA3DMT
+export AnalyseEnsemble3D
+export core_statistics
+export RBFMap, build_rbf_map, apply_rbf_map!
 
 #----- Exports: 1-D / 2-D ------------------------------------------------#
 

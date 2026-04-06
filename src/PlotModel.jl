@@ -1,60 +1,8 @@
 # Shared plotting utilities for model viewers.
 # Author: @pankajkmishra
-# This file contains grid/index/depth/color helper functions reused by 2D and 3D visualization scripts.
-# Keeping these helpers here avoids duplicated plotting logic in examples.
-
-function edges_from_centers(c::AbstractVector)
-    n = length(c)
-    n < 2 && return [c[1] - 0.5; c[1] + 0.5]
-    mids = (c[1:end-1] .+ c[2:end]) ./ 2
-    first_edge = c[1] - (c[2] - c[1]) / 2
-    last_edge  = c[end] + (c[end] - c[end-1]) / 2
-    vcat(first_edge, mids, last_edge)
-end
-
-function core_indices(c::AbstractVector; tol::Real = 0.2)
-    e = edges_from_centers(c)
-    w = abs.(diff(e))
-    n = length(w)
-    n <= 4 && return 1:n
-    s = max(1, round(Int, 0.2n))
-    t = min(n, round(Int, 0.8n))
-    w_ref = median(@view w[(s+1):t])
-    is_core = abs.(w .- w_ref) .<= tol * w_ref
-    best_i, best_len = 1, 0
-    i = 1
-    while i <= n
-        if is_core[i]
-            j = i
-            while j <= n && is_core[j]; j += 1; end
-            if (j - i) > best_len
-                best_i, best_len = i, (j - i)
-            end
-            i = j
-        else
-            i += 1
-        end
-    end
-    best_len > 0 ? (best_i:(best_i + best_len - 1)) : (1:n)
-end
-
-function z_indices_for_max_depth(zc::AbstractVector, max_depth::Real)
-    e = edges_from_centers(zc)
-    dz = abs.(diff(e))
-    cum = cumsum(dz)
-    if max_depth <= cum[1]
-        return 1:1
-    elseif max_depth >= cum[end]
-        return 1:length(zc)
-    else
-        k = findfirst(>=(max_depth), cum)::Int
-        if k > 1 && (max_depth - cum[k-1]) < (cum[k] - max_depth)
-            return 1:(k-1)
-        else
-            return 1:k
-        end
-    end
-end
+# This file contains color/model-array helper functions reused by 2D and 3D visualization scripts.
+# Core grid/index/depth utilities (edges_from_centers, core_indices, z_indices_for_max_depth)
+# are defined in CoreUtils3D.jl and always available, even without GLMakie.
 
 function compute_colorrange(R::AbstractArray;
         resistivity_range::Union{Nothing, Tuple{<:Real,<:Real}, AbstractVector{<:Real}} = nothing)

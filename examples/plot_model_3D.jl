@@ -14,6 +14,7 @@ using Proj
 
 include(joinpath(dirname(@__DIR__), "src", "Model.jl"))
 include(joinpath(dirname(@__DIR__), "src", "Data.jl"))
+include(joinpath(dirname(@__DIR__), "src", "CoreUtils3D.jl"))
 include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
 
 # =========================
