@@ -64,15 +64,6 @@ shapefile_path = "path/to/coastline.shp"
 target_crs     = "EPSG:3067"
 ```
 
-## Model editing (experimental)
-
-Interactive scripts for modifying resistivity values by hand:
-
-```bash
-julia --project=. Examples/edit_model_by_slice.jl
-julia --project=. Examples/edit_model_by_drawing.jl
-```
-
 ## Example data
 
 The Cascadia 3D example is not bundled. Download it from [ModEM-Examples](https://github.com/magnetotellurics/ModEM-Examples/tree/main/Magnetotelluric/3D_MT/Cascadia) and place it in `Examples/Cascadia/`.

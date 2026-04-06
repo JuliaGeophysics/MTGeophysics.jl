@@ -90,13 +90,4 @@ transition_layers       = 1
 apply_to_all_depths     = false
 ```
 
-## Experimental editing scripts
 
-Additional interactive scripts for manual model modification:
-
-| Script | Description |
-|:-------|:------------|
-| `edit_model_by_slice.jl` | Bulk-replace resistivity below a cutoff layer |
-| `edit_model_by_drawing.jl` | Draw polygon zones on slices to replace resistivity |
-
-These are more development-oriented and may require local path adjustments.

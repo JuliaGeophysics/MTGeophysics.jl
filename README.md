@@ -3,7 +3,7 @@
 <p align="center"><em>Magnetotelluric modelling, inversion, and visualization workflows in Julia.</em></p>
 
 <p align="center">
-	<a href="https://juliageophysics.github.io/MTGeophysics.jl/">
+	<a href="https://juliageophysics.github.io/MTGeophysics.jl/dev/">
 		<img src="https://img.shields.io/badge/Documentation-Visit%20Site-0A7EA4?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Documentation" />
 	</a>
 	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/actions/workflows/Documenter.yml">
