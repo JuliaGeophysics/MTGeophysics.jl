@@ -54,23 +54,20 @@ inversion, file conversion, and visualization, requiring researchers to
 maintain ad-hoc scripts in multiple languages to bridge them.
 
 MTGeophysics.jl addresses this fragmentation by providing a single Julia
-package that spans the entire MT workflow, from data collection and
-quality control, through forward modelling and inversion, to a final
-preferred subsurface model with quantified uncertainty. The longer-term
-vision is to supply all the tools a researcher needs to carry out
-magnetotelluric studies end-to-end, and to serve as a foundation on
-which new methods can be built. Because Julia's type system and
-multiple dispatch make it straightforward to compose packages,
-MTGeophysics.jl is designed as a core component of a broader
-JuliaGeophysics ecosystem. Its forward solvers and standardised data
-structures are intended to support training of neural operators and
-neural surrogates that learn to approximate the MT forward map,
-enabling scientific machine learning workflows such as physics-informed
-neural networks and operator learning for rapid approximate inversion.
-Julia's composability with automatic differentiation and scientific
-machine learning libraries makes MTGeophysics.jl a natural building
-block for bridging classical geophysical inversion with modern
-data-driven approaches.
+package that spans the MT modelling and interpretation workflow, from
+forward modelling and inversion to a final preferred subsurface model
+with quantified uncertainty. The package is designed as a research
+repository: its forward solvers, data structures, and inversion
+routines serve as reusable building blocks so that implementing new
+ideas — alternative parameterisations, hybrid inversion strategies,
+or novel uncertainty quantification schemes — is straightforward
+without rebuilding core MT tooling from scratch. Because Julia's type
+system and multiple dispatch make it straightforward to compose
+packages, MTGeophysics.jl is designed as a core component of a broader
+JuliaGeophysics ecosystem. Julia's composability with automatic
+differentiation and scientific computing libraries makes the package a
+natural foundation for extending classical MT workflows with modern
+numerical methods and scientific machine learning.
 
 The package targets MT researchers and students who want a unified,
 open-source toolkit that leverages Julia's [@Bezanson2017] strengths in
@@ -140,28 +137,84 @@ closing the loop between geophysical modelling and geological mapping.
 The visualization layer is conditionally loaded, ensuring the core
 package functions without OpenGL dependencies.
 
-![Interactive 3D model viewer showing combined XY, XZ, and YZ resistivity slices with slider controls and coordinate reprojection.](plot_model_3d.png){#fig:slicer}
+![Interactive 3D model viewer showing combined XY, XZ, and YZ resistivity slices with slider controls, coordinate reprojection (EPSG:3067), north arrow, and scale bar. Depth, X, and Y sliders allow real-time browsing; the view can be toggled between core-only and full-padding extents.](plot_model_3d.png){#fig:slicer}
+
+![Interactive XY depth-slice viewer with WGS 84 geographic coordinates (EPSG:4326), depth-layer slider, core/full model toggle, and GIS shapefile overlay support. Slices can be exported as high-resolution PNGs or georeferenced shapefiles for direct import into GIS platforms.](plot_xy_slices.png){#fig:xyslices}
+
+![Polygon-based interactive model editor. The user draws a closed polygon on a depth slice, sets a target resistivity and vertical extent (layers above, below, and transition), and applies the edit. Undo, reset, and save controls allow iterative refinement of the 3D model before re-running the forward solver.](draw_and_replace.png){#fig:editor}
 
 Publication-quality static plots use CairoMakie for data maps, response
 curves, model cross-sections, and convergence diagnostics. All file
 formats use plain text, ensuring reproducibility and version-control
 friendliness.
 
+# Benchmarks and validation
+
+The package includes two levels of numerical validation, both fully
+reproducible from the repository.
+
+**COMMEMI 2D benchmarks.**
+The 2D forward solver and VFSA inversion have been validated against
+the COMMEMI benchmark suite [@Zhdanov1997], the community-standard
+test set for 2D MT numerical methods. The repository natively generates
+the COMMEMI-2D-I, II, and III synthetic models and observed data via
+the included benchmark scripts (`Helpers/benchmarks_2d.jl`), so
+validation can be repeated with a single command without any external
+data downloads.
+
+**Cascadia 3D field-data benchmark.**
+The 3D VFSA inversion has been benchmarked at regional scale using
+USArray MT data from the Cascadia subduction zone [@Patro2008], a
+dataset extensively studied with the deterministic ModEM NLCG
+inversion. This benchmark will be presented at EGU General Assembly
+2026 [@Mishra2026]. \autoref{fig:cascadia} compares depth slices from the
+published ModEM NLCG result (top row) with the VFSA ensemble mean
+computed from nine independent Markov chains (middle row), each
+running 3000 iterations with four trial proposals per iteration
+(approximately 60 seconds per forward solve). The VFSA ensemble mean
+recovers the major conductive structures identified by deterministic
+inversion at both shallow (24--30 km) and deeper (59--74 km) depth
+ranges, and in several areas resolves geological boundaries more
+sharply than the smoothness-regularised NLCG result. The bottom row
+shows the ensemble standard deviation, a per-voxel uncertainty
+estimate that no single deterministic inversion can provide. Regions
+of high standard deviation correspond to areas where the data poorly
+constrain the model, giving interpreters direct information about
+which features are robust and which remain ambiguous. Because the
+stochastic workflow produces a distribution of plausible models rather
+than one "best" solution, it quantifies the non-uniqueness inherent
+in MT inversion and delivers spatially resolved confidence measures
+alongside the resistivity image.
+
+![3D VFSA benchmark on Cascadia field data. Top: ModEM NLCG deterministic inversion. Middle: VFSA ensemble mean from 9 independent chains. Bottom: ensemble standard deviation (uncertainty). Left column: 24--30 km depth. Right column: 59--74 km depth. The VFSA mean recovers the same major conductive features as the deterministic result while additionally providing spatially resolved uncertainty estimates.](VFSA3DBenchmark.png){#fig:cascadia}
+
 # Research impact statement
 
 MTGeophysics.jl has been developed to support ongoing magnetotelluric
-research at the Geological Survey of Finland (GTK). The 2D VFSA
-inversion module has been validated against the COMMEMI benchmarks
-[@Zhdanov1997], reproducing known synthetic models. The 3D VFSA
-inversion has been demonstrated at regional scale using USArray MT data
-from the Cascadia subduction zone [@Patro2008], a dataset extensively
-studied with deterministic 3D inversion, providing a direct benchmark
-for the stochastic results. The package's ModEM I/O and 3D
-visualization capabilities are actively used for interpreting
-crustal-scale MT surveys in Finland. The repository includes complete
-reproducible examples with synthetic datasets, benchmark scripts, and
-documentation, making it ready for adoption by the broader MT research
-community.
+research at the Geological Survey of Finland (GTK). The numerical core
+has been validated at two levels: the 2D forward solver and VFSA
+inversion reproduce the community-standard COMMEMI benchmark models
+[@Zhdanov1997], and the 3D VFSA inversion recovers established
+resistivity structures from the published Cascadia USArray dataset
+[@Patro2008] while additionally providing ensemble uncertainty
+estimates not available from deterministic methods
+(\autoref{fig:cascadia}). The package integrates directly with ModEM
+[@Kelbert2014], the most widely used 3D MT forward solver, by reading
+and writing its native file formats and wrapping it as the external
+forward engine for 3D VFSA inversion, ensuring interoperability with
+existing research workflows worldwide. The interactive 3D visualization
+tools (\autoref{fig:slicer}, \autoref{fig:xyslices}) support
+coordinate reprojection to standard CRS (EPSG:4326, EPSG:3067) and
+shapefile overlays, enabling direct integration of geophysical results
+with geological maps in GIS platforms. The interactive model editor
+(\autoref{fig:editor}) allows polygon-based resistivity modification
+with depth control, supporting iterative hypothesis testing. The
+package's ModEM I/O and 3D visualization capabilities are actively
+used for interpreting crustal-scale MT surveys in Finland. The
+repository includes complete reproducible examples: COMMEMI synthetic
+benchmarks are generated natively, and the Cascadia 3D example runs
+end-to-end from a single script, making the package ready for
+adoption by the broader MT research community.
 
 # AI usage disclosure
 
