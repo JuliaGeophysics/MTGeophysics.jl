@@ -108,7 +108,7 @@ struct MT2DRBFMap
     z_centers::Vector{Float64}
 end
 
-core_indices(cell_sizes::AbstractVector{<:Real}; tol::Real = 0.20) = begin
+core_cell_indices(cell_sizes::AbstractVector{<:Real}; tol::Real = 0.20) = begin
     minimum_size = minimum(Float64.(cell_sizes))
     threshold = minimum_size * (1 + Float64(tol))
     indices = findall(size -> Float64(size) <= threshold + 1e-9, cell_sizes)
@@ -708,7 +708,7 @@ end
 
 function _core_model_error_metrics(mesh::MT2DMesh, recovered::AbstractMatrix{<:Real}, truth::AbstractMatrix{<:Real}; tol::Real)
     row_range = (mesh.n_air_cells + 1):size(recovered, 1)
-    core_y = core_indices(mesh.y_cell_sizes; tol = tol)
+    core_y = core_cell_indices(mesh.y_cell_sizes; tol = tol)
     full_difference = log10.(Float64.(recovered[row_range, :])) .- log10.(Float64.(truth[row_range, :]))
     core_difference = log10.(Float64.(recovered[row_range, core_y])) .- log10.(Float64.(truth[row_range, core_y]))
     abs_core = abs.(core_difference)
@@ -730,7 +730,7 @@ function _conductive_anomaly_metrics(
     tol::Real,
 )
     row_range = (mesh.n_air_cells + 1):size(recovered, 1)
-    core_y = core_indices(mesh.y_cell_sizes; tol = tol)
+    core_y = core_cell_indices(mesh.y_cell_sizes; tol = tol)
     y_centers = mt2d_y_centers(mesh)[core_y]
     z_centers = mt2d_z_centers(mesh)[row_range]
     true_mask = Float64.(truth[row_range, core_y]) .<= Float64(threshold)
@@ -1087,7 +1087,7 @@ function _run_mt2d_chain(
     _write_trials_header(trials_log, config, Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))
     _write_iteration_header(iteration_log, config, Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))
 
-    core_y = core_indices(mesh.y_cell_sizes; tol = config.pad_tolerance)
+    core_y = core_cell_indices(mesh.y_cell_sizes; tol = config.pad_tolerance)
     core_z = _perturbable_ground_indices(mesh, config.perturb_depth_m)
 
     # Keep the prior in the sparse-control subspace. A dense random cell-by-cell

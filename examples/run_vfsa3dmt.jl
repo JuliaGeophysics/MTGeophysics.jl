@@ -13,16 +13,95 @@
 #
 # Usage:
 #   julia --project=. examples/run_vfsa3dmt.jl
+#   julia --project=. examples/run_vfsa3dmt.jl path/to/model.rho path/to/data.dat
+#   julia --project=. examples/run_vfsa3dmt.jl --check path/to/model.rho path/to/data.dat
 #
 # The Cascadia example data is from:
 #   Patro & Egbert (2008), Geophys. Res. Lett., 35, L20311.
 
 using MTGeophysics
 
+function _parse_cli(args::Vector{String})
+    check_only = any(==("--check"), args)
+    positional = filter(!=("--check"), args)
+    length(positional) in (0, 2) || error("Usage: julia --project=. examples/run_vfsa3dmt.jl [--check] [model_path data_path]")
+    return check_only, positional
+end
+
+function _resolve_paths(args::Vector{String})
+    check_only, positional = _parse_cli(args)
+    if length(positional) == 2
+        start_model = abspath(positional[1])
+        observed_data = abspath(positional[2])
+    else
+        cascadia_dir = normpath(@__DIR__, "Cascadia")
+        start_model = get(ENV, "MTG_MODEL_PATH", joinpath(cascadia_dir, "cascad_half_prior.ws"))
+        observed_data = get(ENV, "MTG_DATA_PATH", joinpath(cascadia_dir, "cascad_errfl5.dat"))
+    end
+    return check_only, start_model, observed_data
+end
+
+function _print_preflight_summary(start_model::AbstractString, observed_data::AbstractString, cfg::VFSA3DMTConfig)
+    m = load_ws3d_model(start_model)
+    ix = core_indices(m.cx; tol = cfg.pad_tol)
+    iy = core_indices(m.cy; tol = cfg.pad_tol)
+    println("3D VFSA preflight summary")
+    println("  Model: $start_model")
+    println("  Data:  $observed_data")
+    println("  Mesh cells: $(m.nx) x $(m.ny) x $(m.nz)")
+    println("  Detected core x-range: $ix ($(length(ix)) cells)")
+    println("  Detected core y-range: $iy ($(length(iy)) cells)")
+    println("  Nominal padding estimate: $(m.npad)")
+    println("  Core cell widths (x median / y median): $(median(m.dx[ix])) / $(median(m.dy[iy]))")
+end
+
+# --------------------------------------------------------------------------
+# Resolve input paths
+# --------------------------------------------------------------------------
+check_only, start_model, observed_data = _resolve_paths(ARGS)
+
+# Verify files exist
+for (label, path) in [("Starting model", start_model), ("Observed data", observed_data)]
+    if !isfile(path)
+        error("$label not found: $path")
+    end
+end
+
+# --------------------------------------------------------------------------
+# Configure the 3D VFSA inversion
+# --------------------------------------------------------------------------
+cfg = VFSA3DMTConfig(
+    nchains               = 1,          # number of independent Markov chains
+    nprocs                = 21,         # MPI processes for ModEM forward calls
+    mpirun_cmd            = get(ENV, "MTG_MPIRUN", "mpirun"),
+    modem_exe             = get(ENV, "MTG_MODEM_EXE", "Mod3DMT"),
+    n_ctrl                = 900,        # RBF control points in the core
+    log_bounds            = (0.0, 5.0), # log10(Ω·m) bounds
+    step_scale            = 0.05,       # VFSA proposal step size
+    max_iter              = 3000,       # total VFSA iterations (use 10-50 for smoke test)
+    n_trials              = 4,          # trial proposals per iteration
+    T0_prop               = 1.0,        # initial proposal temperature
+    Tf_prop               = 1e-3,       # final proposal temperature
+    T0_acc                = 1.0,        # initial acceptance temperature
+    Tf_acc                = 1e-3,       # final acceptance temperature
+    seed                  = 1911,       # random seed for reproducibility
+    padding_decay_length  = 10.0,       # horizontal padding blend (in cell widths)
+    keep_models           = true,       # keep all trial model files
+    keep_dpred            = false,      # discard predicted data files to save space
+)
+
+# --------------------------------------------------------------------------
+# Optional preflight mode for debugging input meshes without ModEM
+# --------------------------------------------------------------------------
+if check_only || get(ENV, "MTG_PREFLIGHT_ONLY", "0") == "1"
+    _print_preflight_summary(start_model, observed_data, cfg)
+    exit(0)
+end
+
 # --------------------------------------------------------------------------
 # Check that the external ModEM solver is available
 # --------------------------------------------------------------------------
-modem_exe = "Mod3DMT"  # change to "Mod3DMT_2025" if using the 2025 build
+modem_exe = cfg.modem_exe
 
 modem_found = try
     success(`which $modem_exe`)
@@ -43,6 +122,11 @@ if !modem_found
     ║  The 3D VFSA inversion requires the ModEM 3D MT code and an   ║
     ║  MPI runtime to compute forward responses.                    ║
     ║                                                                ║
+    ║  To debug inputs without ModEM, run:                           ║
+    ║    julia --project=. examples/run_vfsa3dmt.jl --check         ║
+    ║    julia --project=. examples/run_vfsa3dmt.jl --check         ║
+    ║      /path/to/model.rho /path/to/data.dat                     ║
+    ║                                                                ║
     ║  Installation:                                                 ║
     ║    1. Download ModEM from:                                     ║
     ║       https://github.com/dong-hao/ModEM-GPU                   ║
@@ -50,50 +134,12 @@ if !modem_found
     ║    3. Ensure the executable is on your PATH.                   ║
     ║    4. Install an MPI runtime (OpenMPI, MPICH, MS-MPI, etc.)   ║
     ║                                                                ║
-    ║  Once installed, re-run this script.                           ║
+    ║  Once installed, re-run this script without --check.           ║
     ╚══════════════════════════════════════════════════════════════════╝
 
     """; color=:yellow, bold=true)
     exit(1)
 end
-
-# --------------------------------------------------------------------------
-# Paths to Cascadia example data
-# --------------------------------------------------------------------------
-cascadia_dir = normpath(@__DIR__, "Cascadia")
-
-start_model  = joinpath(cascadia_dir, "cascad_half_prior.ws")
-observed_data = joinpath(cascadia_dir, "cascad_errfl5.dat")
-
-# Verify files exist
-for (label, path) in [("Starting model", start_model), ("Observed data", observed_data)]
-    if !isfile(path)
-        error("$label not found: $path")
-    end
-end
-
-# --------------------------------------------------------------------------
-# Configure the 3D VFSA inversion
-# --------------------------------------------------------------------------
-cfg = VFSA3DMTConfig(
-    nchains               = 1,          # number of independent Markov chains
-    nprocs                = 21,         # MPI processes for ModEM forward calls
-    mpirun_cmd            = "mpirun",   # MPI launcher command
-    modem_exe             = modem_exe,  # ModEM executable name
-    n_ctrl                = 900,        # RBF control points in the core
-    log_bounds            = (0.0, 5.0), # log10(Ω·m) bounds
-    step_scale            = 0.05,       # VFSA proposal step size
-    max_iter              = 3000,       # total VFSA iterations (use 10-50 for smoke test)
-    n_trials              = 4,          # trial proposals per iteration
-    T0_prop               = 1.0,        # initial proposal temperature
-    Tf_prop               = 1e-3,       # final proposal temperature
-    T0_acc                = 1.0,        # initial acceptance temperature
-    Tf_acc                = 1e-3,       # final acceptance temperature
-    seed                  = 1911,       # random seed for reproducibility
-    padding_decay_length  = 10.0,       # horizontal padding blend (in cell widths)
-    keep_models           = true,       # keep all trial model files
-    keep_dpred            = false,      # discard predicted data files to save space
-)
 
 # --------------------------------------------------------------------------
 # Run the inversion
