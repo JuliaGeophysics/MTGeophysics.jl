@@ -3,7 +3,7 @@
 using MTGeophysics
 
 function main(args::AbstractVector{<:AbstractString} = ARGS)
-    1 <= length(args) <= 2 || error("usage: julia --project=. Helpers/run_statistics_2d.jl <run_dir> [observed_data_path]")
+    1 <= length(args) <= 2 || error("usage: julia --project=. helpers/run_statistics_2d.jl <run_dir> [observed_data_path]")
     run_dir = args[1]
     observed_data_path = length(args) == 2 ? args[2] : nothing
     stats = AnalyseEnsemble2D(run_dir; observed_data_path = observed_data_path, copy_script = false)

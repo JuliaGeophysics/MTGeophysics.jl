@@ -18,20 +18,45 @@ edges_from_centers(c::AbstractVector) = begin
 end
 
 """
+    _mode_width(w::AbstractVector)
+
+Most frequently occurring cell width in `w`. Widths are rounded to 6 significant
+digits before tallying, since cell-edge reconstruction blends only the 1–2 cells
+straddling a core/padding boundary while every interior core cell shares an
+identical width. Ties are broken toward the smaller width (finer cells).
+"""
+function _mode_width(w::AbstractVector)
+    counts = Dict{Float64,Int}()
+    @inbounds for v in w
+        key = round(float(v); sigdigits = 6)
+        counts[key] = get(counts, key, 0) + 1
+    end
+    best_w, best_c = first(keys(counts)), 0
+    for (k, c) in counts
+        if c > best_c || (c == best_c && k < best_w)
+            best_w, best_c = k, c
+        end
+    end
+    return best_w
+end
+
+"""
     core_indices(c::AbstractVector; tol::Real=0.2)
 
 Return the index range of the largest contiguous block of cells whose widths
-are within `tol * w_ref` of the interior reference width (median over the
-central 60% of the mesh).
+are within `tol * w_ref` of the reference core width `w_ref`.
+
+The core (survey) region is meshed with uniform fine cells, so `w_ref` is taken
+as the *most common* cell width (mode). This recovers the fine-cell plateau no
+matter where it sits or how small a fraction of the axis it occupies — unlike a
+central-window median, which is polluted by padding when the core is narrow.
 """
 function core_indices(c::AbstractVector; tol::Real = 0.2)
     e = edges_from_centers(c)
     w = abs.(diff(e))
     n = length(w)
     n <= 4 && return 1:n
-    s = max(1, round(Int, 0.2n))
-    t = min(n, round(Int, 0.8n))
-    w_ref = median(@view w[(s+1):t])
+    w_ref = _mode_width(w)
     is_core = abs.(w .- w_ref) .<= tol * w_ref
     best_i, best_len = 1, 0
     i = 1

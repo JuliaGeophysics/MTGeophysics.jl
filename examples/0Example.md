@@ -44,8 +44,8 @@ The 3-D viewer scripts currently default to:
 ## 2. Generate synthetic benchmarks
 
 ```powershell
-julia --project=. Helpers/benchmarks_1d.jl
-julia --project=. Helpers/benchmarks_2d.jl
+julia --project=. helpers/benchmarks_1d.jl
+julia --project=. helpers/benchmarks_2d.jl
 ```
 
 Generated output directories:
@@ -137,19 +137,19 @@ Useful flags:
 ### Recompute ensemble statistics
 
 ```powershell
-julia --project=. Helpers/run_statistics_2d.jl examples/run_VFSA2DMT_<timestamp>
+julia --project=. helpers/run_statistics_2d.jl examples/run_VFSA2DMT_<timestamp>
 ```
 
 ### Build a convergence GIF
 
 ```powershell
-julia --project=. Helpers/make_gif_2d.jl examples/run_VFSA2DMT_<timestamp>
+julia --project=. helpers/make_gif_2d.jl examples/run_VFSA2DMT_<timestamp>
 ```
 
 With explicit options:
 
 ```powershell
-julia --project=. Helpers/make_gif_2d.jl examples/run_VFSA2DMT_<timestamp> my_animation.gif --fps 8 --depth_km 50 --rho_range 0,4
+julia --project=. helpers/make_gif_2d.jl examples/run_VFSA2DMT_<timestamp> my_animation.gif --fps 8 --depth_km 50 --rho_range 0,4
 ```
 
 ## 7. Explore 3-D models interactively
@@ -216,8 +216,8 @@ If you are using the repository for the first time, this is the safest path:
 
 ```powershell
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
-julia --project=. Helpers/benchmarks_1d.jl
-julia --project=. Helpers/benchmarks_2d.jl
+julia --project=. helpers/benchmarks_1d.jl
+julia --project=. helpers/benchmarks_2d.jl
 julia --project=. .\examples\response_1d.jl
 julia --project=. .\examples\response_2d.jl
 julia --project=. .\examples\run_vfsa2dmt.jl

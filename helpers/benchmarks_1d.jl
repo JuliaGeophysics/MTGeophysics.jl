@@ -3,7 +3,7 @@
 using MTGeophysics
 
 """
-    SaveBenchmarks1D(; output_root=joinpath(dirname(@__DIR__), "Examples"))
+    SaveBenchmarks1D(; output_root=joinpath(dirname(@__DIR__), "examples"))
 
 Inputs:
 - `output_root`: Parent directory under which per-case benchmark directories are created.
@@ -12,10 +12,10 @@ Output:
 - Vector of named tuples containing the written true-model, reference-data, and observed-data paths.
 
 Description:
-- Writes each 1D benchmark into its own sub-directory (e.g. `Examples/0Layered1D/`).
+- Writes each 1D benchmark into its own sub-directory (e.g. `examples/0Layered1D/`).
 """
 function SaveBenchmarks1D(;
-    output_root::AbstractString = joinpath(dirname(@__DIR__), "Examples"),
+    output_root::AbstractString = joinpath(dirname(@__DIR__), "examples"),
 )
     cases = [
         (
@@ -78,7 +78,7 @@ Description:
 save_benchmarks1d(; kwargs...) = SaveBenchmarks1D(; kwargs...)
 
 function main(args::AbstractVector{<:AbstractString} = ARGS)
-    isempty(args) || error("usage: julia --project=. Helpers/benchmarks_1d.jl")
+    isempty(args) || error("usage: julia --project=. helpers/benchmarks_1d.jl")
     saved = SaveBenchmarks1D()
     println("SavedCases = ", length(saved))
     for s in saved

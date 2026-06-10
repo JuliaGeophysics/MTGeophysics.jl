@@ -21,8 +21,8 @@ MTGeophysics.jl is part of the [JuliaGeophysics ecosystem](https://github.com/Ju
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 
 # Generate synthetic benchmark models
-julia --project=. Helpers/benchmarks_1d.jl
-julia --project=. Helpers/benchmarks_2d.jl
+julia --project=. helpers/benchmarks_1d.jl
+julia --project=. helpers/benchmarks_2d.jl
 
 # 1-D forward response
 julia --project=. examples/response_1d.jl

@@ -74,7 +74,7 @@ MTGeophysics.jl/
 │   ├── replace_slice_resistivity_scope.jl  # Bulk resistivity editing
 │   ├── draw_and_replace_in_model.jl        # Polygon zone editing
 │   └── Cascadia/               # Example data (not tracked)
-├── Helpers/                    # Benchmark generation & post-processing
+├── helpers/                    # Benchmark generation & post-processing
 │   ├── benchmarks_1d.jl        # Generate 1D benchmarks
 │   ├── benchmarks_2d.jl        # Generate 2D benchmarks
 │   ├── run_statistics_2d.jl    # 2D ensemble statistics
@@ -94,7 +94,7 @@ MTGeophysics.jl/
 1. Build a synthetic 2D benchmark model and generate inputs.
 
 ```
-julia --project=. Helpers/benchmarks_2d.jl
+julia --project=. helpers/benchmarks_2d.jl
 ```
 
 2. Run the VFSA inversion workflow for the benchmark.
@@ -106,13 +106,13 @@ julia --project=. examples/run_vfsa2dmt.jl
 3. Compute ensemble statistics for posterior models and misfit summaries.
 
 ```
-julia --project=. Helpers/run_statistics_2d.jl
+julia --project=. helpers/run_statistics_2d.jl
 ```
 
 4. Create a GIF to visualize inversion evolution through iterations.
 
 ```
-julia --project=. Helpers/make_gif_2d.jl
+julia --project=. helpers/make_gif_2d.jl
 ```
 
 # Research using this code 

@@ -17,13 +17,18 @@ using Dates
 
 Configuration for the 3D VFSA MT inversion. All VFSA hyper-parameters,
 file-management switches, and external-solver settings live here.
+
+`out_root::String` is the scratch "runs" directory holding the per-chain ModEM
+working folders. A relative value (the default `"runs"`) is created alongside the
+starting model file; an absolute path is used as-is. Logs and best models are
+always written directly into the starting model's own directory.
 """
 Base.@kwdef mutable struct VFSA3DMTConfig
     nchains::Int                  = 1
     nprocs::Int                   = 21
     mpirun_cmd::String            = "mpirun"
     modem_exe::String             = "Mod3DMT_2025"
-    out_root::String              = ""
+    out_root::String              = "runs"
     n_ctrl::Int                   = 900
     log_bounds::Tuple{Float64,Float64} = (0.0, 5.0)
     frac_update_controls::Float64 = 1.0
@@ -386,7 +391,7 @@ _T_schedule(k::Int; T0::Float64, Tend::Float64, Nref::Int) =
 function _run_chain_3d(chain_id::Int, start_model_path::String,
                        dobs_filename::String, timestamp::String,
                        trials_log::String, iter_log::String,
-                       run_root::String; cfg::VFSA3DMTConfig)
+                       run_root::String, results_root::String; cfg::VFSA3DMTConfig)
     rng = MersenneTwister(cfg.seed + 1000*(chain_id-1))
     chain_dir = joinpath(run_root, @sprintf("chain_%02d", chain_id))
     mkpath(chain_dir)
@@ -447,7 +452,7 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
     rms_current  = dp0.rms
     best_chi2 = chi2_current
     best_rms  = rms_current
-    best_model_abs = joinpath(run_root, @sprintf("best_model_chain%02d.rho", chain_id))
+    best_model_abs = joinpath(results_root, @sprintf("best_model_chain%02d.rho", chain_id))
     cp(joinpath(chain_dir, model0_filename), best_model_abs; force=true)
 
     lo, hi = cfg.log_bounds
@@ -570,28 +575,32 @@ Run a 3D VFSA MT inversion. Returns `(best_model_path, iter_log_path)`.
 function VFSA3DMT(start_model_path::AbstractString;
                   dobs_path::AbstractString,
                   cfg::VFSA3DMTConfig = VFSA3DMTConfig())
-    if isempty(cfg.out_root)
-        cfg.out_root = joinpath("runs", Dates.format(now(), "yyyymmdd_HHMMSS"))
-    end
-    isdir(cfg.out_root) || mkpath(cfg.out_root)
+    start_model_abs = abspath(start_model_path)
+    model_dir = dirname(start_model_abs)
+
+    # Scratch "runs" directory (per-chain ModEM working dirs). When out_root is a
+    # relative path it is created alongside the starting model file.
+    run_root = isabspath(cfg.out_root) ? cfg.out_root : joinpath(model_dir, cfg.out_root)
+    isdir(run_root) || mkpath(run_root)
 
     dobs_filename = basename(dobs_path)
-    dobs_abs_target = abspath(joinpath(cfg.out_root, dobs_filename))
+    dobs_abs_target = abspath(joinpath(run_root, dobs_filename))
     cp(abspath(dobs_path), dobs_abs_target; force=true)
 
-    trials_log = joinpath(cfg.out_root, "0vfsa3DMT_detailed.log")
-    iter_log   = joinpath(cfg.out_root, "0vfsa3DMT.log")
+    # Logs and best models are written directly in the starting model's directory.
+    trials_log = joinpath(model_dir, "0vfsa3DMT_detailed.log")
+    iter_log   = joinpath(model_dir, "0vfsa3DMT.log")
     timestamp = Dates.format(now(), "yyyy-mm-dd HH:MM:SS")
 
     _write_trials_header_3d(trials_log; timestamp=timestamp, cfg=cfg)
     _write_iter_header_3d(iter_log; timestamp=timestamp, cfg=cfg)
 
     for c in 1:cfg.nchains
-        _run_chain_3d(c, abspath(start_model_path), dobs_filename, timestamp,
-                      trials_log, iter_log, cfg.out_root; cfg=cfg)
+        _run_chain_3d(c, start_model_abs, dobs_filename, timestamp,
+                      trials_log, iter_log, run_root, model_dir; cfg=cfg)
     end
 
-    best_model = joinpath(cfg.out_root, @sprintf("best_model_chain%02d.rho", 1))
+    best_model = joinpath(model_dir, @sprintf("best_model_chain%02d.rho", 1))
     return best_model, iter_log
 end
 
@@ -674,16 +683,18 @@ function core_statistics(cores::Vector{Array{Float64,3}})
 end
 
 """
-    AnalyseEnsemble3D(input_dir; pattern=r"^chain.*\\.rho\$",
+    AnalyseEnsemble3D(input_dir; pattern=r"^best_model.*\\.rho\$",
                       grid_atol=1e-8, grid_rtol=1e-8)
 
 Load all matching model files from `input_dir`, validate grid consistency,
-compute ensemble mean/median/std, and write them as WS3D model files.
+compute ensemble mean/median/std, and write them as WS3D model files. The default
+pattern matches the per-chain best models (`best_model_chainNN.rho`) that VFSA3DMT
+writes into the starting model's directory.
 
 Returns `(mean_path, median_path, std_path)`.
 """
 function AnalyseEnsemble3D(input_dir::AbstractString;
-                           pattern::Regex = r"^chain.*\.rho$",
+                           pattern::Regex = r"^best_model.*\.rho$",
                            grid_atol::Float64 = 1e-8,
                            grid_rtol::Float64 = 1e-8)
     files = _find_model_files(input_dir, pattern)

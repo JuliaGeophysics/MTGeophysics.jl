@@ -8,7 +8,7 @@ Interactive GLMakie viewers for exploring 3D resistivity models with depth slice
 ## Full 3D slice viewer
 
 ```bash
-julia --project=. Examples/plot_model_3D.jl
+julia --project=. examples/plot_model_3D.jl
 ```
 
 Combined XY/XZ/YZ slices with depth controls, padding toggle, shapefile overlays, and figure export.
@@ -18,7 +18,7 @@ Combined XY/XZ/YZ slices with depth controls, padding toggle, shapefile overlays
 ## XY depth slices
 
 ```bash
-julia --project=. Examples/plot_XY_slices.jl
+julia --project=. examples/plot_XY_slices.jl
 ```
 
 Horizontal map-view slices at selectable depths.
@@ -28,7 +28,7 @@ Horizontal map-view slices at selectable depths.
 ## XZ cross-sections
 
 ```bash
-julia --project=. Examples/plot_XZ_slices.jl
+julia --project=. examples/plot_XZ_slices.jl
 ```
 
 North-South vertical sections at selectable East-West positions.
@@ -38,7 +38,7 @@ North-South vertical sections at selectable East-West positions.
 ## YZ cross-sections
 
 ```bash
-julia --project=. Examples/plot_YZ_slices.jl
+julia --project=. examples/plot_YZ_slices.jl
 ```
 
 East-West vertical sections at selectable North-South positions.
@@ -66,4 +66,4 @@ target_crs     = "EPSG:3067"
 
 ## Example data
 
-The Cascadia 3D example is not bundled. Download it from [ModEM-Examples](https://github.com/magnetotellurics/ModEM-Examples/tree/main/Magnetotelluric/3D_MT/Cascadia) and place it in `Examples/Cascadia/`.
+The Cascadia 3D example is not bundled. Download it from [ModEM-Examples](https://github.com/magnetotellurics/ModEM-Examples/tree/main/Magnetotelluric/3D_MT/Cascadia) and place it in `examples/Cascadia/`.

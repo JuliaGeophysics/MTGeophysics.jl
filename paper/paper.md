@@ -158,7 +158,7 @@ The 2D forward solver and VFSA inversion have been validated against
 the COMMEMI benchmark suite [@Zhdanov1997], the community-standard
 test set for 2D MT numerical methods. The repository natively generates
 the COMMEMI-2D-I, II, and III synthetic models and observed data via
-the included benchmark scripts (`Helpers/benchmarks_2d.jl`), so
+the included benchmark scripts (`helpers/benchmarks_2d.jl`), so
 validation can be repeated with a single command without any external
 data downloads.
 

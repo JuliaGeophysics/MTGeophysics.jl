@@ -7,7 +7,7 @@ Compute the 2D magnetotelluric forward response (TE and TM modes) on a tensor me
 ## Running the example
 
 ```bash
-julia --project=. Examples/response_2d.jl
+julia --project=. examples/response_2d.jl
 ```
 
 This reads the default COMEMI benchmark model and data, computes the predicted response, and writes data maps and site curve plots.
@@ -15,7 +15,7 @@ This reads the default COMEMI benchmark model and data, computes the predicted r
 Custom input files:
 
 ```bash
-julia --project=. Examples/response_2d.jl path/to/model path/to/dataspec
+julia --project=. examples/response_2d.jl path/to/model path/to/dataspec
 ```
 
 ## From Julia
@@ -24,8 +24,8 @@ julia --project=. Examples/response_2d.jl path/to/model path/to/dataspec
 using MTGeophysics
 
 # File-based: solve and write predicted data
-pred_path = ForwardSolve2D("Examples/0COMEMI2D-I/Comemi2D1.true",
-                           "Examples/0COMEMI2D-I/Comemi2D1.ref")
+pred_path = ForwardSolve2D("examples/0COMEMI2D-I/Comemi2D1.true",
+                           "examples/0COMEMI2D-I/Comemi2D1.ref")
 
 # Plot data maps (TE/TM apparent resistivity and phase at each frequency)
 PlotData2D(pred_path;
@@ -33,7 +33,7 @@ PlotData2D(pred_path;
            curves_output_path = "DataCurves2D.png")
 
 # Plot the model
-PlotModel2D("Examples/0COMEMI2D-I/Comemi2D1.true";
+PlotModel2D("examples/0COMEMI2D-I/Comemi2D1.true";
             output_path = "ModelPlot2D.png")
 ```
 
@@ -70,5 +70,5 @@ Three standard COMEMI 2D benchmark models are included:
 Generate all three with:
 
 ```bash
-julia --project=. Helpers/benchmarks_2d.jl
+julia --project=. helpers/benchmarks_2d.jl
 ```

@@ -6,8 +6,8 @@
 using Test
 using MTGeophysics
 
-include(joinpath(dirname(@__DIR__), "Helpers", "benchmarks_1d.jl"))
-include(joinpath(dirname(@__DIR__), "Helpers", "benchmarks_2d.jl"))
+include(joinpath(dirname(@__DIR__), "helpers", "benchmarks_1d.jl"))
+include(joinpath(dirname(@__DIR__), "helpers", "benchmarks_2d.jl"))
 
 @testset "MTGeophysics.jl Tests" begin
 
@@ -18,6 +18,7 @@ include(joinpath(dirname(@__DIR__), "Helpers", "benchmarks_2d.jl"))
         @test data.nf == 0
     end
 
+    include(joinpath(@__DIR__, "TestCore3D.jl"))
     include(joinpath(@__DIR__, "TestForward1D.jl"))
     include(joinpath(@__DIR__, "TestForward2D.jl"))
     include(joinpath(@__DIR__, "TestIO2D.jl"))

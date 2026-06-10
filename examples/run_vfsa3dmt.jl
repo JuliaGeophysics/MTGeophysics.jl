@@ -53,6 +53,7 @@ cfg = VFSA3DMTConfig(
     nprocs                = 21,         # MPI processes for ModEM forward calls
     mpirun_cmd            = "mpirun",
     modem_exe             = MODEM_EXECUTABLE,
+    out_root              = "runs",     # scratch dir, created next to the model file
     n_ctrl                = 900,        # RBF control points in the core
     log_bounds            = (0.0, 5.0), # log10(Ω·m) bounds
     step_scale            = 0.05,       # VFSA proposal step size
@@ -102,7 +103,7 @@ if !modem_found
     ║                                                                ║
     ║  Installation:                                                 ║
     ║    1. Download ModEM from:                                     ║
-    ║       https://github.com/dong-hao/ModEM-GPU                   ║
+    ║       https://github.com/magnetotellurics/ModEM               ║
     ║    2. Build with MPI support (see ModEM documentation).        ║
     ║    3. Install an MPI runtime (OpenMPI, MPICH, MS-MPI, etc.)   ║
     ║                                                                ║
@@ -136,7 +137,7 @@ println("  Iteration log: $iter_log")
 if cfg.nchains > 1
     println()
     println("Computing ensemble statistics...")
-    mean_path, median_path, std_path = AnalyseEnsemble3D(cfg.out_root)
+    mean_path, median_path, std_path = AnalyseEnsemble3D(dirname(start_model))
     println("  Mean   model: $mean_path")
     println("  Median model: $median_path")
     println("  Std    model: $std_path")

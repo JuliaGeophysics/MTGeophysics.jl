@@ -7,7 +7,7 @@ frame as a 2-D resistivity heatmap, and assembles them into an animated GIF.
 
 Usage (from the MTGeophysics.jl project root):
 
-    julia --project=. Helpers/make_gif_2d.jl <run_dir> [output.gif] [--fps N] [--depth_km D] [--rho_range lo,hi]
+    julia --project=. helpers/make_gif_2d.jl <run_dir> [output.gif] [--fps N] [--depth_km D] [--rho_range lo,hi]
 
 Arguments:
     run_dir       Path to the VFSA run directory (must contain snapshots/).

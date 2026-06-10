@@ -5,15 +5,15 @@ Compute the 1D magnetotelluric forward response for a layered earth model using 
 ## Running the example
 
 ```bash
-julia --project=. Examples/response_1d.jl
+julia --project=. examples/response_1d.jl
 ```
 
-This reads the default benchmark model (`Examples/0Layered1D/Layered1D.true`) and data specification (`Examples/0Layered1D/Layered1D.ref`), computes the predicted response, and writes a comparison plot.
+This reads the default benchmark model (`examples/0Layered1D/Layered1D.true`) and data specification (`examples/0Layered1D/Layered1D.ref`), computes the predicted response, and writes a comparison plot.
 
 Custom input files:
 
 ```bash
-julia --project=. Examples/response_1d.jl path/to/model path/to/dataspec
+julia --project=. examples/response_1d.jl path/to/model path/to/dataspec
 ```
 
 ## From Julia
@@ -22,15 +22,15 @@ julia --project=. Examples/response_1d.jl path/to/model path/to/dataspec
 using MTGeophysics
 
 # File-based: solve and write predicted data
-pred_path = ForwardSolve1D("Examples/0Layered1D/Layered1D.true",
-                           "Examples/0Layered1D/Layered1D.ref")
+pred_path = ForwardSolve1D("examples/0Layered1D/Layered1D.true",
+                           "examples/0Layered1D/Layered1D.ref")
 
 # Plot observed vs predicted
-PlotData1D("Examples/0Layered1D/Layered1D.ref", pred_path;
+PlotData1D("examples/0Layered1D/Layered1D.ref", pred_path;
            output_path = "DataPlot1D.png")
 
 # Plot the model structure
-PlotModel1D("Examples/0Layered1D/Layered1D.true";
+PlotModel1D("examples/0Layered1D/Layered1D.true";
             output_path = "ModelPlot1D.png")
 ```
 

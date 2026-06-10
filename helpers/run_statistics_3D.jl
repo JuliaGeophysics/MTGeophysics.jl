@@ -1,23 +1,24 @@
 # This helper script recomputes the 3D ensemble statistics from saved chain models.
 #
 # Usage:
-#   julia --project=. Helpers/run_statistics_3d.jl <run_dir>
-#   julia --project=. Helpers/run_statistics_3d.jl <run_dir> "^best_model.*\.rho$"
+#   julia --project=. helpers/run_statistics_3D.jl <run_dir>
+#   julia --project=. helpers/run_statistics_3D.jl <run_dir> "^chain.*\.rho$"
 #
-# The first argument is the VFSA3DMT output directory containing the .rho files.
-# The optional second argument is a regex pattern to match model filenames
-# (default: "^chain.*\.rho$").
+# VFSA3DMT writes the per-chain best models (best_model_chainNN.rho) directly into
+# the starting model's directory, so <run_dir> is that directory. The optional
+# second argument is a regex pattern to match model filenames
+# (default: "^best_model.*\.rho$").
 
 using MTGeophysics
 
 function main(args::AbstractVector{<:AbstractString} = ARGS)
     1 <= length(args) <= 2 || error(
-        "usage: julia --project=. Helpers/run_statistics_3d.jl <run_dir> [pattern]")
+        "usage: julia --project=. helpers/run_statistics_3D.jl <run_dir> [pattern]")
 
     run_dir = args[1]
     isdir(run_dir) || error("Directory not found: $run_dir")
 
-    pattern = length(args) >= 2 ? Regex(args[2]) : r"^chain.*\.rho$"
+    pattern = length(args) >= 2 ? Regex(args[2]) : r"^best_model.*\.rho$"
 
     println("Computing 3D ensemble statistics...")
     println("  Directory: $run_dir")

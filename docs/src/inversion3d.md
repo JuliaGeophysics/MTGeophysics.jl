@@ -2,7 +2,7 @@
 
 Run a 3D magnetotelluric inversion using Very Fast Simulated Annealing (VFSA)
 with Gaussian-RBF parameterization, multi-chain ensemble sampling, and the
-external [ModEM](https://github.com/dong-hao/ModEM-GPU) forward solver.
+external [ModEM](https://github.com/magnetotellurics/ModEM) forward solver.
 
 ![VFSA 3D benchmark — ensemble mean and std vs deterministic ModEM inversion](assets/VFSA3DBenchmark.png)
 

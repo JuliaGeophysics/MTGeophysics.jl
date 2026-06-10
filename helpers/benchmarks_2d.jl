@@ -3,7 +3,7 @@
 using MTGeophysics
 
 """
-    SaveBenchmarks2D(; output_root=joinpath(dirname(@__DIR__), "Examples"))
+    SaveBenchmarks2D(; output_root=joinpath(dirname(@__DIR__), "examples"))
 
 Inputs:
 - `output_root`: Parent directory under which per-case benchmark directories are created.
@@ -12,11 +12,11 @@ Output:
 - Vector of named tuples containing the written true-model, start-model, reference-data, and observed-data paths.
 
 Description:
-- Writes each 2D benchmark into its own sub-directory (e.g. `Examples/0COMEMI2D-I/`).
+- Writes each 2D benchmark into its own sub-directory (e.g. `examples/0COMEMI2D-I/`).
 - Writes a homogeneous halfspace starting model (`.ini`) on the same grid as each true model.
 """
 function SaveBenchmarks2D(;
-    output_root::AbstractString = joinpath(dirname(@__DIR__), "Examples"),
+    output_root::AbstractString = joinpath(dirname(@__DIR__), "examples"),
 )
     case_names = [
         ("comemi2d_case1_dyke", "Comemi2D1", "0COMEMI2D-I"),
@@ -91,7 +91,7 @@ Description:
 save_benchmarks2d(; kwargs...) = SaveBenchmarks2D(; kwargs...)
 
 function main(args::AbstractVector{<:AbstractString} = ARGS)
-    isempty(args) || error("usage: julia --project=. Helpers/benchmarks_2d.jl")
+    isempty(args) || error("usage: julia --project=. helpers/benchmarks_2d.jl")
     saved = SaveBenchmarks2D()
     println("SavedCases = ", length(saved))
     for s in saved

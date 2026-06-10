@@ -25,21 +25,21 @@ julia --project=. test/runtests.jl
 Before running the examples, generate the synthetic benchmark data:
 
 ```bash
-julia --project=. Helpers/benchmarks_1d.jl
-julia --project=. Helpers/benchmarks_2d.jl
+julia --project=. helpers/benchmarks_1d.jl
+julia --project=. helpers/benchmarks_2d.jl
 ```
 
 This creates:
 
-- `Examples/0Layered1D/` — 1D layered benchmark
-- `Examples/0COMEMI2D-I/`, `0COMEMI2D-II/`, `0COMEMI2D-III/` — 2D COMEMI benchmarks
+- `examples/0Layered1D/` — 1D layered benchmark
+- `examples/0COMEMI2D-I/`, `0COMEMI2D-II/`, `0COMEMI2D-III/` — 2D COMEMI benchmarks
 
 ## First session
 
 ```bash
-julia --project=. Helpers/benchmarks_1d.jl
-julia --project=. Helpers/benchmarks_2d.jl
-julia --project=. Examples/response_1d.jl
-julia --project=. Examples/response_2d.jl
-julia --project=. Examples/run_vfsa2dmt.jl
+julia --project=. helpers/benchmarks_1d.jl
+julia --project=. helpers/benchmarks_2d.jl
+julia --project=. examples/response_1d.jl
+julia --project=. examples/response_2d.jl
+julia --project=. examples/run_vfsa2dmt.jl
 ```

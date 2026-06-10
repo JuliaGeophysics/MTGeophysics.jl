@@ -13,10 +13,10 @@ Run a 2D magnetotelluric inversion using Very Fast Simulated Annealing (VFSA) wi
 ## Running the example
 
 ```bash
-julia --project=. Examples/run_vfsa2dmt.jl
+julia --project=. examples/run_vfsa2dmt.jl
 ```
 
-This runs a two-chain VFSA inversion on the COMEMI-I benchmark and writes results into a timestamped directory under `Examples/`.
+This runs a two-chain VFSA inversion on the COMEMI-I benchmark and writes results into a timestamped directory under `examples/`.
 
 ## From Julia
 
@@ -26,8 +26,8 @@ using MTGeophysics
 result = VFSA2DMT(
     VFSA2DMTParams(
         script_path      = @__FILE__,
-        start_model_path = "Examples/0COMEMI2D-I/Comemi2D1.ini",
-        data_path        = "Examples/0COMEMI2D-I/Comemi2D1.obs",
+        start_model_path = "examples/0COMEMI2D-I/Comemi2D1.ini",
+        data_path        = "examples/0COMEMI2D-I/Comemi2D1.obs",
         config = VFSA2DMTConfig(
             n_chains   = 2,
             n_ctrl     = 400,
@@ -45,8 +45,8 @@ result = VFSA2DMT(
 
 ```bash
 julia --project=. -e 'using MTGeophysics; MTGeophysics.main_vfsa2dmt()' -- \
-    Examples/0COMEMI2D-I/Comemi2D1.ini \
-    Examples/0COMEMI2D-I/Comemi2D1.obs \
+    examples/0COMEMI2D-I/Comemi2D1.ini \
+    examples/0COMEMI2D-I/Comemi2D1.obs \
     --n-chains 3 --n-ctrl 400 --max-iter 300 --log-bounds 0,4 --seed 20260308
 ```
 
@@ -82,7 +82,7 @@ run_VFSA2DMT_<timestamp>/
 
 ```julia
 summary = AnalyseEnsemble2D(result.chain_results;
-    true_model_path = "Examples/0COMEMI2D-I/Comemi2D1.true",
+    true_model_path = "examples/0COMEMI2D-I/Comemi2D1.true",
 )
 ```
 
@@ -91,11 +91,11 @@ summary = AnalyseEnsemble2D(result.chain_results;
 Recompute ensemble statistics:
 
 ```bash
-julia --project=. Helpers/run_statistics_2d.jl Examples/run_VFSA2DMT_<timestamp>
+julia --project=. helpers/run_statistics_2d.jl examples/run_VFSA2DMT_<timestamp>
 ```
 
 Generate a convergence GIF (requires `keep_models = true`):
 
 ```bash
-julia --project=. Helpers/make_gif_2d.jl Examples/run_VFSA2DMT_<timestamp>
+julia --project=. helpers/make_gif_2d.jl examples/run_VFSA2DMT_<timestamp>
 ```

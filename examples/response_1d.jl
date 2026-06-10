@@ -1,5 +1,5 @@
 # Compute the 1D forward response and plot observed vs predicted data.
-# Usage: julia --project=. Examples/response_1d.jl <model_path> <reference_path>
+# Usage: julia --project=. examples/response_1d.jl <model_path> <reference_path>
 
 using MTGeophysics
 
