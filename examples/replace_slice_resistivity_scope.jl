@@ -3,8 +3,6 @@
 # This script applies bulk edits to deeper layers and lets you choose whether the edit
 # is applied only to the core model or to the full model including lateral padding.
 
-using Pkg
-
 using GLMakie
 using Statistics
 using Dates

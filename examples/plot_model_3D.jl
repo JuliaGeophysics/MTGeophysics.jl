@@ -3,8 +3,6 @@
 # This script visualizes XY/XZ/YZ slices with controls for depth, padding, and export
 # Use it to explore overall 3D model geometry and resistivity trends
 
-using Pkg
-#Pkg.activate(dirname(@__DIR__))
 using GLMakie
 using Statistics
 using Dates
@@ -20,8 +18,10 @@ include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
 # =========================
 # User controls (edit here)
 # =========================
-model_file = joinpath(@__DIR__, "Cascadia", "cascad_half_inverse.ws")
-data_file  = joinpath(@__DIR__, "Cascadia", "cascad_errfl5.dat")   # needed for EPSG:3067 / EPSG:4326
+# Paths may be passed on the command line; otherwise the defaults below are used:
+#   julia --project=. examples/plot_model_3D.jl [model_file] [data_file]
+model_file = length(ARGS) >= 1 ? ARGS[1] : joinpath(@__DIR__, "Cascadia", "cascad_half_inverse.ws")
+data_file  = length(ARGS) >= 2 ? ARGS[2] : joinpath(@__DIR__, "Cascadia", "cascad_errfl5.dat")   # needed for EPSG:3067 / EPSG:4326
 
 # you can add your shapefiles here 
 shapefile_path = []

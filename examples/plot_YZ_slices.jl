@@ -12,8 +12,6 @@
 # When using a projected or geographic CRS the script needs a ModEM data file
 # (data_file) for georeferencing (origin lat/lon + station coordinates).
 
-using Pkg
-
 using GLMakie
 using Statistics
 using Dates
@@ -25,8 +23,10 @@ include(joinpath(dirname(@__DIR__), "src", "CoreUtils3D.jl"))
 include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
 
 # ---------- Model & data files ----------
-model_file = joinpath(@__DIR__, "Cascadia", "cascad_half_inverse.ws")
-data_file  = joinpath(@__DIR__, "Cascadia", "cascad_errfl5.dat")   # needed for EPSG:3067 / EPSG:4326
+# Paths may be passed on the command line; otherwise the defaults below are used:
+#   julia --project=. examples/plot_YZ_slices.jl [model_file] [data_file]
+model_file = length(ARGS) >= 1 ? ARGS[1] : joinpath(@__DIR__, "Cascadia", "cascad_half_inverse.ws")
+data_file  = length(ARGS) >= 2 ? ARGS[2] : joinpath(@__DIR__, "Cascadia", "cascad_errfl5.dat")   # needed for EPSG:3067 / EPSG:4326
 
 # ---------- Coordinate system ----------
 #   "EPSG:3067"  — ETRS-TM35FIN (Easting / Northing in metres)  ← default

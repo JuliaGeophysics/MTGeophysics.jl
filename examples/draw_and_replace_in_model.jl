@@ -3,8 +3,6 @@
 # This script lets you draw zones on slices and replace resistivity within selected depth intervals.
 # Use it for targeted interactive edits with visual feedback.
 
-using Pkg
-
 using GLMakie
 using Statistics
 using Dates

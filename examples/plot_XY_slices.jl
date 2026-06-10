@@ -13,8 +13,6 @@
 # Shapefiles are automatically reprojected to the chosen CRS using their .prj
 # sidecar files (via Proj.jl).
 
-using Pkg
-
 using GLMakie
 using Statistics
 using Dates
@@ -28,8 +26,10 @@ include(joinpath(dirname(@__DIR__), "src", "CoreUtils3D.jl"))
 include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
 
 # ---------- Model & data files ----------
-model_file = joinpath(@__DIR__, "Cascadia", "cascad_half_inverse.ws")
-data_file  = joinpath(@__DIR__, "Cascadia", "cascad_errfl5.dat")   # needed for EPSG:3067 / EPSG:4326
+# Paths may be passed on the command line; otherwise the defaults below are used:
+#   julia --project=. examples/plot_XY_slices.jl [model_file] [data_file]
+model_file = length(ARGS) >= 1 ? ARGS[1] : joinpath(@__DIR__, "geoenergialoikka", "best_model_chain01.rho")
+data_file  = length(ARGS) >= 2 ? ARGS[2] : joinpath(@__DIR__, "geoenergialoikka", "data.dat")   # needed for EPSG:3067 / EPSG:4326
 
 # ---------- Coordinate system ----------
 # Choose how the map axes are labelled and how model centres are converted:
@@ -43,7 +43,7 @@ log10_scale       = true
 colormap          = :Spectral
 with_padding      = false          # false → start with core/extent view (default)
 max_depth         = nothing
-resistivity_range = (0.0, 4.0)
+resistivity_range = (1.0, 4.0)
 show_grid         = true
 grid_color        = :black
 grid_linewidth    = 0.5

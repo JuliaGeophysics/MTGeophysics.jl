@@ -154,28 +154,44 @@ julia --project=. helpers/make_gif_2d.jl examples/run_VFSA2DMT_<timestamp> my_an
 
 ## 7. Explore 3-D models interactively
 
+Each viewer accepts the model and data files (paths included) as optional
+command-line arguments:
+
+```powershell
+julia --project=. .\examples\<viewer>.jl [model_file] [data_file]
+```
+
+If no arguments are given, the defaults at the top of each script are used
+(`examples/Cascadia/...` for the 3-D/XZ/YZ viewers, `examples/geoenergialoikka/...`
+for the XY viewer). The `data_file` is only needed for the `"EPSG:3067"` and
+`"EPSG:4326"` coordinate modes; in `"model"` mode it is ignored.
+
 ### Full 3-D slice viewer
 
 ```powershell
 julia --project=. .\examples\plot_model_3D.jl
+julia --project=. .\examples\plot_model_3D.jl examples\Cascadia\cascad_half_inverse.ws examples\Cascadia\cascad_errfl5.dat
 ```
 
 ### XY depth-slice viewer
 
 ```powershell
 julia --project=. .\examples\plot_XY_slices.jl
+julia --project=. .\examples\plot_XY_slices.jl examples\geoenergialoikka\best_model_chain01.rho examples\geoenergialoikka\data.dat
 ```
 
 ### XZ cross-section viewer
 
 ```powershell
 julia --project=. .\examples\plot_XZ_slices.jl
+julia --project=. .\examples\plot_XZ_slices.jl examples\Cascadia\cascad_half_inverse.ws examples\Cascadia\cascad_errfl5.dat
 ```
 
 ### YZ cross-section viewer
 
 ```powershell
 julia --project=. .\examples\plot_YZ_slices.jl
+julia --project=. .\examples\plot_YZ_slices.jl examples\Cascadia\cascad_half_inverse.ws examples\Cascadia\cascad_errfl5.dat
 ```
 
 In the slice-viewer scripts, switch the coordinate mode at the top of the file
