@@ -282,3 +282,124 @@ function calc_rho_pha(Z::Array{ComplexF64,3}, Zerr::Array{ComplexF64,3}, T::Vect
     end
     return ρ, φ, ρerr, φerr
 end
+
+function _write_data_block_header!(io;
+    datatype::AbstractString,
+    sign::Int,
+    units::AbstractString,
+    rotation::Real,
+    origin_lat::Real,
+    origin_lon::Real,
+    nf::Int,
+    ns::Int)
+    signline = sign == -1 ? "exp(-iωt)" : "exp(+iωt)"
+    println(io, "> $datatype")
+    println(io, "> $signline")
+    println(io, "> $units")
+    println(io, "> $(rotation)")
+    println(io, "> $(origin_lat) $(origin_lon)")
+    println(io, "> $(nf) $(ns)")
+end
+
+function write_data_modem(outputfile::AbstractString, d::Data;
+    sign::Int = 1,
+    units::AbstractString = "[V/m]/[T]",
+    rotation::Union{Nothing, Real} = nothing,
+    include_impedance::Bool = true,
+    include_tipper::Bool = true)
+
+    ns = d.ns
+    nf = d.nf
+    ns == 0 && error("Data has zero stations.")
+    nf == 0 && error("Data has zero periods.")
+    size(d.loc, 1) == ns || error("Data loc array does not match station count.")
+
+    rotation_val = if isnothing(rotation)
+        if !isempty(d.zrot)
+            v = d.zrot[1]
+            isfinite(v) ? v : 0.0
+        else
+            0.0
+        end
+    else
+        float(rotation)
+    end
+
+    origin_lat = length(d.origin) >= 1 ? d.origin[1] : 0.0
+    origin_lon = length(d.origin) >= 2 ? d.origin[2] : 0.0
+
+    open(outputfile, "w") do io
+        println(io, "# Written by MTGeophysics.jl write_data_modem")
+
+        if include_impedance
+            _write_data_block_header!(io;
+                datatype = "Full_Impedance",
+                sign = sign,
+                units = units,
+                rotation = rotation_val,
+                origin_lat = origin_lat,
+                origin_lon = origin_lon,
+                nf = nf,
+                ns = ns)
+
+            comp_labels = ("ZXX", "ZXY", "ZYX", "ZYY")
+            for is in 1:ns
+                site = d.site[is]
+                lat = d.loc[is, 1]
+                lon = d.loc[is, 2]
+                elev = d.loc[is, 3]
+                x = d.x[is]
+                y = d.y[is]
+                z = d.z[is]
+                for ip in 1:nf
+                    T = d.T[ip]
+                    for ic in 1:4
+                        zval = d.Z[ip, ic, is]
+                        if isfinite(real(zval)) && isfinite(imag(zval))
+                            err = abs(d.Zerr[ip, ic, is])
+                            err_out = (isfinite(err) && err > 0) ? err : 1e12
+                            println(io, "$(T) $(site) $(lat) $(lon) $(x) $(y) $(elev) $(comp_labels[ic]) $(real(zval)) $(imag(zval)) $(err_out)")
+                        end
+                    end
+                end
+            end
+        end
+
+        if include_tipper
+            _write_data_block_header!(io;
+                datatype = "Full_Vertical_Components",
+                sign = sign,
+                units = units,
+                rotation = rotation_val,
+                origin_lat = origin_lat,
+                origin_lon = origin_lon,
+                nf = nf,
+                ns = ns)
+
+            tip_labels = ("TX", "TY")
+            for is in 1:ns
+                site = d.site[is]
+                lat = d.loc[is, 1]
+                lon = d.loc[is, 2]
+                elev = d.loc[is, 3]
+                x = d.x[is]
+                y = d.y[is]
+                z = d.z[is]
+                for ip in 1:nf
+                    T = d.T[ip]
+                    for ic in 1:2
+                        tval = d.tip[ip, ic, is]
+                        if isfinite(real(tval)) && isfinite(imag(tval))
+                            err = abs(d.tiperr[ip, ic, is])
+                            err_out = (isfinite(err) && err > 0) ? err : 1e12
+                            println(io, "$(T) $(site) $(lat) $(lon) $(x) $(y) $(elev) $(tip_labels[ic]) $(real(tval)) $(imag(tval)) $(err_out)")
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    println("ModEM data written to: $outputfile")
+    return outputfile
+end

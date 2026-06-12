@@ -11,13 +11,7 @@ include(joinpath(dirname(@__DIR__), "helpers", "benchmarks_2d.jl"))
 
 @testset "MTGeophysics.jl Tests" begin
 
-    @testset "Data Structures" begin
-        data = make_nan_data()
-        @test isa(data, Data)
-        @test data.ns == 0
-        @test data.nf == 0
-    end
-
+    include(joinpath(@__DIR__, "TestIO3D.jl"))
     include(joinpath(@__DIR__, "TestCore3D.jl"))
     include(joinpath(@__DIR__, "TestForward1D.jl"))
     include(joinpath(@__DIR__, "TestForward2D.jl"))

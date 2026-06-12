@@ -47,7 +47,7 @@ include("VFSA3DMT.jl")
 #----- Exports: 3-D ModEM ------------------------------------------------#
 
 export Data, Model, ModEMData, ModEMModel
-export load_data_modem, make_nan_data, calc_rho_pha
+export load_data_modem, write_data_modem, make_nan_data, calc_rho_pha
 export read_mackie3d_model, load_model_modem, write_model_modem
 export chi2_and_rms
 

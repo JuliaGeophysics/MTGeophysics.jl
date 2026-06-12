@@ -131,7 +131,7 @@ mktempdir() do temp_dir
 
     example_run = VFSA2DMT(
         VFSA2DMTParams(
-            script_path = joinpath(temp_dir, \"run_vfsa2dmt.jl\"),
+            script_path = joinpath(temp_dir, "run_vfsa2dmt.jl"),
             data_path = benchmarks[1].observed_path,
             start_model_path = benchmarks[1].start_model_path,
             model_path = benchmarks[1].model_path,
