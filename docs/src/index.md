@@ -37,8 +37,10 @@ julia --project=. examples/run_vfsa2dmt.jl
 julia --project=. examples/run_vfsa3dmt.jl
 
 # Interactive 3-D viewers (requires GLMakie)
-julia --project=. examples/plot_model_3D.jl
-julia --project=. examples/plot_XY_slices.jl
-julia --project=. examples/plot_XZ_slices.jl
-julia --project=. examples/plot_YZ_slices.jl
+julia --project=. examples/plot_model_XYZ.jl
+julia --project=. examples/plot_model_XY_slices.jl
+julia --project=. examples/plot_model_XY_with_shapefiles.jl
+julia --project=. examples/plot_model_LL_with_shapefiles.jl
+julia --project=. examples/plot_model_XZ_slices.jl
+julia --project=. examples/plot_model_YZ_slices.jl
 ```

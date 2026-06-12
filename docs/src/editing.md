@@ -12,7 +12,7 @@ edit applies to the core model only or to the full model including lateral
 padding.
 
 ```bash
-julia --project=. examples/replace_slice_resistivity_scope.jl
+julia --project=. examples/manipulate_model_by_layers.jl
 ```
 
 ![Replace Slice Resistivity Viewer](assets/replace_slice_resistivity_scope.png)
@@ -60,7 +60,7 @@ Draw polygon zones on depth slices and replace resistivity within selected
 depth intervals. Supports undo, transition layers, and optional all-depths mode.
 
 ```bash
-julia --project=. examples/draw_and_replace_in_model.jl
+julia --project=. examples/manipulate_model_by_drawing.jl
 ```
 
 ![Draw and Replace Zone Editor](assets/draw_and_replace.png)

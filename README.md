@@ -67,12 +67,14 @@ MTGeophysics.jl/
 │   ├── response_2d.jl          # 2D forward response
 │   ├── run_vfsa2dmt.jl         # 2D VFSA inversion
 │   ├── run_vfsa3dmt.jl         # 3D VFSA inversion (requires ModEM)
-│   ├── plot_model_3D.jl        # Interactive 3D slice viewer
-│   ├── plot_XY_slices.jl       # XY depth-slice viewer
-│   ├── plot_XZ_slices.jl       # XZ cross-section viewer
-│   ├── plot_YZ_slices.jl       # YZ cross-section viewer
-│   ├── replace_slice_resistivity_scope.jl  # Bulk resistivity editing
-│   ├── draw_and_replace_in_model.jl        # Polygon zone editing
+│   ├── plot_model_XYZ.jl       # Interactive 3D slice viewer
+│   ├── plot_model_XY_slices.jl # XY depth-slice viewer
+│   ├── plot_model_XY_with_shapefiles.jl  # XY viewer with shapefile overlays
+│   ├── plot_model_LL_with_shapefiles.jl  # Lat/lon map view, any EPSG CRS
+│   ├── plot_model_XZ_slices.jl # XZ cross-section viewer
+│   ├── plot_model_YZ_slices.jl # YZ cross-section viewer
+│   ├── manipulate_model_by_layers.jl   # Bulk resistivity editing
+│   ├── manipulate_model_by_drawing.jl  # Polygon zone editing
 │   └── Cascadia/               # Example data (not tracked)
 ├── helpers/                    # Benchmark generation & post-processing
 │   ├── benchmarks_1d.jl        # Generate 1D benchmarks

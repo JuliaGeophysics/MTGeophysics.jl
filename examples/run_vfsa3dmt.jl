@@ -151,4 +151,4 @@ end
 #   m = load_ws3d_model(best_model)
 #   # Convert to linear for the ModEMModel viewer:
 #   m_modem = load_model_modem(best_model)
-#   # Then use plot_model_3D.jl or gl_modem_viewer() from examples/
+#   # Then use plot_model_XYZ.jl or gl_modem_viewer() from examples/

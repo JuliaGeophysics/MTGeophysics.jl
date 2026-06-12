@@ -7,6 +7,9 @@ module MTGeophysics
 
 using LinearAlgebra
 using Statistics
+using Shapefile
+using GeoInterface
+using Proj
 
 #----- 3-D ModEM I/O and misfit (existing code) ---------------------------#
 
@@ -17,6 +20,10 @@ include("Chi2RMS.jl")
 #----- Headless core/padding utilities (always available) ------------------#
 
 include("CoreUtils3D.jl")
+
+#----- Headless shapefile overlay utilities --------------------------------#
+
+include("ShapefileOverlay.jl")
 
 #----- WS3D format model I/O (log10 internal) -----------------------------#
 
@@ -55,6 +62,11 @@ export chi2_and_rms
 
 export edges_from_centers, core_indices, z_indices_for_max_depth
 export lateral_core_ranges, core_view
+
+#----- Exports: Shapefile overlay utilities --------------------------------#
+
+export detect_shapefile_crs, shapefile_coord_transform
+export load_shapefile_geometries, prepare_shapefiles
 
 #----- Exports: WS3D model I/O -------------------------------------------#
 

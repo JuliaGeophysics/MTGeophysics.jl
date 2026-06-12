@@ -13,6 +13,7 @@ include(joinpath(dirname(@__DIR__), "helpers", "benchmarks_2d.jl"))
 
     include(joinpath(@__DIR__, "TestIO3D.jl"))
     include(joinpath(@__DIR__, "TestCore3D.jl"))
+    include(joinpath(@__DIR__, "TestShapefileOverlay.jl"))
     include(joinpath(@__DIR__, "TestForward1D.jl"))
     include(joinpath(@__DIR__, "TestForward2D.jl"))
     include(joinpath(@__DIR__, "TestIO2D.jl"))

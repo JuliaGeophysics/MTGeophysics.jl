@@ -99,22 +99,51 @@ function z_indices_for_max_depth(zc::AbstractVector, max_depth::Real)
 end
 
 """
-    lateral_core_ranges(m; tol=0.2)
+    _npad_core_ranges(m)
+
+Core index ranges `(ix, iy)` derived from an explicit `m.npad` padding-cell
+count `(nx_pad, ny_pad)`, or `nothing` when `npad` is absent, zero, negative,
+or would produce an empty range — callers then fall back to width detection.
+"""
+function _npad_core_ranges(m)
+    hasproperty(m, :npad) || return nothing
+    npad = m.npad
+    length(npad) == 2 || return nothing
+    nx_pad, ny_pad = Int(npad[1]), Int(npad[2])
+    (nx_pad >= 0 && ny_pad >= 0) || return nothing
+    (nx_pad > 0 || ny_pad > 0) || return nothing
+    ix = (nx_pad + 1):(length(m.cx) - nx_pad)
+    iy = (ny_pad + 1):(length(m.cy) - ny_pad)
+    (isempty(ix) || isempty(iy)) && return nothing
+    return ix, iy
+end
+
+"""
+    lateral_core_ranges(m; tol=0.2, use_npad=true)
 
 Return `(ix, iy)` core index ranges for any model with `.cx` and `.cy` fields.
+
+When the model carries an `npad` field with the per-side padding cell counts
+`(nx_pad, ny_pad)` (as stored by `load_model_modem`), those counts are used
+directly. Models without usable `npad` information fall back to width-based
+`core_indices` detection. Pass `use_npad=false` to force width detection.
 """
-function lateral_core_ranges(m; tol::Real = 0.2)
+function lateral_core_ranges(m; tol::Real = 0.2, use_npad::Bool = true)
+    if use_npad
+        r = _npad_core_ranges(m)
+        isnothing(r) || return r
+    end
     ix = core_indices(m.cx; tol=tol)
     iy = core_indices(m.cy; tol=tol)
     return ix, iy
 end
 
 """
-    core_view(m; tol=0.2)
+    core_view(m; tol=0.2, use_npad=true)
 
 Return `(Rview, ix, iy)` where `Rview = @view m.A[ix, iy, :]`.
 """
-function core_view(m; tol::Real = 0.2)
-    ix, iy = lateral_core_ranges(m; tol=tol)
+function core_view(m; tol::Real = 0.2, use_npad::Bool = true)
+    ix, iy = lateral_core_ranges(m; tol=tol, use_npad=use_npad)
     return (@view m.A[ix, iy, :]), ix, iy
 end

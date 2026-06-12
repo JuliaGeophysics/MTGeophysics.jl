@@ -169,29 +169,47 @@ for the XY viewer). The `data_file` is only needed for the `"EPSG:3067"` and
 ### Full 3-D slice viewer
 
 ```powershell
-julia --project=. .\examples\plot_model_3D.jl
-julia --project=. .\examples\plot_model_3D.jl examples\Cascadia\cascad_half_inverse.ws examples\Cascadia\cascad_errfl5.dat
+julia --project=. .\examples\plot_model_XYZ.jl
+julia --project=. .\examples\plot_model_XYZ.jl examples\Cascadia\cascad_half_inverse.ws examples\Cascadia\cascad_errfl5.dat
 ```
 
 ### XY depth-slice viewer
 
 ```powershell
-julia --project=. .\examples\plot_XY_slices.jl
-julia --project=. .\examples\plot_XY_slices.jl examples\geoenergialoikka\best_model_chain01.rho examples\geoenergialoikka\data.dat
+julia --project=. .\examples\plot_model_XY_slices.jl
+julia --project=. .\examples\plot_model_XY_slices.jl examples\geoenergialoikka\best_model_chain01.rho examples\geoenergialoikka\data.dat
+```
+
+### XY depth-slice viewer with shapefile overlays
+
+Same viewer plus any number of shapefile overlays, configured in the
+`shapefiles` list at the top of the script:
+
+```powershell
+julia --project=. .\examples\plot_model_XY_with_shapefiles.jl
+```
+
+### Lat/lon map view with shapefiles (any projected CRS)
+
+Map view in WGS 84 lat/lon by default, switchable to any projected EPSG code
+(e.g. `EPSG:3067` for Finland, `EPSG:32610` / `EPSG:26910` for Cascadia):
+
+```powershell
+julia --project=. .\examples\plot_model_LL_with_shapefiles.jl
 ```
 
 ### XZ cross-section viewer
 
 ```powershell
-julia --project=. .\examples\plot_XZ_slices.jl
-julia --project=. .\examples\plot_XZ_slices.jl examples\Cascadia\cascad_half_inverse.ws examples\Cascadia\cascad_errfl5.dat
+julia --project=. .\examples\plot_model_XZ_slices.jl
+julia --project=. .\examples\plot_model_XZ_slices.jl examples\Cascadia\cascad_half_inverse.ws examples\Cascadia\cascad_errfl5.dat
 ```
 
 ### YZ cross-section viewer
 
 ```powershell
-julia --project=. .\examples\plot_YZ_slices.jl
-julia --project=. .\examples\plot_YZ_slices.jl examples\Cascadia\cascad_half_inverse.ws examples\Cascadia\cascad_errfl5.dat
+julia --project=. .\examples\plot_model_YZ_slices.jl
+julia --project=. .\examples\plot_model_YZ_slices.jl examples\Cascadia\cascad_half_inverse.ws examples\Cascadia\cascad_errfl5.dat
 ```
 
 In the slice-viewer scripts, switch the coordinate mode at the top of the file
@@ -201,13 +219,13 @@ to one of:
 - `"EPSG:4326"`
 - `"model"`
 
-## 8. Replace slice resistivity
+## 8. Manipulate model by layers
 
 Interactively replace resistivity below a chosen depth layer, with scope
 control (core-only or full model including padding):
 
 ```powershell
-julia --project=. .\examples\replace_slice_resistivity_scope.jl
+julia --project=. .\examples\manipulate_model_by_layers.jl
 ```
 
 Use the depth slider to pick a cutoff layer, enter a target resistivity and
@@ -215,16 +233,14 @@ optional blend percentage, then click **Apply Changes**. Toggle between
 core-only and full-model scope with the **Show Core Model / Show Full Model**
 button. Click **Save Model** to write the edited model to disk.
 
-## 9. Experimental editing scripts
+## 9. Manipulate model by drawing
 
-The repository also contains interactive editing scripts for manual model
-modification:
+Draw polygon zones on depth slices and replace resistivity within selected
+depth intervals, with undo and transition layers:
 
-- `examples/edit_model_by_slice.jl`
-- `examples/edit_model_by_drawing.jl`
-
-These are currently more development-oriented than the main workflows and may
-need local path adjustment before use.
+```powershell
+julia --project=. .\examples\manipulate_model_by_drawing.jl
+```
 
 ## 10. Recommended first session
 
@@ -242,5 +258,5 @@ julia --project=. .\examples\run_vfsa2dmt.jl
 Then, if you have downloaded the Cascadia dataset:
 
 ```powershell
-julia --project=. .\examples\plot_XY_slices.jl
+julia --project=. .\examples\plot_model_XY_slices.jl
 ```

@@ -41,4 +41,47 @@
         @test iz == 7:26
         @test length(iz) == 20
     end
+
+    @testset "npad-aware lateral_core_ranges" begin
+        dx = widths(npad_lo = 8, ncore = 30, npad_hi = 8, core_w = 1000.0, factor = 1.3)
+        dy = widths(npad_lo = 5, ncore = 40, npad_hi = 5, core_w = 1000.0, factor = 1.3)
+        cx = centers(dx)
+        cy = centers(dy)
+
+        m_npad = (cx = cx, cy = cy, npad = (8, 5))
+        ix, iy = lateral_core_ranges(m_npad)
+        @test ix == 9:38
+        @test iy == 6:45
+
+        m_plain = (cx = cx, cy = cy)
+        ix, iy = lateral_core_ranges(m_plain)
+        @test ix == 9:38
+        @test iy == 6:45
+
+        m_wrong = (cx = cx, cy = cy, npad = (10, 7))
+        ix, iy = lateral_core_ranges(m_wrong)
+        @test ix == 11:36
+        @test iy == 8:43
+
+        ix, iy = lateral_core_ranges(m_wrong; use_npad = false)
+        @test ix == 9:38
+        @test iy == 6:45
+
+        m_zero = (cx = cx, cy = cy, npad = (0, 0))
+        ix, iy = lateral_core_ranges(m_zero)
+        @test ix == 9:38
+        @test iy == 6:45
+
+        m_bogus = (cx = cx, cy = cy, npad = (25, 5))
+        ix, iy = lateral_core_ranges(m_bogus)
+        @test ix == 9:38
+        @test iy == 6:45
+
+        m_view = (cx = cx, cy = cy, npad = (8, 5),
+                  A = reshape(1.0:(length(cx) * length(cy) * 2), length(cx), length(cy), 2))
+        Rv, ixv, iyv = core_view(m_view)
+        @test ixv == 9:38
+        @test iyv == 6:45
+        @test size(Rv) == (30, 40, 2)
+    end
 end
