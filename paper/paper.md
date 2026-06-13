@@ -59,8 +59,8 @@ forward modelling and inversion to a final preferred subsurface model
 with quantified uncertainty. The package is designed as a research
 repository: its forward solvers, data structures, and inversion
 routines serve as reusable building blocks so that implementing new
-ideas — alternative parameterisations, hybrid inversion strategies,
-or novel uncertainty quantification schemes — is straightforward
+ideas (alternative parameterisations, hybrid inversion strategies,
+or novel uncertainty quantification schemes) is straightforward
 without rebuilding core MT tooling from scratch. Because Julia's type
 system and multiple dispatch make it straightforward to compose
 packages, MTGeophysics.jl is designed as a core component of a broader
@@ -70,7 +70,7 @@ natural foundation for extending classical MT workflows with modern
 numerical methods and scientific machine learning.
 
 The package targets MT researchers and students who want a unified,
-open-source toolkit that leverages Julia's [@Bezanson2017] strengths in
+open-source toolkit that builds on Julia's [@Bezanson2017] strengths in
 numerical computing, automatic differentiation, composability, and
 interactive graphics. It reads and writes standard ModEM file formats, enabling
 direct interoperability with the Fortran ModEM code used by many
@@ -95,11 +95,9 @@ with ensemble uncertainty quantification in both 2D and 3D.
 MTGeophysics.jl contributes a tightly integrated Julia-native package
 that covers 1D and 2D MT forward modelling, 2D and 3D VFSA
 inversion with ensemble uncertainty quantification, and interactive 3D
-model viewing with GIS overlay support. This combination is not
-available in any single existing package. The choice of Julia provides
+model viewing with GIS overlay support. The choice of Julia provides
 performance comparable to compiled languages while maintaining the
-interactivity and rapid prototyping advantages of interpreted
-environments.
+interactivity and rapid prototyping advantages of dynamic languages.
 
 # Software design
 
@@ -121,11 +119,7 @@ finite-difference forward engine; in 3D the inversion wraps the ModEM
 forward solver [@Kelbert2014], ensuring compatibility with established
 workflows. Multiple independent Markov chains run in parallel, and
 ensemble statistics (mean, median, standard deviation) are computed
-across chains to provide uncertainty estimates. Instead of producing a
-single deterministic model, the workflow generates a set of plausible
-models that explain the data comparably well, allowing geologists to
-interpret results while being explicitly aware of the inherent
-non-uniqueness.
+across chains to provide uncertainty estimates.
 
 Interactive visualization is handled through GLMakie, providing
 GPU-accelerated 3D slice viewers (XY, XZ, YZ, and combined) with
@@ -174,8 +168,8 @@ running 3000 iterations with four trial proposals per iteration
 (approximately 60 seconds per forward solve). The VFSA ensemble mean
 recovers the major conductive structures identified by deterministic
 inversion at both shallow (24--30 km) and deeper (59--74 km) depth
-ranges, and in several areas resolves geological boundaries more
-sharply than the smoothness-regularised NLCG result. The bottom row
+ranges, and in several areas produces sharper geological boundaries
+than the smoothness-regularised NLCG result. The bottom row
 shows the ensemble standard deviation, a per-voxel uncertainty
 estimate that no single deterministic inversion can provide. Regions
 of high standard deviation correspond to areas where the data poorly
@@ -183,8 +177,7 @@ constrain the model, giving interpreters direct information about
 which features are robust and which remain ambiguous. Because the
 stochastic workflow produces a distribution of plausible models rather
 than one "best" solution, it quantifies the non-uniqueness inherent
-in MT inversion and delivers spatially resolved confidence measures
-alongside the resistivity image.
+in MT inversion.
 
 ![3D VFSA benchmark on Cascadia field data. Top: ModEM NLCG deterministic inversion. Middle: VFSA ensemble mean from 9 independent chains. Bottom: ensemble standard deviation (uncertainty). Left column: 24--30 km depth. Right column: 59--74 km depth. The VFSA mean recovers the same major conductive features as the deterministic result while additionally providing spatially resolved uncertainty estimates.](VFSA3DBenchmark.png){#fig:cascadia}
 
@@ -224,8 +217,9 @@ reviewed, tested, and verified by the author for correctness.
 
 # Acknowledgements
 
-The author thanks the Geological Survey of Finland (GTK) for supporting
-this work. The COMMEMI benchmark models used for validation were defined
-by @Zhdanov1997.
+This work was supported by the Research Council of Finland
+(project 359261). The author wishes to acknowledge CSC – IT Center for
+Science, Finland, for computational resources. The COMMEMI benchmark
+models used for validation were defined by @Zhdanov1997.
 
 # References

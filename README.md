@@ -3,30 +3,9 @@
 <p align="center"><em>Magnetotelluric modelling, inversion, and visualization workflows in Julia.</em></p>
 
 <p align="center">
-	<a href="https://juliageophysics.github.io/MTGeophysics.jl/dev/">
-		<img src="https://img.shields.io/badge/Documentation-Visit%20Site-0A7EA4?style=for-the-badge&logo=readthedocs&logoColor=white" alt="Documentation" />
-	</a>
-	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/actions/workflows/Documenter.yml">
-		<img src="https://img.shields.io/github/actions/workflow/status/JuliaGeophysics/MTGeophysics.jl/Documenter.yml?branch=main&label=Docs%20Build&style=for-the-badge" alt="Docs Build" />
-	</a>
-	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/releases">
-		<img src="https://img.shields.io/github/v/release/JuliaGeophysics/MTGeophysics.jl?style=for-the-badge&label=Release" alt="Release" />
-	</a>
-</p>
-
-<p align="center">
-	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/blob/main/LICENSE.md">
-		<img src="https://img.shields.io/github/license/JuliaGeophysics/MTGeophysics.jl?style=flat-square" alt="License" />
-	</a>
-	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/stargazers">
-		<img src="https://img.shields.io/github/stars/JuliaGeophysics/MTGeophysics.jl?style=flat-square" alt="GitHub stars" />
-	</a>
-	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/issues">
-		<img src="https://img.shields.io/github/issues/JuliaGeophysics/MTGeophysics.jl?style=flat-square" alt="Issues" />
-	</a>
-	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/pulls">
-		<img src="https://img.shields.io/github/issues-pr/JuliaGeophysics/MTGeophysics.jl?style=flat-square" alt="Pull requests" />
-	</a>
+	<a href="https://juliageophysics.github.io/MTGeophysics.jl/dev/">Documentation</a> |
+	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/issues">Issues</a> |
+	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/releases">Releases</a>
 </p>
 
 ---
@@ -46,80 +25,76 @@
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
 
-## Repository structure
-
-```
-MTGeophysics.jl/
-├── src/                        # Package source
-│   ├── MTGeophysics.jl         # Main module (includes & exports)
-│   ├── MTGeophysics1D.jl       # 1D forward solvers
-│   ├── MTGeophysics2D.jl       # 2D forward solvers
-│   ├── VFSA2DMT.jl             # 2D VFSA inversion engine
-│   ├── VFSA3DMT.jl             # 3D VFSA inversion engine
-│   ├── Model.jl                # ModEM 3D model I/O
-│   ├── Data.jl                 # ModEM 3D data I/O
-│   ├── WS3DModel.jl            # WS3D model format I/O
-│   ├── CoreUtils3D.jl          # Core/padding detection utilities
-│   ├── PlotModel.jl            # Visualization helpers (GLMakie)
-│   └── Chi2RMS.jl              # Misfit statistics
-├── examples/                   # Runnable example scripts
-│   ├── response_1d.jl          # 1D forward response
-│   ├── response_2d.jl          # 2D forward response
-│   ├── run_vfsa2dmt.jl         # 2D VFSA inversion
-│   ├── run_vfsa3dmt.jl         # 3D VFSA inversion (requires ModEM)
-│   ├── plot_model_XYZ.jl       # Interactive 3D slice viewer
-│   ├── plot_model_XY_slices.jl # XY depth-slice viewer
-│   ├── plot_model_XY_with_shapefiles.jl  # XY viewer with shapefile overlays
-│   ├── plot_model_LL_with_shapefiles.jl  # Lat/lon map view, any EPSG CRS
-│   ├── plot_model_XZ_slices.jl # XZ cross-section viewer
-│   ├── plot_model_YZ_slices.jl # YZ cross-section viewer
-│   ├── manipulate_model_by_layers.jl   # Bulk resistivity editing
-│   ├── manipulate_model_by_drawing.jl  # Polygon zone editing
-│   └── Cascadia/               # Example data (not tracked)
-├── helpers/                    # Benchmark generation & post-processing
-│   ├── benchmarks_1d.jl        # Generate 1D benchmarks
-│   ├── benchmarks_2d.jl        # Generate 2D benchmarks
-│   ├── run_statistics_2d.jl    # 2D ensemble statistics
-│   ├── run_statistics_3D.jl    # 3D ensemble statistics
-│   └── make_gif_2d.jl          # 2D convergence animation
-├── docs/                       # Documenter.jl site
-├── test/                       # Unit tests
-├── paper/                      # JOSS paper
-├── Project.toml
-└── README.md
-```
-
-## Quick example: 2D VFSA inversion
+## Quick start: 2D benchmark + VFSA inversion
 
 > Note: This is a quick demonstration workflow. For production-quality inversion, tune key settings such as the number of VFSA iterations, number of chains, cooling schedule, regularization choices, and uncertainty/ensemble controls for your survey and model size.
 
-1. Build a synthetic 2D benchmark model and generate inputs.
+**1. Generate the COMMEMI 2D benchmarks.** Writes the true model, halfspace starting model, reference data template, and noisy observed data into `examples/0COMEMI2D-I/`, `-II/`, and `-III/`.
 
 ```
 julia --project=. helpers/benchmarks_2d.jl
 ```
 
-2. Run the VFSA inversion workflow for the benchmark.
+**2. (Optional) Inspect the 2D forward response** of the benchmark model.
+
+```
+julia --project=. examples/response_2d.jl
+```
+
+**3. Run the 2D VFSA inversion** (multi-chain ensemble, RBF parameterization) on the COMMEMI-I benchmark. Results are written to a timestamped `examples/run_VFSA2DMT_<timestamp>/` directory containing per-chain logs, best models, and ensemble mean/median/std.
 
 ```
 julia --project=. examples/run_vfsa2dmt.jl
 ```
 
-3. Compute ensemble statistics for posterior models and misfit summaries.
+**4. Compute ensemble statistics** (posterior mean/median/std and misfit summaries).
 
 ```
-julia --project=. helpers/run_statistics_2d.jl
+julia --project=. helpers/run_statistics_2d.jl examples/run_VFSA2DMT_<timestamp>
 ```
 
-4. Create a GIF to visualize inversion evolution through iterations.
+**5. Create a convergence GIF** to visualize model evolution across iterations (requires `keep_models = true`).
 
 ```
-julia --project=. helpers/make_gif_2d.jl
+julia --project=. helpers/make_gif_2d.jl examples/run_VFSA2DMT_<timestamp>
 ```
+
+From Julia, the inversion can also be driven directly:
+
+```julia
+using MTGeophysics
+
+result = VFSA2DMT(
+    VFSA2DMTParams(
+        script_path      = @__FILE__,
+        start_model_path = "examples/0COMEMI2D-I/Comemi2D1.ini",
+        data_path        = "examples/0COMEMI2D-I/Comemi2D1.obs",
+        config = VFSA2DMTConfig(
+            n_chains    = 2,
+            n_ctrl      = 400,
+            max_iter    = 3000,
+            n_trials    = 4,
+            log_bounds  = (0.0, 4.0),
+            seed        = 20260308,
+            keep_models = true,
+        ),
+    ),
+)
+```
+
+See the [documentation](https://juliageophysics.github.io/MTGeophysics.jl/dev/) for the full 2D/3D workflow, configuration options, and visualization examples.
 
 # Research using this code 
 
 - Mishra, P. K., Kamm, J., Patzer, C., Autio, U., and Sen, M. K.: Building uncertainty-aware subsurface models with 3D magnetotelluric inversion, EGU General Assembly 2026, Vienna, Austria, 3–8 May 2026, EGU26-4367, https://doi.org/10.5194/egusphere-egu26-4367, 2026. 
+
+- Mishra, P. K.: MTGeophysics.jl: A software repository for magnetotelluric research and application, 27th Electromagnetic Induction Workshop (EMIW 2026), St. John's, Newfoundland and Labrador, Canada, 2026. 
+
+- Mishra, P. K., Kamm, J., Patzer, C., Autio, U., Xiao, L., and Sen, M. K.: Stochastic model exploration in three-dimensional inversion of magnetotelluric data, 27th Electromagnetic Induction Workshop (EMIW 2026), St. John's, Newfoundland and Labrador, Canada, 2026. 
+
+- Mishra, P. K.: MTGeophysics.jl: A software repository for magnetotelluric research and application, JuliaCon 2026. 
+
+- Patzer, C., Mishra, P. K., and Kamm, J.: Studying the Wiborg Rapakivi Batholith in SE Finland, 27th Electromagnetic Induction Workshop (EMIW 2026), St. John's, Newfoundland and Labrador, Canada, 2026. 
 
 
 
