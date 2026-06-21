@@ -46,3 +46,6 @@ coverage/
 tmp/
 logs/
 
+# Local example scripts
+examples/create_mesh3D.jl
+

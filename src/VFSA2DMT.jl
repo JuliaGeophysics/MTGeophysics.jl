@@ -21,10 +21,21 @@ Base.@kwdef struct VFSA2DMTConfig
     log_bounds::Tuple{Float64, Float64} = (0.0, 5.0)
     frac_update_controls::Float64 = 1.0
     step_scale::Float64 = 0.11
+    # Proposal and acceptance use SEPARATE temperatures by design — do not unify
+    # them. The proposal temperature feeds the normalized generator `_vfsa_y`, whose
+    # natural range is (0,1] (step-size units), while the acceptance temperature
+    # sits on the reduced-χ² (rms²) energy scale below. A single temperature cannot
+    # be correctly scaled for both. (Canonical Ingber VFSA/ASA likewise keeps the
+    # generating and acceptance temperatures distinct.)
     t0_prop::Float64 = 1.0
     tf_prop::Float64 = 1e-3
-    t0_acc::Float64 = 1.0
-    tf_acc::Float64 = 1e-2
+    # Acceptance temperatures are now on the ABSOLUTE reduced-χ² (rms²) energy
+    # scale used by the corrected Metropolis test (dE = rms_trial² - rms_current²),
+    # NOT the old relative Δχ²/χ² scale. Pick t0_acc near the typical |dE| of early
+    # proposals for high early acceptance; the old 1.0→1e-2 range was tuned to the
+    # relative energy and is far too cold here. Retune per dataset if needed.
+    t0_acc::Float64 = 50.0
+    tf_acc::Float64 = 5e-2
     seed::Int = 20260308
     pad_tolerance::Float64 = 0.20
     padding_decay_length::Float64 = 8.0
@@ -565,9 +576,13 @@ function _write_trials_header(path::AbstractString, config::VFSA2DMTConfig, time
             "  n_trials=", config.n_trials,
         )
         println(io, repeat("-", 280))
+        # CORRECTED: replaced the relative-energy column (dRel = Δχ²/χ²) with the
+        # acceptance audit trail actually used now — dE_rms2 (Δ reduced-χ² = Δrms²),
+        # Pacc (Metropolis probability), Uacc (random draw) and Acc (1/0 = this
+        # individual trial accepted/rejected, no longer a best-of-N flag).
         @printf(
             io,
-            "%6s %8s %8s %12s %12s %14s %11s %14s %12s %10s %12s %10s %12s %11s %8s %8s %s %s\n",
+            "%6s %8s %8s %12s %12s %14s %11s %14s %12s %12s %10s %10s %10s %10s %12s %11s %5s %7s %s %s\n",
             "Chain",
             "Iter",
             "Trial",
@@ -577,12 +592,14 @@ function _write_trials_header(path::AbstractString, config::VFSA2DMTConfig, time
             "RMSBefore",
             "Chi2Prop",
             "dChi2",
-            "dRel",
             "RMSProp",
             "dRMS",
+            "dE_rms2",
+            "Pacc",
+            "Uacc",
             "Chi2Best",
             "RMSBest",
-            "AccIdx",
+            "Acc",
             "UpdCtrl",
             "Model",
             "Data",
@@ -602,12 +619,14 @@ function _append_trial_row(
     rms_before::Float64,
     chi2_prop::Float64,
     dchi2::Float64,
-    dchi2_rel::Float64,
     rms_prop::Float64,
     drms::Float64,
+    dE::Float64,
+    p_acc::Float64,
+    u_acc::Float64,
     chi2_best::Float64,
     rms_best::Float64,
-    accepted_index::Int,
+    acc::Int,
     updated_controls::Int,
     model_rel::String,
     data_rel::String,
@@ -615,7 +634,7 @@ function _append_trial_row(
     open(path, "a") do io
         @printf(
             io,
-            "%6d %8d %8d %12.4g %12.4g %14.4f %11.5f %14.4f %12.4f %10.4f %12.5f %10.5f %12.4f %11.5f %8d %8d %s %s\n",
+            "%6d %8d %8d %12.4g %12.4g %14.4f %11.5f %14.4f %12.4f %12.5f %10.5f %10.5f %10.5f %10.5f %12.4f %11.5f %5d %7d %s %s\n",
             chain,
             iteration,
             trial,
@@ -625,12 +644,14 @@ function _append_trial_row(
             rms_before,
             chi2_prop,
             dchi2,
-            dchi2_rel,
             rms_prop,
             drms,
+            dE,
+            p_acc,
+            u_acc,
             chi2_best,
             rms_best,
-            accepted_index,
+            acc,
             updated_controls,
             isempty(model_rel) ? "-" : model_rel,
             isempty(data_rel) ? "-" : data_rel,
@@ -651,20 +672,23 @@ function _write_iteration_header(path::AbstractString, config::VFSA2DMTConfig, t
             "  n_trials=", config.n_trials,
         )
         println(io, repeat("-", 210))
+        # CORRECTED: Chi2Curr/dChi2 now describe the CURRENT accepted state after the
+        # iteration, and Nacc = number of accepted trials (0..n_trials) instead of the
+        # old single-flag "AccIdx" that only described the best-of-N candidate.
         @printf(
             io,
-            "%6s %8s %12s %12s %14s %12s %12s %11s %12s %11s %8s %s\n",
+            "%6s %8s %12s %12s %14s %12s %12s %11s %12s %11s %6s %s\n",
             "Chain",
             "Iter",
             "Tprop",
             "Tacc",
-            "Chi2Prop",
+            "Chi2Curr",
             "dChi2",
-            "RMSProp",
+            "RMSCurr",
             "CurrRMS",
             "Chi2Best",
             "RMSBest",
-            "AccIdx",
+            "Nacc",
             "Model",
         )
         println(io, repeat("-", 210))
@@ -677,30 +701,30 @@ function _append_iteration_row(
     iteration::Int,
     tprop::Float64,
     tacc::Float64,
-    chi2_prop::Float64,
+    chi2_curr::Float64,
     dchi2::Float64,
-    rms_prop::Float64,
+    rms_curr::Float64,
     current_rms::Float64,
     chi2_best::Float64,
     rms_best::Float64,
-    accepted_index::Int,
+    nacc::Int,
     model_rel::String,
 )
     open(path, "a") do io
         @printf(
             io,
-            "%6d %8d %12.4g %12.4g %14.4f %12.4f %12.5f %11.5f %12.4f %11.5f %8d %s\n",
+            "%6d %8d %12.4g %12.4g %14.4f %12.4f %12.5f %11.5f %12.4f %11.5f %6d %s\n",
             chain,
             iteration,
             tprop,
             tacc,
-            chi2_prop,
+            chi2_curr,
             dchi2,
-            rms_prop,
+            rms_curr,
             current_rms,
             chi2_best,
             rms_best,
-            accepted_index,
+            nacc,
             isempty(model_rel) ? "-" : model_rel,
         )
     end
@@ -1164,8 +1188,22 @@ function _run_mt2d_chain(
             total_iterations = config.max_iter,
         )
 
+        # ------------------------------------------------------------------ #
+        # CORRECTED VFSA ACCEPTANCE (standard per-trial Metropolis).
+        #
+        # Was: keep the best-of-n_trials proposal (minimum χ²) and run one
+        # acceptance test on that minimum using a relative energy Δχ²/χ². That
+        # greedy best-of-N test made rejection almost impossible. Now each trial
+        # is tested INDEPENDENTLY against the current accepted state, the chain
+        # advances within the iteration, the global best is only RECORDED, and
+        # the energy is an ABSOLUTE change in reduced χ² (rms²) so it matches the
+        # Tacc scale. Mirrors the reference MATLAB VFSA and the 3D driver.
+        # ------------------------------------------------------------------ #
+        n_accepted_iter = 0
+        last_accepted_trial = 0
         trial_cache = NamedTuple[]
         for trial in 1:config.n_trials
+            # Propose from the CURRENT accepted state (advances within the iteration).
             trial_delta = copy(current_delta)
             updated = _propose_controls!(
                 trial_delta,
@@ -1199,43 +1237,52 @@ function _run_mt2d_chain(
                 write_model2d(joinpath(chain_dir, _vfsa2d_trial_model_filename(iteration, trial)), mesh, trial_model.resistivity; title = "VFSA $(chain_slug) trial model")
             end
 
+            # Absolute reduced-χ² (rms²) energy against the current accepted state.
+            # Downhill accepted unconditionally; uphill via exp(-dE/Tacc). A failed
+            # forward gives dE = Inf and is never accepted (guarded by isfinite).
+            dE = trial_fit.rms^2 - current_fit.rms^2
+            u_acc = rand(rng)
+            # p_acc is a true probability: 1.0 for downhill (dE<=0, auto-accept),
+            # exp(-dE/Tacc) in (0,1) for uphill. This is exactly the MATLAB test
+            # `(delE <= 0) || (u2 < exp(-delE/tt))`, where the leading `delE<=0`
+            # clause short-circuits and the (>1) exp value is never used; we just
+            # make it explicit so the logged Pacc column stays a finite [0,1] value.
+            p_acc = dE <= 0 ? 1.0 : exp(-dE / max(tacceptance, 1e-12))
+            accept_trial = isfinite(trial_fit.chi2) && (u_acc < p_acc)
+
+            if accept_trial
+                current_delta .= trial_delta
+                current_resistivity = trial_model.resistivity
+                current_response = trial_response
+                current_data = trial_data
+                current_fit = trial_fit
+                n_accepted_iter += 1
+                last_accepted_trial = trial
+                if current_fit.chi2 < best_fit.chi2
+                    best_resistivity = copy(current_resistivity)
+                    best_response = current_response
+                    best_data = current_data
+                    best_fit = current_fit
+                    write_model2d(best_model_path, mesh, best_resistivity; title = "Best $(chain_slug) model")
+                    write_data2d(best_data_path, best_data)
+                end
+            end
+
             push!(
                 trial_cache,
                 (
                     trial = trial,
                     updated_controls = length(updated),
-                    delta = trial_delta,
-                    resistivity = trial_model.resistivity,
-                    response = trial_response,
-                    data = trial_data,
                     fit = trial_fit,
+                    dE = dE,
+                    p_acc = p_acc,
+                    u_acc = u_acc,
+                    accepted = accept_trial,
+                    chi2_best = best_fit.chi2,
+                    rms_best = best_fit.rms,
                     model_rel = model_rel,
                 ),
             )
-        end
-
-        best_trial_index = argmin([trial.fit.chi2 for trial in trial_cache])
-        best_trial = trial_cache[best_trial_index]
-        delta_chi2 = best_trial.fit.chi2 - current_fit.chi2
-        delta_chi2_rel = delta_chi2 / max(current_fit.chi2, eps(Float64))
-        accept = isfinite(best_trial.fit.chi2) &&
-                 ((delta_chi2_rel <= 0) || (rand(rng) < exp(-delta_chi2_rel / max(tacceptance, 1e-12))))
-        accepted_index = accept ? best_trial_index : 0
-
-        if accept
-            current_delta .= best_trial.delta
-            current_resistivity = best_trial.resistivity
-            current_response = best_trial.response
-            current_data = best_trial.data
-            current_fit = best_trial.fit
-            if current_fit.chi2 < best_fit.chi2
-                best_resistivity = copy(current_resistivity)
-                best_response = current_response
-                best_data = current_data
-                best_fit = current_fit
-                write_model2d(best_model_path, mesh, best_resistivity; title = "Best $(chain_slug) model")
-                write_data2d(best_data_path, best_data)
-            end
         end
 
         # Save best-so-far snapshot at configured intervals (for convergence GIF).
@@ -1256,34 +1303,38 @@ function _run_mt2d_chain(
                 rms_before = rms_before_iter,
                 chi2_prop = trial.fit.chi2,
                 dchi2 = trial.fit.chi2 - chi2_before_iter,
-                dchi2_rel = (trial.fit.chi2 - chi2_before_iter) / max(chi2_before_iter, eps(Float64)),
                 rms_prop = trial.fit.rms,
                 drms = trial.fit.rms - rms_before_iter,
-                chi2_best = best_fit.chi2,
-                rms_best = best_fit.rms,
-                accepted_index = trial.trial == best_trial_index ? accepted_index : 0,
+                dE = trial.dE,
+                p_acc = trial.p_acc,
+                u_acc = trial.u_acc,
+                chi2_best = trial.chi2_best,
+                rms_best = trial.rms_best,
+                acc = trial.accepted ? 1 : 0,
                 updated_controls = trial.updated_controls,
                 model_rel = trial.model_rel,
                 data_rel = "",
             )
         end
 
+        # accepted_trial now holds the last accepted trial index (0 if none) and
+        # `accepted` is true when the iteration accepted at least one proposal.
         push!(
             iteration_records,
             MT2DIterationRecord(
                 chain = chain_id,
                 iteration = iteration,
-                accepted_trial = accepted_index,
+                accepted_trial = last_accepted_trial,
                 tproposal = tproposal,
                 tacceptance = tacceptance,
-                proposal_chi2 = best_trial.fit.chi2,
-                proposal_rms = best_trial.fit.rms,
+                proposal_chi2 = current_fit.chi2,
+                proposal_rms = current_fit.rms,
                 current_chi2 = current_fit.chi2,
                 current_rms = current_fit.rms,
                 best_chi2 = best_fit.chi2,
                 best_rms = best_fit.rms,
-                delta_chi2 = delta_chi2,
-                accepted = accept,
+                delta_chi2 = current_fit.chi2 - chi2_before_iter,
+                accepted = n_accepted_iter > 0,
             ),
         )
 
@@ -1293,14 +1344,15 @@ function _run_mt2d_chain(
             iteration = iteration,
             tprop = tproposal,
             tacc = tacceptance,
-            chi2_prop = best_trial.fit.chi2,
-            dchi2 = delta_chi2,
-            rms_prop = best_trial.fit.rms,
+            chi2_curr = current_fit.chi2,
+            dchi2 = current_fit.chi2 - chi2_before_iter,
+            rms_curr = current_fit.rms,
             current_rms = current_fit.rms,
             chi2_best = best_fit.chi2,
             rms_best = best_fit.rms,
-            accepted_index = accepted_index,
-            model_rel = best_trial.model_rel,
+            nacc = n_accepted_iter,
+            model_rel = last_accepted_trial > 0 ?
+                joinpath(chain_slug, _vfsa2d_trial_model_filename(iteration, last_accepted_trial)) : "",
         )
         _print_vfsa_progress_bar(chain_id, iteration, config.max_iter, current_fit.rms, best_fit.rms)
     end

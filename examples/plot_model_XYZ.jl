@@ -20,17 +20,17 @@ include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
 # =========================
 # Paths may be passed on the command line; otherwise the defaults below are used:
 #   julia --project=. examples/plot_model_XYZ.jl [model_file] [data_file]
-model_file = length(ARGS) >= 1 ? ARGS[1] : joinpath(@__DIR__, "Cascadia", "cascad_half_inverse.ws")
-data_file  = length(ARGS) >= 2 ? ARGS[2] : joinpath(@__DIR__, "Cascadia", "cascad_errfl5.dat")   # needed for EPSG:3067 / EPSG:4326
+model_file = length(ARGS) >= 1 ? ARGS[1] : joinpath(@__DIR__, "geoenergialoikka", "best_model_chain01.rho")
+data_file  = length(ARGS) >= 2 ? ARGS[2] : joinpath(@__DIR__, "geoenergialoikka", "data.dat")   # needed for EPSG:3067 / EPSG:4326
 
 # you can add your shapefiles here 
-shapefile_path = []
-shapefile_path = joinpath(@__DIR__, "gis", "Tnew", "Tnew.shp")
+shapefile_path = joinpath(@__DIR__, "geoenergialoikka", "BatholithOutline", "BatholithOutline.shp")
+#shapefile_path = joinpath(@__DIR__, "gis", "Tnew", "Tnew.shp")
 
 log10_scale = true
 colormap = :Spectral
-resistivity_range = (1.0, 4.0)
-max_depth = 400000.0
+resistivity_range = (0.0, 5.0)
+max_depth = 40000.0
 show_padding = false
 pad_tolerance = 0.2
 viewer_figsize = (1800, 920)      # interactive viewer window size (points)

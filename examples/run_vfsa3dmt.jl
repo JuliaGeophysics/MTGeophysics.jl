@@ -1,19 +1,10 @@
-# Example: 3D VFSA MT Inversion
-#
-# This script demonstrates how to set up and run a 3D VFSA inversion
-# with MTGeophysics.jl using an example dataset bundled with the repository.
-#
-# IMPORTANT: This example requires the external ModEM forward solver
-# and an MPI runtime (e.g. OpenMPI or MPICH).
-#
-# The model and data paths are defined below relative to this script.
+# example: 3D VFSA MT inversion on the bundled dataset
+# needs the external ModEM forward solver and an MPI runtime (OpenMPI or MPICH)
 
 using MTGeophysics
 
-# --------------------------------------------------------------------------
-# User-configurable paths
-# --------------------------------------------------------------------------
-# These resolve relative to the location of this script.
+#---------- user-configurable paths ----------
+# resolve relative to this script
 const START_MODEL_PATH = normpath(@__DIR__, "geoenergialoikka", "model.rho")
 const OBSERVED_DATA_PATH = normpath(@__DIR__, "geoenergialoikka", "data.dat")
 const MODEM_EXECUTABLE = "/usr/local/bin/Mod3DMT_2025"
@@ -32,54 +23,52 @@ function _print_preflight_summary(start_model::AbstractString, observed_data::Ab
     println("  Core cell widths (x median / y median): $(median(m.dx[ix])) / $(median(m.dy[iy]))")
 end
 
-# --------------------------------------------------------------------------
-# Resolve input paths
-# --------------------------------------------------------------------------
+#---------- resolve input paths ----------
 start_model = START_MODEL_PATH
 observed_data = OBSERVED_DATA_PATH
 
-# Verify files exist
+# verify files exist
 for (label, path) in [("Starting model", start_model), ("Observed data", observed_data)]
     if !isfile(path)
         error("$label not found: $path")
     end
 end
 
-# --------------------------------------------------------------------------
-# Configure the 3D VFSA inversion
-# --------------------------------------------------------------------------
+#---------- configure the inversion ----------
 cfg = VFSA3DMTConfig(
-    nchains               = 1,          # number of independent Markov chains
-    nprocs                = 21,         # MPI processes for ModEM forward calls
+    nchains               = 1,          # independent markov chains
+    nprocs                = 41,         # MPI processes for ModEM forward calls
     mpirun_cmd            = "mpirun",
     modem_exe             = MODEM_EXECUTABLE,
-    out_root              = "runs",     # scratch dir, created next to the model file
+    out_root              = "runs",     # run dir base, seed appended -> runs_<seed>, next to the model file
     n_ctrl                = 900,        # RBF control points in the core
+    frac_update_controls  = 0.05,       # controls perturbed per trial (~45 of 900), local refinement not whole-model redraw
     log_bounds            = (0.0, 5.0), # log10(Ω·m) bounds
-    step_scale            = 0.05,       # VFSA proposal step size
-    max_iter              = 3000,       # total VFSA iterations (use 10-50 for smoke test)
+    step_scale            = 1.0,        # proposal step = step_scale × bound width
+    max_iter              = 3000,       # iteration cap, stops earlier if target_rms is reached
     n_trials              = 4,          # trial proposals per iteration
-    T0_prop               = 1.0,        # initial proposal temperature
-    Tf_prop               = 1e-3,       # final proposal temperature
-    T0_acc                = 1.0,        # initial acceptance temperature
-    Tf_acc                = 1e-3,       # final acceptance temperature
-    seed                  = 1911,       # random seed for reproducibility
-    padding_decay_length  = 10.0,       # horizontal padding blend (in cell widths)
-    keep_models           = true,       # keep all trial model files
+    #---------- decoupled temperatures ----------
+    # generating temp (T0/cooling_ak) drives the proposal on the parameter scale
+    # acceptance temp (Tacc0/cooling_ak_acc) drives exp(-dE/Tacc) on the rms^2 scale
+    T0                    = 1.0,        # generating temp, ~1 = full-width exploration
+    cooling_ak            = 2.0e-4,     # generating cooling constant (rate ≈ 0.986/iter)
+    Tacc0                 = 4.0,        # acceptance temp, a few × typical uphill dE (rms^2=chi2/N scale, dE~O(1))
+    cooling_ak_acc        = 4.0e-4,     # acceptance cooling constant
+    target_rms            = 3.0,        # stop once best rms ≤ this
+    seed                  = 1911,       # rng seed
+    padding_decay_length  = 10.0,       # horizontal padding blend in cell widths
+    keep_models           = true,       # keep all trial model files (ignored when model_save_every>0)
     keep_dpred            = false,      # discard predicted data files to save space
+    model_save_every      = 100,        # only retain trial models every 100 iters (+ best), bounds disk use
 )
 
-# --------------------------------------------------------------------------
-# Optional preflight mode for debugging input meshes without ModEM
-# --------------------------------------------------------------------------
+#---------- optional preflight (inspect mesh without ModEM) ----------
 if get(ENV, "MTG_PREFLIGHT_ONLY", "0") == "1"
     _print_preflight_summary(start_model, observed_data, cfg)
     exit(0)
 end
 
-# --------------------------------------------------------------------------
-# Check that the external ModEM solver is available
-# --------------------------------------------------------------------------
+#---------- check the ModEM solver is available ----------
 modem_exe = cfg.modem_exe
 
 modem_found = try
@@ -115,9 +104,7 @@ if !modem_found
     exit(1)
 end
 
-# --------------------------------------------------------------------------
-# Run the inversion
-# --------------------------------------------------------------------------
+#---------- run the inversion ----------
 println("Starting 3D VFSA MT inversion...")
 println("  Model:  $start_model")
 println("  Data:   $observed_data")
@@ -131,24 +118,18 @@ println("Inversion complete.")
 println("  Best model : $best_model")
 println("  Iteration log: $iter_log")
 
-# --------------------------------------------------------------------------
-# (Optional) Run ensemble statistics if multiple chains were used
-# --------------------------------------------------------------------------
+#---------- optional ensemble statistics for multi-chain runs ----------
 if cfg.nchains > 1
     println()
     println("Computing ensemble statistics...")
-    mean_path, median_path, std_path = AnalyseEnsemble3D(dirname(start_model))
+    mean_path, median_path, std_path = AnalyseEnsemble3D(dirname(best_model))
     println("  Mean   model: $mean_path")
     println("  Median model: $median_path")
     println("  Std    model: $std_path")
 end
 
-# --------------------------------------------------------------------------
-# (Optional) Visualize the best model using the existing 3D viewer
-# --------------------------------------------------------------------------
-# If GLMakie is available, you can load and view the result:
-#
+#---------- optional viewing of the best model ----------
+# if GLMakie is available:
 #   m = load_ws3d_model(best_model)
-#   # Convert to linear for the ModEMModel viewer:
-#   m_modem = load_model_modem(best_model)
-#   # Then use plot_model_XYZ.jl or gl_modem_viewer() from examples/
+#   m_modem = load_model_modem(best_model)   # linear for the ModEMModel viewer
+#   # then use plot_model_XYZ.jl or gl_modem_viewer() from examples/
