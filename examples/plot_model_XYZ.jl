@@ -25,11 +25,11 @@ data_file  = length(ARGS) >= 2 ? ARGS[2] : joinpath(@__DIR__, "geoenergialoikka"
 
 # you can add your shapefiles here 
 shapefile_path = joinpath(@__DIR__, "geoenergialoikka", "BatholithOutline", "BatholithOutline.shp")
-#shapefile_path = joinpath(@__DIR__, "gis", "Tnew", "Tnew.shp")
+#shapefile_path = joinpath(@__DIR__, "geoenergialoikka", "MTSites", "MTSites.shp")
 
 log10_scale = true
 colormap = :Spectral
-resistivity_range = (0.0, 5.0)
+resistivity_range = (0.0, 4.0)
 max_depth = 40000.0
 show_padding = false
 pad_tolerance = 0.2
