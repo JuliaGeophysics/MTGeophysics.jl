@@ -304,6 +304,23 @@ function _build_model_in_crs(M, d, crs::AbstractString, crs_extent = nothing)
     end
 end
 
+# ---------- station locations in the chosen plot CRS ----------
+
+function _stations_in_crs(d, crs::AbstractString)
+    isnothing(d) && return (Float64[], Float64[])
+    crs_up = uppercase(strip(crs))
+    if crs_up == "MODEL"
+        return (collect(Float64.(d.y)), collect(Float64.(d.x)))
+    elseif crs_up == "EPSG:4326"
+        return (collect(Float64.(d.loc[:, 2])), collect(Float64.(d.loc[:, 1])))
+    elseif crs_up == "EPSG:3067"
+        northing, easting = _latlon_to_epsg3067(collect(Float64.(d.loc[:, 1])), collect(Float64.(d.loc[:, 2])))
+        return (collect(Float64.(easting)), collect(Float64.(northing)))
+    else
+        return (Float64[], Float64[])
+    end
+end
+
 # ---------- WKT strings for .prj files ----------
 
 function _default_wgs84_wkt()
@@ -493,7 +510,9 @@ function depth_slice_viewer(
     export_crs::String = "model",
     gis_output_dir::String = "",
     qml_source_path::String = "",
-    lyrx_source_path::String = ""
+    lyrx_source_path::String = "",
+    site_x::Vector{Float64} = Float64[],
+    site_y::Vector{Float64} = Float64[]
 )
     x_all = M.cx
     y_all = M.cy
@@ -579,6 +598,8 @@ function depth_slice_viewer(
     hm = heatmap!(ax, current_y_edges[], current_x_edges[], slice_data,
                   colormap = current_colormap,
                   colorrange = (cmin, cmax))
+
+    isempty(site_x) || scatter!(ax, site_x, site_y; color = :black, marker = :circle, markersize = 4)
 
     grid_plots = Ref{Vector{Any}}([])
 
@@ -672,6 +693,8 @@ function depth_slice_viewer(
         hm = heatmap!(ax, current_y_edges[], current_x_edges[], slice_data,
                       colormap = current_colormap,
                       colorrange = (cmin, cmax))
+
+        isempty(site_x) || scatter!(ax, site_x, site_y; color = :black, marker = :circle, markersize = 4)
 
         draw_grid!(ax, current_x_edges[], current_y_edges[])
 
@@ -778,6 +801,8 @@ function depth_slice_viewer(
         export_hm = heatmap!(export_ax, ye, xe, data,
                             colormap = cmap_val,
                             colorrange = (cmin, cmax))
+
+        isempty(site_x) || scatter!(export_ax, site_x, site_y; color = :black, marker = :circle, markersize = 4)
 
         if show_grid
             for x_edge in xe
@@ -901,18 +926,17 @@ function main()
     need_data = crs_up != "MODEL"
 
     d = nothing
-    if need_data
-        if !isfile(data_file)
-            println("="^60)
-            println("ERROR: Data file not found!")
-            println("  A ModEM data file is required for coordinate_system = \"$coordinate_system\".")
-            println("  Set data_file at the top of this script, or use coordinate_system = \"model\".")
-            println("  Current path: $data_file")
-            println("="^60)
-            return nothing, nothing
-        end
-        println("\nLoading ModEM data for georeferencing: $data_file")
+    if isfile(data_file)
+        println("\nLoading ModEM data: $data_file")
         d = load_data_modem(data_file)
+    elseif need_data
+        println("="^60)
+        println("ERROR: Data file not found!")
+        println("  A ModEM data file is required for coordinate_system = \"$coordinate_system\".")
+        println("  Set data_file at the top of this script, or use coordinate_system = \"model\".")
+        println("  Current path: $data_file")
+        println("="^60)
+        return nothing, nothing
     end
 
     println("\nCoordinate conversion:")
@@ -928,6 +952,8 @@ function main()
         end
     end
     M_crs, xlabel, ylabel, aspect = _build_model_in_crs(M, d, coordinate_system, crs_extent)
+
+    site_x, site_y = _stations_in_crs(d, coordinate_system)
 
     println("\nCreating interactive depth-slice viewer...")
 
@@ -959,7 +985,9 @@ function main()
         export_crs      = coordinate_system,
         gis_output_dir  = gis_output_dir,
         qml_source_path = qml_style_file,
-        lyrx_source_path = lyrx_style_file
+        lyrx_source_path = lyrx_style_file,
+        site_x          = site_x,
+        site_y          = site_y
     )
 
     println("\nViewer ready!")

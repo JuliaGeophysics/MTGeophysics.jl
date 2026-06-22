@@ -152,7 +152,7 @@ function model_xy_to_target_crs_centers(M, d, target_crs::AbstractString)
 
     mismatch_dim_consistent = abs(log(span_x_model / span_e_sta)) + abs(log(span_y_model / span_n_sta))
 
-    return x_target, y_target, lat0, lon0, shiftlat, shiftlon, lat_ref, lon_ref, mismatch_dim_consistent
+    return x_target, y_target, lat0, lon0, shiftlat, shiftlon, lat_ref, lon_ref, mismatch_dim_consistent, station_tx, station_ty
 end
 
 function _nice_scale_length(target::Float64)
@@ -389,7 +389,9 @@ function modem_3d_viewer(
     pad_tol::Real = 0.2,
     resistivity_range::Union{Nothing, Tuple{<:Real,<:Real}} = nothing,
     overlay_transform = (x, y) -> (x, y),
-    north_axis::Symbol = :y
+    north_axis::Symbol = :y,
+    site_e::Vector{Float64} = Float64[],
+    site_n::Vector{Float64} = Float64[]
 )
 
     x_all = M.cx
@@ -493,6 +495,7 @@ function modem_3d_viewer(
         show_scale = show_scale_bar,
         color = annotation_color,
         line_width = annotation_line_width)
+    isempty(site_e) || scatter!(ax.scene, site_e, site_n, fill(Float64(overlay_z_fixed), length(site_e)); color = :black, marker = :circle, markersize = 7)
     current_plt[] = plt
     current_heatmaps[] = (yz=plt[:heatmap_yz][], xz=plt[:heatmap_xz][], xy=plt[:heatmap_xy][])
 
@@ -667,6 +670,7 @@ function modem_3d_viewer(
             show_scale = show_scale_bar,
             color = annotation_color,
             line_width = annotation_line_width)
+        isempty(site_e) || scatter!(ax.scene, site_e, site_n, fill(Float64(overlay_z_fixed), length(site_e)); color = :black, marker = :circle, markersize = 7)
 
         current_plt[] = new_plt
         current_heatmaps[] = (yz=new_plt[:heatmap_yz][], xz=new_plt[:heatmap_xz][], xy=new_plt[:heatmap_xy][])
@@ -808,6 +812,8 @@ function modem_3d_viewer(
         export_plt[:heatmap_xz][].visible[] = tog_xz.active[]
         export_plt[:heatmap_xy][].visible[] = tog_xy.active[]
 
+        isempty(site_e) || scatter!(export_ax, site_e, site_n, fill(Float64(overlay_z_fixed), length(site_e)); color = :black, marker = :circle, markersize = 7)
+
         cb_lbl = log10scale ? "log₁₀ ρ (Ω·m)" : "ρ (Ω·m)"
         Colorbar(export_fig[2, 2], export_plt[:heatmap_xy][], label = cb_lbl, labelsize = 14)
 
@@ -846,7 +852,7 @@ function main()
     println("Loading ModEM data for georeference from: $data_file")
     d = load_data_modem(data_file)
 
-    x_target, y_target, lat0, lon0, shiftlat, shiftlon, lat_ref, lon_ref, mismatch_dim_consistent =
+    x_target, y_target, lat0, lon0, shiftlat, shiftlon, lat_ref, lon_ref, mismatch_dim_consistent, station_tx, station_ty =
         model_xy_to_target_crs_centers(M, d, target_crs)
     wgs84_to_target = _resolve_wgs84_to_target_xy_transform(target_crs)
     overlay_transform = (lon, lat) -> begin
@@ -897,7 +903,9 @@ function main()
         pad_tol = pad_tolerance,
         resistivity_range = resistivity_range,
         overlay_transform = overlay_transform,
-        north_axis = north_axis
+        north_axis = north_axis,
+        site_e = collect(Float64.(station_tx)),
+        site_n = collect(Float64.(station_ty))
     )
 
     println("\n3D Viewer Controls:")
