@@ -40,7 +40,7 @@ default_view_scale = 1.12f0
 
 overlay_z_fixed = 0.0
 overlay_auto_reproject_to_wgs84 = true
-overlay_point_color = :black
+overlay_point_color = :black 
 overlay_line_color = :black
 overlay_point_size = 7
 overlay_line_width = 1.5

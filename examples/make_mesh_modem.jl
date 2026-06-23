@@ -1,7 +1,7 @@
 # Interactive ModEM mesh builder.
 # Inputs (optional CLI args): [data_file (ModEM .dat)] [out_model (.rho)];
 # defaults to geoenergialoikka/data_new.dat and mesh_start_model.rho next to it.
-# Set MESH_PREFLIGHT=1 to build+write the default mesh headless (no GUI).
+# Set MODE = "nogui" in the user controls to build+write the default mesh headless.
 
 using MTGeophysics
 using GLMakie
@@ -11,9 +11,25 @@ using Dates
 
 GLMakie.activate!()
 
-const DATA_PATH = length(ARGS) >= 1 ? ARGS[1] : normpath(@__DIR__, "geoenergialoikka", "data_new.dat")
-const OUT_PATH = length(ARGS) >= 2 ? ARGS[2] : joinpath(dirname(DATA_PATH), "mesh_start_model.rho")
-
+#----- user controls (edit here) -----
+const MODE            = "gui"                # "gui" = interactive window; "nogui" = headless build + write
+const DATA_PATH       = length(ARGS) >= 1 ? ARGS[1] : normpath(@__DIR__, "geoenergialoikka", "data_new.dat")  # input ModEM data file
+const OUT_PATH        = length(ARGS) >= 2 ? ARGS[2] : joinpath(dirname(DATA_PATH), "mesh_start_model.rho")     # output ModEM model (.rho)
+const CELL_WIDTH_FRAC = 0.5                  # core cell width = this × median station spacing
+const N_PAD           = 12                   # padding cells per side (N–S and E–W)
+const PAD_FACTOR      = 1.5                  # geometric padding growth ratio
+const FIRST_LAYER_DIV = 4.0                  # first vertical layer = skin_depth(Tmin) / this
+const VERTICAL_FACTOR = 1.2                  # geometric vertical growth ratio
+const DEPTH_MULT      = 1.5                  # model bottom depth = this × skin_depth(Tmax)
+const CMAP            = :Spectral            # resistivity colormap
+const CRANGE          = (0.0, 4.0)           # log10 ρ colour range
+const SITE_COLOR      = :black               # station marker colour
+const SITE_SIZE_FULL  = 6                    # station dot size (px) in full-model view
+const SITE_SIZE_CORE  = 5                    # station dot size (px) in core view
+const GRID_COLOR      = (:grey, 0.7)         # mesh grid line colour (colour, alpha)
+const GRID_WIDTH      = 1.0                  # mesh grid line thickness (≥1 px = crisp)
+const FIG_SIZE        = (1500, 1000)         # viewer window size (points)
+ 
 #----- EM skin depth from resistivity and period -----
 skin_depth(ρ, T) = 503.0 * sqrt(ρ * T)
 
@@ -49,20 +65,21 @@ function site_occupancy(sx, sy, x_edges, y_edges, ix_core, iy_core)
 end
 
 #----- build the mesh from sites, padding and depth settings -----
-function design_mesh(sx, sy, T; ρ_bg, nx_core, ny_core, nx_pad, ny_pad,
+function design_mesh(sx, sy, T; ρ_bg, dx_core, dy_core, nx_pad, ny_pad,
                      pad_factor, z_first, z_factor, depth_mult)
-    nx_core = max(1, nx_core)
-    ny_core = max(1, ny_core)
+    dxc = max(1.0, dx_core)
+    dyc = max(1.0, dy_core)
     nx_pad = max(0, nx_pad)
     ny_pad = max(0, ny_pad)
 
-    x0 = minimum(sx); x1 = maximum(sx)
-    y0 = minimum(sy); y1 = maximum(sy)
-    mx = 0.02 * max(x1 - x0, 1.0)
-    my = 0.02 * max(y1 - y0, 1.0)
-    x0 -= mx; x1 += mx; y0 -= my; y1 += my
-    dxc = (x1 - x0) / nx_core
-    dyc = (y1 - y0) / ny_core
+    span_x = max(maximum(sx) - minimum(sx), dxc)
+    span_y = max(maximum(sy) - minimum(sy), dyc)
+    cx_mid = (minimum(sx) + maximum(sx)) / 2
+    cy_mid = (minimum(sy) + maximum(sy)) / 2
+    nx_core = max(1, ceil(Int, span_x / dxc))
+    ny_core = max(1, ceil(Int, span_y / dyc))
+    x0 = cx_mid - nx_core * dxc / 2
+    y0 = cy_mid - ny_core * dyc / 2
 
     padx = [dxc * pad_factor^i for i in 1:nx_pad]
     pady = [dyc * pad_factor^i for i in 1:ny_pad]
@@ -121,28 +138,30 @@ end
 #----- snap a value to the nearest in a range -----
 snap(v, r) = collect(r)[argmin(abs.(collect(r) .- v))]
 
-d = load_data_modem(DATA_PATH)
-sx = collect(Float64.(d.x))
-sy = collect(Float64.(d.y))
-Tobs = collect(Float64.(d.T))
+d = load_data_modem(DATA_PATH)                                     # ModEM data file (sites, periods, app. res.)
+sx = collect(Float64.(d.x))                                       # site northings X (m)
+sy = collect(Float64.(d.y))                                       # site eastings Y (m)
+Tobs = collect(Float64.(d.T))                                     # observed periods (s)
 
-spacing = nearest_neighbour_spacing(sx, sy)
-ρ_off = filter(x -> isfinite(x) && x > 0, vec(d.ρ[:, [2, 3], :]))
-ρ_bg_data = isempty(ρ_off) ? 100.0 : median(ρ_off)
-ρ_bg0 = snap(ρ_bg_data, 10:10:20000)
-span_x0 = maximum(sx) - minimum(sx)
-span_y0 = maximum(sy) - minimum(sy)
-nx_core0 = max(2, ceil(Int, span_x0 / (spacing.median / 2)))
-ny_core0 = max(2, ceil(Int, span_y0 / (spacing.median / 2)))
-z_first0 = snap(skin_depth(Float64(ρ_bg0), minimum(Tobs)) / 4, 5:5:2000)
+spacing = nearest_neighbour_spacing(sx, sy)                       # nearest-neighbour station spacing (m)
+ρ_off = filter(x -> isfinite(x) && x > 0, vec(d.ρ[:, [2, 3], :])) # off-diagonal apparent resistivities (Ω·m)
+ρ_bg_data = isempty(ρ_off) ? 100.0 : median(ρ_off)               # data-suggested background ρ (Ω·m)
+ρ_bg0 = snap(ρ_bg_data, 10:10:20000)                             # background ρ seed for the GUI
+dx_core0 = snap(spacing.median * CELL_WIDTH_FRAC, 50:25:10000)    # N–S core cell width seed (m)
+dy_core0 = dx_core0                                               # E–W core cell width seed (m)
+span_x0 = max(maximum(sx) - minimum(sx), 1.0)                     # N–S station footprint (m)
+span_y0 = max(maximum(sy) - minimum(sy), 1.0)                     # E–W station footprint (m)
+nx_core0 = max(1, ceil(Int, span_x0 / dx_core0))                  # N–S core cell count seed
+ny_core0 = max(1, ceil(Int, span_y0 / dy_core0))                  # E–W core cell count seed
+z_first0 = snap(skin_depth(Float64(ρ_bg0), minimum(Tobs)) / FIRST_LAYER_DIV, 5:5:2000)  # first layer seed (m)
 
 @info @sprintf("Loaded %d sites, %d periods (%.3g–%.3g s); median spacing %.0f m; suggested background ρ = %.0f Ω·m (median off-diagonal app. res.)",
                length(sx), length(Tobs), minimum(Tobs), maximum(Tobs), spacing.median, ρ_bg_data)
 
-if get(ENV, "MESH_PREFLIGHT", "0") == "1"
+if MODE == "nogui"
     m = design_mesh(sx, sy, Tobs; ρ_bg = Float64(ρ_bg0),
-        nx_core = nx_core0, ny_core = ny_core0, nx_pad = 12, ny_pad = 12,
-        pad_factor = 1.5, z_first = Float64(z_first0), z_factor = 1.2, depth_mult = 1.5)
+        dx_core = Float64(dx_core0), dy_core = Float64(dy_core0), nx_pad = N_PAD, ny_pad = N_PAD,
+        pad_factor = PAD_FACTOR, z_first = Float64(z_first0), z_factor = VERTICAL_FACTOR, depth_mult = DEPTH_MULT)
     @printf("grid %d×%d×%d (%d cells); core %d×%d @ %.0f×%.0f m; max sites/cell %d; occupied %.0f%%; pad %.0f km/side; depth %.0f km; pad≥δmax %s\n",
         m.nx, m.ny, m.nz, m.nx * m.ny * m.nz, m.nx_core, m.ny_core, m.dx_core, m.dy_core,
         m.maxper, 100 * m.occupied, m.pad_extent_km, m.depth_km, m.pad_ok ? "yes" : "no")
@@ -152,10 +171,6 @@ if get(ENV, "MESH_PREFLIGHT", "0") == "1"
     exit(0)
 end
 
-const SITE_COLOR = RGBf(0.10, 0.18, 0.45)
-const CMAP = :Spectral
-const CRANGE = (0.0, 3.0)
-
 #----- rectangle outline for the core box -----
 corner_points(yl, yh, xl, xh) = [Point2f(yl, xl), Point2f(yh, xl), Point2f(yh, xh),
                                  Point2f(yl, xh), Point2f(yl, xl)]
@@ -164,9 +179,9 @@ corner_points(yl, yh, xl, xh) = [Point2f(yl, xl), Point2f(yh, xl), Point2f(yh, x
 function suggestions(m)
     msgs = String[]
     m.maxper > 1 && push!(msgs,
-        "• More than one site falls in some cells — increase 'Core cells X' / 'Core cells Y'.")
+        "• More than one site falls in some cells — decrease 'Core cell N–S (m)' / 'Core cell E–W (m)'.")
     m.pad_ok || push!(msgs,
-        "• Lateral padding is too small — increase 'Pad cells X' / 'Pad cells Y' or 'Pad factor'; " *
+        "• Lateral padding is too small — increase 'Pad cells N–S' / 'Pad cells E–W' or 'Pad factor'; " *
         "the boundary should sit at least one skin depth at the longest period (δ(Tmax)) from the core.")
     m.depth_km < m.δmax_km && push!(msgs,
         "• Model is too shallow — increase 'Depth × δ(Tmax)' so the mesh spans the depth of investigation.")
@@ -176,14 +191,20 @@ function suggestions(m)
 end
 
 const PARAM_HELP = Dict(
-    "Core cells X" =>
-        "Number of core cells in the X (North) direction across the station area. " *
-        "More cells = finer cells (cell size = N–S site span / count). Use enough that " *
-        "no cell holds more than one site and structure between stations is resolved.",
-    "Core cells Y" =>
-        "Number of core cells in the Y (East) direction across the station area. " *
-        "More cells = finer cells (cell size = E–W site span / count). Use enough that " *
-        "no cell holds more than one site and structure between stations is resolved.",
+    "Core cell N–S (m)" =>
+        "Core cell width in the N–S (X) direction, in metres. Use about half the " *
+        "station spacing so no cell holds more than one site and structure between " *
+        "stations is resolved. Smaller = finer resolution but more cells and slower.",
+    "Core cell E–W (m)" =>
+        "Core cell width in the E–W (Y) direction, in metres. Use about half the " *
+        "station spacing so no cell holds more than one site and structure between " *
+        "stations is resolved. Smaller = finer resolution but more cells and slower.",
+    "Core cells N–S" =>
+        "Number of core cells across the stations in the N–S (X) direction. Linked to " *
+        "'Core cell N–S (m)': editing one updates the other (width = footprint / count).",
+    "Core cells E–W" =>
+        "Number of core cells across the stations in the E–W (Y) direction. Linked to " *
+        "'Core cell E–W (m)': editing one updates the other (width = footprint / count).",
     "ρ background (Ω·m)" =>
         "Half-space resistivity that fills the starting model. It also sets the skin " *
         "depths that size the vertical mesh and padding. The default is suggested from " *
@@ -191,12 +212,12 @@ const PARAM_HELP = Dict(
     "Pad factor" =>
         "Geometric growth ratio of the padding cells (~1.4–1.6). A larger ratio expands " *
         "the grid quickly with few cells so the boundaries sit far from the sites.",
-    "Pad cells X" =>
-        "Number of padding cells added on each side in X (North). More cells push the " *
+    "Pad cells N–S" =>
+        "Number of padding cells added on each side in N–S (X). More cells push the " *
         "boundary farther out; it should reach ≥ one skin depth at the longest period " *
         "δ(Tmax) so boundary conditions do not affect the core.",
-    "Pad cells Y" =>
-        "Number of padding cells added on each side in Y (East). More cells push the " *
+    "Pad cells E–W" =>
+        "Number of padding cells added on each side in E–W (Y). More cells push the " *
         "boundary farther out; it should reach ≥ one skin depth at the longest period " *
         "δ(Tmax) so boundary conditions do not affect the core.",
     "First layer (m)" =>
@@ -214,22 +235,23 @@ const PARAM_HELP = Dict(
 function draw2d!(ax, m)
     heatmap!(ax, m.y_edges_km, m.x_edges_km, fill(log10(m.ρ_bg), m.ny, m.nx);
              colormap = CMAP, colorrange = CRANGE)
-    vlines!(ax, m.y_edges_km; color = (:gray, 0.4), linewidth = 0.4)
-    hlines!(ax, m.x_edges_km; color = (:gray, 0.4), linewidth = 0.4)
+    vlines!(ax, m.y_edges_km; color = GRID_COLOR, linewidth = GRID_WIDTH)
+    hlines!(ax, m.x_edges_km; color = GRID_COLOR, linewidth = GRID_WIDTH)
     lines!(ax, corner_points(m.core_y0_km, m.core_y1_km, m.core_x0_km, m.core_x1_km);
-           color = :red, linewidth = 2.5)
+           color = :black, linewidth = 2.5)
     scatter!(ax, sy ./ 1000, sx ./ 1000; color = SITE_COLOR, marker = :circle,
-             markersize = 6, strokecolor = :black, strokewidth = 0.5)
+             markersize = site_size)
     return ax
 end
 
-fig = Figure(size = (1500, 1000), figure_padding = 14)
+fig = Figure(size = FIG_SIZE, figure_padding = (40, 14, 14, 14))  # (left, right, bottom, top)
 
-status = Observable("Output → $(basename(OUT_PATH))")
-help_obs = Observable("Click  ?  next to a parameter for an explanation.")
-sug_obs = Observable("")
-sug_color = Observable(RGBf(0.15, 0.5, 0.25))
-show_full = Observable(true)
+status = Observable("Output → $(basename(OUT_PATH))")              # save/export status line
+help_obs = Observable("Click  ?  next to a parameter for an explanation.")  # parameter help text
+sug_obs = Observable("")                                           # grid summary + suggestions text
+sug_color = Observable(RGBf(0.15, 0.5, 0.25))                      # suggestion colour (green/red)
+show_full = Observable(true)                                       # map shows full grid vs core only
+site_size = Observable(SITE_SIZE_FULL)                             # station dot size (px), set by view mode
 
 Colorbar(fig[1, 3]; colormap = CMAP, colorrange = CRANGE,
     label = "log₁₀ ρ (Ω·m)", width = 16)
@@ -260,15 +282,17 @@ function add_param!(name, default; isint = false)
     return tb
 end
 
-tb_nxc  = add_param!("Core cells X", nx_core0; isint = true)
-tb_nyc  = add_param!("Core cells Y", ny_core0; isint = true)
-tb_rho  = add_param!("ρ background (Ω·m)", ρ_bg0; isint = true)
-tb_npx  = add_param!("Pad cells X", 12; isint = true)
-tb_npy  = add_param!("Pad cells Y", 12; isint = true)
-tb_pf   = add_param!("Pad factor", 1.5)
-tb_zf   = add_param!("First layer (m)", z_first0; isint = true)
-tb_zfac = add_param!("Vertical factor", 1.2)
-tb_dm   = add_param!("Depth × δ(Tmax)", 1.5)
+tb_dx   = add_param!("Core cell N–S (m)", dx_core0; isint = true)   # N–S core cell width (m)
+tb_dy   = add_param!("Core cell E–W (m)", dy_core0; isint = true)   # E–W core cell width (m)
+tb_nxc  = add_param!("Core cells N–S", nx_core0; isint = true)      # N–S core cell count (linked to width)
+tb_nyc  = add_param!("Core cells E–W", ny_core0; isint = true)      # E–W core cell count (linked to width)
+tb_rho  = add_param!("ρ background (Ω·m)", ρ_bg0; isint = true)     # half-space resistivity (Ω·m)
+tb_npx  = add_param!("Pad cells N–S", N_PAD; isint = true)          # padding cells per side, N–S
+tb_npy  = add_param!("Pad cells E–W", N_PAD; isint = true)          # padding cells per side, E–W
+tb_pf   = add_param!("Pad factor", PAD_FACTOR)                      # geometric padding growth
+tb_zf   = add_param!("First layer (m)", z_first0; isint = true)     # top vertical cell thickness (m)
+tb_zfac = add_param!("Vertical factor", VERTICAL_FACTOR)            # geometric vertical growth
+tb_dm   = add_param!("Depth × δ(Tmax)", DEPTH_MULT)                 # bottom depth in skin depths
 
 updatebtn = Button(left[(next_row[] += 1), 1:3]; label = "Update mesh", fontsize = 14)
 
@@ -284,24 +308,26 @@ exportbtn = Button(actiongrid[1, 2]; label = "Export figure", fontsize = 14, tel
 colsize!(actiongrid, 1, Relative(0.5)); colsize!(actiongrid, 2, Relative(0.5))
 colgap!(actiongrid, 8)
 
-Label(left[(next_row[] += 1), 1:3], sug_obs; fontsize = 12.5, halign = :left,
-    justification = :left, color = sug_color, word_wrap = true, tellwidth = false)
-
-Label(left[(next_row[] += 1), 1:3], "Parameter info"; fontsize = 13, font = :bold,
-    halign = :left, color = :gray35)
-Label(left[(next_row[] += 1), 1:3], help_obs; fontsize = 12, halign = :left,
-    justification = :left, color = :gray30, word_wrap = true, tellwidth = false)
-
-Label(left[(next_row[] += 1), 1:3], status; fontsize = 11, halign = :left,
-    color = :gray45, word_wrap = true, tellwidth = false)
-
 rowgap!(left, 7)
 colgap!(left, 8)
 colsize!(left, 2, Fixed(86))
 colsize!(left, 3, Fixed(26))
 
+#----- bottom panel (spans controls + map): mesh quality and parameter info -----
+Label(fig[2, 1:3], sug_obs; fontsize = 13, halign = :left, justification = :left,
+    color = sug_color, word_wrap = true, tellwidth = false)
+Label(fig[3, 1:3], help_obs; fontsize = 12.5, halign = :left, justification = :left,
+    color = :gray30, word_wrap = true, tellwidth = false)
+Label(fig[4, 1:3], status; fontsize = 11, halign = :left, color = :gray45,
+    word_wrap = true, tellwidth = false)
+
 colsize!(fig.layout, 1, Fixed(290))
 colsize!(fig.layout, 3, Fixed(70))
+rowsize!(fig.layout, 1, Relative(0.82))
+for r in 2:4
+    rowsize!(fig.layout, r, Auto())
+end
+rowgap!(fig.layout, 6)
 
 #----- read a number from a textbox -----
 tbget(tb, d) = begin
@@ -311,18 +337,27 @@ tbget(tb, d) = begin
     v === nothing ? d : v
 end
 
-#----- rebuild the mesh from the current inputs -----
+# last applied core widths/counts, used to detect which of the linked pair changed
+last_dx = Ref(Float64(dx_core0)); last_nx = Ref(nx_core0)   # N–S width (m) / cell count
+last_dy = Ref(Float64(dy_core0)); last_ny = Ref(ny_core0)   # E–W width (m) / cell count
+
+#----- rebuild the mesh from the current inputs (width ↔ count reconciled) -----
 function build_mesh()
+    wdx = tbget(tb_dx, last_dx[])                          # typed N–S width
+    ndx = round(Int, tbget(tb_nxc, Float64(last_nx[])))   # typed N–S count
+    dxw = (ndx != last_nx[] && ndx >= 1 && wdx == last_dx[]) ? span_x0 / ndx : wdx  # count wins iff only count changed
+    wdy = tbget(tb_dy, last_dy[])                          # typed E–W width
+    ndy = round(Int, tbget(tb_nyc, Float64(last_ny[])))   # typed E–W count
+    dyw = (ndy != last_ny[] && ndy >= 1 && wdy == last_dy[]) ? span_y0 / ndy : wdy
     design_mesh(sx, sy, Tobs;
         ρ_bg = tbget(tb_rho, Float64(ρ_bg0)),
-        nx_core = Int(round(tbget(tb_nxc, Float64(nx_core0)))),
-        ny_core = Int(round(tbget(tb_nyc, Float64(ny_core0)))),
-        nx_pad = Int(round(tbget(tb_npx, 12.0))),
-        ny_pad = Int(round(tbget(tb_npy, 12.0))),
-        pad_factor = tbget(tb_pf, 1.5),
+        dx_core = dxw, dy_core = dyw,
+        nx_pad = Int(round(tbget(tb_npx, Float64(N_PAD)))),
+        ny_pad = Int(round(tbget(tb_npy, Float64(N_PAD)))),
+        pad_factor = tbget(tb_pf, PAD_FACTOR),
         z_first = tbget(tb_zf, Float64(z_first0)),
-        z_factor = tbget(tb_zfac, 1.2),
-        depth_mult = tbget(tb_dm, 1.5))
+        z_factor = tbget(tb_zfac, VERTICAL_FACTOR),
+        depth_mult = tbget(tb_dm, DEPTH_MULT))
 end
 
 mesh = Observable(build_mesh())
@@ -346,7 +381,7 @@ end
 function refresh!(m)
     current_ax[] === nothing || delete!(current_ax[])
     ax = Axis(fig[1, 2]; xlabel = "Y East (km)", ylabel = "X North (km)",
-        aspect = DataAspect(),
+        aspect = DataAspect(), halign = :right,
         xgridvisible = false, ygridvisible = false,
         xlabelfont = :bold, ylabelfont = :bold,
         xticklabelcolor = :gray55, yticklabelcolor = :gray55)
@@ -358,6 +393,12 @@ function refresh!(m)
         m.nx, m.ny, m.nz, m.nx_core, m.ny_core, m.dx_core, m.dy_core, m.maxper, m.depth_km)
     sug_obs[] = gridinfo * "\n" * s.text
     sug_color[] = s.ok ? RGBf(0.15, 0.5, 0.25) : RGBf(0.75, 0.2, 0.15)
+    last_dx[] = round(m.dx_core); last_nx[] = m.nx_core      # keep linked width/count fields consistent
+    last_dy[] = round(m.dy_core); last_ny[] = m.ny_core
+    tb_dx.displayed_string[]  = string(Int(last_dx[]))
+    tb_nxc.displayed_string[] = string(last_nx[])
+    tb_dy.displayed_string[]  = string(Int(last_dy[]))
+    tb_nyc.displayed_string[] = string(last_ny[])
     return nothing
 end
 
@@ -370,9 +411,16 @@ on(updatebtn.clicks) do _
     mesh[] = build_mesh()
 end
 
+for tb in (tb_dx, tb_dy, tb_nxc, tb_nyc, tb_rho, tb_npx, tb_npy, tb_pf, tb_zf, tb_zfac, tb_dm)
+    on(tb.stored_string) do _          # pressing Enter in any field applies and re-syncs
+        mesh[] = build_mesh()
+    end
+end
+
 on(corefullbtn.clicks) do _
     show_full[] = !show_full[]
     corefullbtn.label[] = show_full[] ? "Show core" : "Show full"
+    site_size[] = show_full[] ? SITE_SIZE_FULL : SITE_SIZE_CORE
     current_ax[] === nothing || apply_limits!(current_ax[], mesh[])
 end
 
@@ -393,7 +441,7 @@ on(exportbtn.clicks) do _
     ts = Dates.format(Dates.now(), "yyyymmdd_HHMMSS")
     efig = Figure(size = (1200, 1000))
     eax = Axis(efig[1, 1]; xlabel = "Y East (km)", ylabel = "X North (km)",
-        aspect = DataAspect(), xgridvisible = false, ygridvisible = false)
+        aspect = DataAspect(), halign = :right, xgridvisible = false, ygridvisible = false)
     draw2d!(eax, m)
     apply_limits!(eax, m)
     Colorbar(efig[1, 2]; colormap = CMAP, colorrange = CRANGE,
