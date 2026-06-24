@@ -66,18 +66,17 @@ end
 
 #----- build the mesh from sites, padding and depth settings -----
 function design_mesh(sx, sy, T; ρ_bg, dx_core, dy_core, nx_pad, ny_pad,
-                     pad_factor, z_first, z_factor, depth_mult)
+                     pad_factor, z_first, z_factor, depth_mult,
+                     nx_core = nothing, ny_core = nothing)
     dxc = max(1.0, dx_core)
     dyc = max(1.0, dy_core)
     nx_pad = max(0, nx_pad)
     ny_pad = max(0, ny_pad)
 
-    span_x = max(maximum(sx) - minimum(sx), dxc)
-    span_y = max(maximum(sy) - minimum(sy), dyc)
     cx_mid = (minimum(sx) + maximum(sx)) / 2
     cy_mid = (minimum(sy) + maximum(sy)) / 2
-    nx_core = max(1, ceil(Int, span_x / dxc))
-    ny_core = max(1, ceil(Int, span_y / dyc))
+    nx_core = nx_core === nothing ? max(1, ceil(Int, max(maximum(sx) - minimum(sx), dxc) / dxc)) : max(1, Int(nx_core))
+    ny_core = ny_core === nothing ? max(1, ceil(Int, max(maximum(sy) - minimum(sy), dyc) / dyc)) : max(1, Int(ny_core))
     x0 = cx_mid - nx_core * dxc / 2
     y0 = cy_mid - ny_core * dyc / 2
 
@@ -200,11 +199,11 @@ const PARAM_HELP = Dict(
         "station spacing so no cell holds more than one site and structure between " *
         "stations is resolved. Smaller = finer resolution but more cells and slower.",
     "Core cells N–S" =>
-        "Number of core cells across the stations in the N–S (X) direction. Linked to " *
-        "'Core cell N–S (m)': editing one updates the other (width = footprint / count).",
+        "Number of core cells in the N–S (X) direction. Independent of 'Core cell N–S (m)': " *
+        "the core spans count × cell width, centred on the stations.",
     "Core cells E–W" =>
-        "Number of core cells across the stations in the E–W (Y) direction. Linked to " *
-        "'Core cell E–W (m)': editing one updates the other (width = footprint / count).",
+        "Number of core cells in the E–W (Y) direction. Independent of 'Core cell E–W (m)': " *
+        "the core spans count × cell width, centred on the stations.",
     "ρ background (Ω·m)" =>
         "Half-space resistivity that fills the starting model. It also sets the skin " *
         "depths that size the vertical mesh and padding. The default is suggested from " *
@@ -284,8 +283,8 @@ end
 
 tb_dx   = add_param!("Core cell N–S (m)", dx_core0; isint = true)   # N–S core cell width (m)
 tb_dy   = add_param!("Core cell E–W (m)", dy_core0; isint = true)   # E–W core cell width (m)
-tb_nxc  = add_param!("Core cells N–S", nx_core0; isint = true)      # N–S core cell count (linked to width)
-tb_nyc  = add_param!("Core cells E–W", ny_core0; isint = true)      # E–W core cell count (linked to width)
+tb_nxc  = add_param!("Core cells N–S", nx_core0; isint = true)      # N–S core cell count (independent)
+tb_nyc  = add_param!("Core cells E–W", ny_core0; isint = true)      # E–W core cell count (independent)
 tb_rho  = add_param!("ρ background (Ω·m)", ρ_bg0; isint = true)     # half-space resistivity (Ω·m)
 tb_npx  = add_param!("Pad cells N–S", N_PAD; isint = true)          # padding cells per side, N–S
 tb_npy  = add_param!("Pad cells E–W", N_PAD; isint = true)          # padding cells per side, E–W
@@ -337,21 +336,14 @@ tbget(tb, d) = begin
     v === nothing ? d : v
 end
 
-# last applied core widths/counts, used to detect which of the linked pair changed
-last_dx = Ref(Float64(dx_core0)); last_nx = Ref(nx_core0)   # N–S width (m) / cell count
-last_dy = Ref(Float64(dy_core0)); last_ny = Ref(ny_core0)   # E–W width (m) / cell count
-
-#----- rebuild the mesh from the current inputs (width ↔ count reconciled) -----
+#----- rebuild the mesh from the current inputs (each field independent) -----
 function build_mesh()
-    wdx = tbget(tb_dx, last_dx[])                          # typed N–S width
-    ndx = round(Int, tbget(tb_nxc, Float64(last_nx[])))   # typed N–S count
-    dxw = (ndx != last_nx[] && ndx >= 1 && wdx == last_dx[]) ? span_x0 / ndx : wdx  # count wins iff only count changed
-    wdy = tbget(tb_dy, last_dy[])                          # typed E–W width
-    ndy = round(Int, tbget(tb_nyc, Float64(last_ny[])))   # typed E–W count
-    dyw = (ndy != last_ny[] && ndy >= 1 && wdy == last_dy[]) ? span_y0 / ndy : wdy
     design_mesh(sx, sy, Tobs;
         ρ_bg = tbget(tb_rho, Float64(ρ_bg0)),
-        dx_core = dxw, dy_core = dyw,
+        dx_core = tbget(tb_dx, Float64(dx_core0)),
+        dy_core = tbget(tb_dy, Float64(dy_core0)),
+        nx_core = Int(round(tbget(tb_nxc, Float64(nx_core0)))),
+        ny_core = Int(round(tbget(tb_nyc, Float64(ny_core0)))),
         nx_pad = Int(round(tbget(tb_npx, Float64(N_PAD)))),
         ny_pad = Int(round(tbget(tb_npy, Float64(N_PAD)))),
         pad_factor = tbget(tb_pf, PAD_FACTOR),
@@ -393,12 +385,6 @@ function refresh!(m)
         m.nx, m.ny, m.nz, m.nx_core, m.ny_core, m.dx_core, m.dy_core, m.maxper, m.depth_km)
     sug_obs[] = gridinfo * "\n" * s.text
     sug_color[] = s.ok ? RGBf(0.15, 0.5, 0.25) : RGBf(0.75, 0.2, 0.15)
-    last_dx[] = round(m.dx_core); last_nx[] = m.nx_core      # keep linked width/count fields consistent
-    last_dy[] = round(m.dy_core); last_ny[] = m.ny_core
-    tb_dx.displayed_string[]  = string(Int(last_dx[]))
-    tb_nxc.displayed_string[] = string(last_nx[])
-    tb_dy.displayed_string[]  = string(Int(last_dy[]))
-    tb_nyc.displayed_string[] = string(last_ny[])
     return nothing
 end
 
