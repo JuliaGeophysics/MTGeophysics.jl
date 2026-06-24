@@ -2,12 +2,14 @@
 # needs the external ModEM forward solver and an MPI runtime (OpenMPI or MPICH)
 
 using MTGeophysics
+using Dates
+using Statistics
 
 #---------- user-configurable paths ----------
 # resolve relative to this script
 const START_MODEL_PATH = normpath(@__DIR__, "geoenergialoikka", "model.rho")
-const OBSERVED_DATA_PATH = normpath(@__DIR__, "geoenergialoikka", "data.dat")
-const MODEM_EXECUTABLE = "/usr/local/bin/Mod3DMT_2025"
+const OBSERVED_DATA_PATH = normpath(@__DIR__, "geoenergialoikka", "data.dat") 
+const MODEM_EXECUTABLE = "/projappl/project_2005537/Mod3DMT_cc"
 
 function _print_preflight_summary(start_model::AbstractString, observed_data::AbstractString, cfg::VFSA3DMTConfig)
     m = load_ws3d_model(start_model)
@@ -36,30 +38,35 @@ end
 
 #---------- configure the inversion ----------
 cfg = VFSA3DMTConfig(
-    nchains               = 1,          # independent markov chains
-    nprocs                = 41,         # MPI processes for ModEM forward calls
-    mpirun_cmd            = "mpirun",
+    nchains               = 1,          # independent chains
+    nprocs                = 39,         # MPI ranks for ModEM
+    mpirun_cmd            = "srun",     # MPI launcher
     modem_exe             = MODEM_EXECUTABLE,
-    out_root              = "runs",     # run dir base, seed appended -> runs_<seed>, next to the model file
-    n_ctrl                = 900,        # RBF control points in the core
-    frac_update_controls  = 0.05,       # controls perturbed per trial (~45 of 900), local refinement not whole-model redraw
-    log_bounds            = (0.0, 5.0), # log10(Ω·m) bounds
+    out_root              = "runs",     # run dir base -> runs_<seed>
+    n_ctrl                = 900,        # RBF control points
+    frac_update_controls  = 0.05,       # fraction of controls perturbed per trial
+    log_bounds            = (0.0, 6.0), # log10(Ω·m) model bounds
     step_scale            = 1.0,        # proposal step = step_scale × bound width
-    max_iter              = 3000,       # iteration cap, stops earlier if target_rms is reached
-    n_trials              = 4,          # trial proposals per iteration
-    #---------- decoupled temperatures ----------
-    # generating temp (T0/cooling_ak) drives the proposal on the parameter scale
-    # acceptance temp (Tacc0/cooling_ak_acc) drives exp(-dE/Tacc) on the rms^2 scale
-    T0                    = 1.0,        # generating temp, ~1 = full-width exploration
-    cooling_ak            = 2.0e-4,     # generating cooling constant (rate ≈ 0.986/iter)
-    Tacc0                 = 4.0,        # acceptance temp, a few × typical uphill dE (rms^2=chi2/N scale, dE~O(1))
-    cooling_ak_acc        = 4.0e-4,     # acceptance cooling constant
+    max_iter              = 3000,       # iteration cap
+    n_trials              = 4,          # trials per iteration
+    # decoupled temperatures: T0 = temp_kappa*rms_initial^2, cooling as T0*exp(-sqrt(ak)*(k-1)).
+    # T_prop drives proposals, T_acc the metropolis test; each reaches cool_ratio*T0 at its
+    # own fraction of max_iter. acc_freeze_frac >= explore_frac makes acceptance cool slower.
+    temp_kappa            = 1.0,        # T0 = temp_kappa * rms_initial^2
+    explore_frac          = 0.15,       # proposal reaches cool_ratio*T0 at this fraction of max_iter
+    acc_freeze_frac       = 1.0,        # acceptance reaches cool_ratio*T0 at this fraction of max_iter
+    cool_ratio            = 1e-3,       # cold endpoint T = cool_ratio*T0
+    ak                    = nothing,    # set Float to override proposal decay rate
+    ak_acc                = nothing,    # set Float to override acceptance decay rate
     target_rms            = 3.0,        # stop once best rms ≤ this
-    seed                  = 1911,       # rng seed
-    padding_decay_length  = 10.0,       # horizontal padding blend in cell widths
-    keep_models           = true,       # keep all trial model files (ignored when model_save_every>0)
-    keep_dpred            = false,      # discard predicted data files to save space
-    model_save_every      = 100,        # only retain trial models every 100 iters (+ best), bounds disk use
+    seed                  = Dates.value(Dates.now()), # fix to an Int for reproducibility
+    pad_tol               = 0.2,        # core/padding detection tolerance
+    padding_decay_length  = 10.0,       # padding blend (cells)
+    keep_models           = true,       # keep trial models (ignored when model_save_every>0)
+    keep_dpred            = false,      # discard predicted-data files
+    model_save_every      = 100,        # keep trial models every N iters (+ best)
+    sigma_scale           = 2.0,        # RBF width in cells (1σ); larger = smoother
+    trunc_sigmas          = 3.0,        # RBF support cutoff in σ
 )
 
 #---------- optional preflight (inspect mesh without ModEM) ----------
@@ -68,68 +75,5 @@ if get(ENV, "MTG_PREFLIGHT_ONLY", "0") == "1"
     exit(0)
 end
 
-#---------- check the ModEM solver is available ----------
-modem_exe = cfg.modem_exe
-
-modem_found = try
-    success(`which $modem_exe`)
-catch
-    try
-        success(`where $modem_exe`)
-    catch
-        false
-    end
-end
-
-if !modem_found
-    printstyled("""
-
-    ╔══════════════════════════════════════════════════════════════════╗
-    ║  ModEM forward solver ("$modem_exe") was not found.            ║
-    ║                                                                ║
-    ║  The 3D VFSA inversion requires the ModEM 3D MT code and an   ║
-    ║  MPI runtime to compute forward responses.                    ║
-    ║                                                                ║
-    ║  Installation:                                                 ║
-    ║    1. Download ModEM from:                                     ║
-    ║       https://github.com/magnetotellurics/ModEM               ║
-    ║    2. Build with MPI support (see ModEM documentation).        ║
-    ║    3. Install an MPI runtime (OpenMPI, MPICH, MS-MPI, etc.)   ║
-    ║                                                                ║
-    ║  Current executable path:                                      ║
-    ║    $modem_exe
-    ╚══════════════════════════════════════════════════════════════════╝
-
-    """; color=:yellow, bold=true)
-    exit(1)
-end
-
-#---------- run the inversion ----------
-println("Starting 3D VFSA MT inversion...")
-println("  Model:  $start_model")
-println("  Data:   $observed_data")
-println("  Config: $(cfg.nchains) chain(s), $(cfg.max_iter) iterations, $(cfg.n_trials) trials/iter")
-println()
-
 best_model, iter_log = VFSA3DMT(start_model; dobs_path=observed_data, cfg=cfg)
 
-println()
-println("Inversion complete.")
-println("  Best model : $best_model")
-println("  Iteration log: $iter_log")
-
-#---------- optional ensemble statistics for multi-chain runs ----------
-if cfg.nchains > 1
-    println()
-    println("Computing ensemble statistics...")
-    mean_path, median_path, std_path = AnalyseEnsemble3D(dirname(best_model))
-    println("  Mean   model: $mean_path")
-    println("  Median model: $median_path")
-    println("  Std    model: $std_path")
-end
-
-#---------- optional viewing of the best model ----------
-# if GLMakie is available:
-#   m = load_ws3d_model(best_model)
-#   m_modem = load_model_modem(best_model)   # linear for the ModEMModel viewer
-#   # then use plot_model_XYZ.jl or gl_modem_viewer() from examples/

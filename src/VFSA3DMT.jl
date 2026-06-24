@@ -12,50 +12,51 @@ using Dates
     VFSA3DMTConfig
 
 Configuration for the 3D VFSA MT inversion. All VFSA hyper-parameters,
-file-management switches, and external-solver settings live here.
+file-management switches, and external-solver settings live here. Every field is
+a required keyword with no default — values are supplied by the run script (see
+`examples/run_vfsa3dmt.jl`), so the engine carries no hidden defaults.
 
 `out_root::String` is the base name/path of the run directory holding the
 per-chain ModEM working folders. The seed is appended to it, so the actual run
-directory is `<out_root>_<seed>` (e.g. the default `"runs"` with seed 1911 gives
+directory is `<out_root>_<seed>` (e.g. `out_root="runs"` with seed 1911 gives
 `runs_1911`). A relative `out_root` is created alongside the starting model file;
 an absolute path is used as-is. The iteration/trial logs and the per-chain best
 models are written directly inside this seeded run directory.
 """
 Base.@kwdef mutable struct VFSA3DMTConfig
-    nchains::Int                  = 1
-    nprocs::Int                   = 21
-    mpirun_cmd::String            = "mpirun"
-    modem_exe::String             = "Mod3DMT_2025"
-    out_root::String              = "runs"
-    n_ctrl::Int                   = 900
-    log_bounds::Tuple{Float64,Float64} = (0.0, 5.0)
-    frac_update_controls::Float64 = 1.0
-    step_scale::Float64           = 1.0
-    max_iter::Int                 = 3000
-    n_trials::Int                 = 4
-    #---------- generating (proposal) temperature ----------
-    # drives the cauchy step on the parameter scale
-    # T0~1 explores full width, cooling localizes the step
-    T0::Float64                   = 1.0
-    cooling_ak::Float64           = 2.0e-4
-    #---------- acceptance temperature (decoupled) ----------
-    # drives the metropolis test exp(-dE/Tacc) on the rms^2 energy scale
-    # rms^2 = chi2/N is the per-datum (reduced) misfit, so dE is O(1);
-    # set Tacc0 to a few x the typical uphill dE
-    Tacc0::Float64                = 4.0
-    cooling_ak_acc::Float64       = 4.0e-4
-    # stop the chain once best rms reaches this target
-    target_rms::Float64           = 1.0
-    seed::Int                     = 1911
-    pad_tol::Float64              = 0.2
-    padding_decay_length::Float64 = 10.0
-    keep_models::Bool             = true
-    keep_dpred::Bool              = false
-    # 0 = behave per keep_models; >0 = retain trial models only on iterations
-    # where iter % model_save_every == 0 (the best model is always kept)
-    model_save_every::Int         = 0
-    sigma_scale::Float64          = 2.0
-    trunc_sigmas::Float64         = 3.0
+    nchains::Int
+    nprocs::Int
+    mpirun_cmd::String
+    modem_exe::String
+    out_root::String
+    n_ctrl::Int
+    log_bounds::Tuple{Float64,Float64}
+    frac_update_controls::Float64
+    step_scale::Float64
+    max_iter::Int
+    n_trials::Int
+    # decoupled temperatures: base T0 = temp_kappa * rms_initial^2; each schedule
+    # cools as T0 * exp(-sqrt(ak) * (k-1)). T_prop (proposal) reaches cool_ratio*T0
+    # after explore_frac*max_iter; T_acc (metropolis) after acc_freeze_frac*max_iter.
+    # acc_freeze_frac >= explore_frac makes acceptance cool slower. ak / ak_acc
+    # override the derived rates (nothing = derive from the fracs).
+    temp_kappa::Float64
+    explore_frac::Float64
+    acc_freeze_frac::Float64
+    cool_ratio::Float64
+    ak::Union{Nothing,Float64}
+    ak_acc::Union{Nothing,Float64}
+    target_rms::Float64
+    seed::Int
+    pad_tol::Float64
+    padding_decay_length::Float64
+    keep_models::Bool
+    keep_dpred::Bool
+    # model_save_every: 0 = behave per keep_models; >0 = retain trial models only
+    # on iterations where iter % model_save_every == 0 (best model always kept)
+    model_save_every::Int
+    sigma_scale::Float64
+    trunc_sigmas::Float64
 end
 
 #---------- internal helpers ----------
@@ -314,85 +315,97 @@ function forward_and_misfit!(m::WS3DModel;
     end
     if !ok || !isfile(dpred_abs)
         _cleanup_modem_artifacts!(run_dir)
-        return (chi2=Inf, rms=Inf)
+        return Inf
     end
     s = chi2_and_rms(dobs_abs, dpred_abs; use_impedance=true, use_tipper=true, components=String[])
     _cleanup_modem_artifacts!(run_dir)
-    return (chi2=s.χ², rms=s.rms)
+    return s.rms
 end
 
 #---------- logging ----------
 
-function _write_trials_header_3d(path::AbstractString; timestamp::String, cfg::VFSA3DMTConfig, chain_seed::Int)
+function _write_trials_header_3d(path::AbstractString; timestamp::String, cfg::VFSA3DMTConfig, chain_seed::Int, T0_chain::Float64, ak_prop::Float64, ak_acc::Float64)
     open(path, "w") do io
         println(io, "# VFSA 3D MT detailed trials — ", timestamp)
         println(io, "# chains=", cfg.nchains,
                     "  seed=", chain_seed,
                     "  n_ctrl=", cfg.n_ctrl,
                     "  frac_update_controls=", cfg.frac_update_controls,
-                    "  Tprop0=", cfg.T0,
-                    "  ak_prop=", cfg.cooling_ak,
-                    "  Tacc0=", cfg.Tacc0,
-                    "  ak_acc=", cfg.cooling_ak_acc,
+                    "  temp_kappa=", cfg.temp_kappa,
+                    "  T0=", T0_chain,
+                    "  explore_frac=", cfg.explore_frac,
+                    "  acc_freeze_frac=", cfg.acc_freeze_frac,
+                    "  cool_ratio=", cfg.cool_ratio,
+                    "  ak_prop=", ak_prop,
+                    "  ak_acc=", ak_acc,
+                    "  max_iter=", cfg.max_iter,
                     "  target_rms=", cfg.target_rms,
                     "  n_trials=", cfg.n_trials)
-        println(io, repeat("-", 150))
-        @printf(io, "%6s %8s %8s %12s %12s %14s %11s %12s %10s %10s %5s %14s %11s %s\n",
-                "Chain","Iter","Trial","Tprop","Tacc",
-                "Chi2","RMS","dE_rms2","Pacc","Uacc","Acc","Chi2Best","RMSBest","Model")
-        println(io, repeat("-", 150))
+        println(io, repeat("-", 114))
+        @printf(io, "%8s %8s %12s %12s %11s %12s %10s %10s %5s %11s %s\n",
+                "Iter","Trial","Tprop","Tacc",
+                "RMS","dE_rms2","Pacc","Uacc","Acc","RMSBest","Model")
+        println(io, repeat("-", 114))
     end
 end
 
-function _append_trial_row_3d(path::AbstractString; chain::Int, iter::Int, trial::Int,
+function _append_trial_row_3d(path::AbstractString; iter::Int, trial::Int,
                               Tprop::Float64, Tacc::Float64,
-                           chi2_prop::Float64, rms_prop::Float64,
+                           rms_prop::Float64,
                            dE::Float64, p_acc::Float64, u_acc::Float64,
-                           chi2_best::Float64, rms_best::Float64,
+                           rms_best::Float64,
                            acc::Int, model_rel::String)
     # one row per trial: the proposal's own misfit, energy dE, metropolis
     # prob/draw, accept flag, running best, and the proposal model filename
     open(path, "a") do io
-        @printf(io, "%6d %8d %8d %12.4g %12.4g %14.4f %11.5f %12.5f %10.5f %10.5f %5d %14.4f %11.5f %s\n",
-                chain, iter, trial, Tprop, Tacc, chi2_prop, rms_prop, dE, p_acc, u_acc, acc, chi2_best, rms_best, model_rel)
+        @printf(io, "%8d %8d %12.4g %12.4g %11.5f %12.5f %10.5f %10.5f %5d %11.5f %s\n",
+                iter, trial, Tprop, Tacc, rms_prop, dE, p_acc, u_acc, acc, rms_best, model_rel)
     end
 end
 
-function _write_iter_header_3d(path::AbstractString; timestamp::String, cfg::VFSA3DMTConfig, chain_seed::Int)
+function _write_iter_header_3d(path::AbstractString; timestamp::String, cfg::VFSA3DMTConfig, chain_seed::Int, T0_chain::Float64, ak_prop::Float64, ak_acc::Float64)
     open(path, "w") do io
         println(io, "# VFSA 3D MT iteration best — ", timestamp)
         println(io, "# chains=", cfg.nchains,
                     "  seed=", chain_seed,
                     "  n_ctrl=", cfg.n_ctrl,
                     "  frac_update_controls=", cfg.frac_update_controls,
-                    "  Tprop0=", cfg.T0,
-                    "  ak_prop=", cfg.cooling_ak,
-                    "  Tacc0=", cfg.Tacc0,
-                    "  ak_acc=", cfg.cooling_ak_acc,
+                    "  temp_kappa=", cfg.temp_kappa,
+                    "  T0=", T0_chain,
+                    "  explore_frac=", cfg.explore_frac,
+                    "  acc_freeze_frac=", cfg.acc_freeze_frac,
+                    "  cool_ratio=", cfg.cool_ratio,
+                    "  ak_prop=", ak_prop,
+                    "  ak_acc=", ak_acc,
+                    "  max_iter=", cfg.max_iter,
                     "  target_rms=", cfg.target_rms,
                     "  n_trials=", cfg.n_trials)
-        println(io, repeat("-", 140))
+        println(io, repeat("-", 100))
         # current accepted state after the iteration, Nacc = accepted trials this iter
-        @printf(io, "%6s %8s %12s %12s %14s %11s %14s %11s %6s %s\n",
-                "Chain","Iter","Tprop","Tacc","Chi2","RMS","Chi2Best","RMSBest","Nacc","Model")
-        println(io, repeat("-", 140))
+        @printf(io, "%8s %12s %12s %11s %11s %6s %s\n",
+                "Iter","Tprop","Tacc","RMS","RMSBest","Nacc","Model")
+        println(io, repeat("-", 100))
     end
 end
 
-function _append_iter_row_3d(path::AbstractString; chain::Int, iter::Int,
+function _append_iter_row_3d(path::AbstractString; iter::Int,
                           Tprop::Float64, Tacc::Float64,
-                          chi2_curr::Float64, rms_curr::Float64,
-                          chi2_best::Float64, rms_best::Float64,
+                          rms_curr::Float64,
+                          rms_best::Float64,
                           nacc::Int, model_rel::String)
     open(path, "a") do io
-        @printf(io, "%6d %8d %12.4g %12.4g %14.4f %11.5f %14.4f %11.5f %6d %s\n",
-                chain, iter, Tprop, Tacc, chi2_curr, rms_curr, chi2_best, rms_best, nacc, model_rel)
+        @printf(io, "%8d %12.4g %12.4g %11.5f %11.5f %6d %s\n",
+                iter, Tprop, Tacc, rms_curr, rms_best, nacc, model_rel)
     end
 end
 
-# cooling law T(k) = T0 * exp(-c1*ak^c2)^(k-1), keeps T(1) = T0
-_T_schedule(k::Int; T0::Float64, ak::Float64, c1::Float64=1.0, c2::Float64=0.5) =
-    T0 * exp(-c1 * ak^c2)^(k - 1)
+_T_schedule(k::Int; T0::Float64, ak::Float64) = T0 * exp(-sqrt(ak) * (k - 1))
+
+function _resolve_ak(cfg::VFSA3DMTConfig, freeze_frac::Float64, override::Union{Nothing,Float64})
+    override === nothing || return override
+    k_freeze = freeze_frac * cfg.max_iter
+    return (log(1.0 / cfg.cool_ratio) / max(k_freeze - 1.0, 1.0))^2
+end
 
 #---------- single-chain vfsa loop ----------
 
@@ -407,8 +420,6 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
     # each chain keeps its own logs so chains stay independent and parallel-safe
     trials_log = joinpath(chain_dir, "0vfsa3DMT_detailed.log")
     iter_log   = joinpath(chain_dir, "0vfsa3DMT.log")
-    _write_trials_header_3d(trials_log; timestamp=timestamp, cfg=cfg, chain_seed=chain_seed)
-    _write_iter_header_3d(iter_log; timestamp=timestamp, cfg=cfg, chain_seed=chain_seed)
 
     dobs_chain_path = joinpath(chain_dir, dobs_filename)
     if !isfile(dobs_chain_path)
@@ -462,10 +473,15 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
     dp0 = forward_and_misfit!(m; run_dir=chain_dir, model_filename=model0_filename,
                               dobs_filename=dobs_filename, dpred_filename=dpred0_filename,
                               origin=origin, rotation=rotation, cfg=cfg)
-    chi2_current = dp0.chi2
-    rms_current  = dp0.rms
-    best_chi2 = chi2_current
-    best_rms  = rms_current
+    rms_current = dp0
+    best_rms    = rms_current
+    # single coupled temperature: start from the initial-model misfit (rms^2 scale);
+    # this is data-dependent, logged for reproducibility
+    T0_chain = cfg.temp_kappa * rms_current^2
+    ak_prop_chain = _resolve_ak(cfg, cfg.explore_frac, cfg.ak)
+    ak_acc_chain = _resolve_ak(cfg, cfg.acc_freeze_frac, cfg.ak_acc)
+    _write_trials_header_3d(trials_log; timestamp=timestamp, cfg=cfg, chain_seed=chain_seed, T0_chain=T0_chain, ak_prop=ak_prop_chain, ak_acc=ak_acc_chain)
+    _write_iter_header_3d(iter_log; timestamp=timestamp, cfg=cfg, chain_seed=chain_seed, T0_chain=T0_chain, ak_prop=ak_prop_chain, ak_acc=ak_acc_chain)
     best_model_abs = joinpath(results_root, @sprintf("best_model_chain%02d.rho", chain_id))
     cp(joinpath(chain_dir, model0_filename), best_model_abs; force=true)
     # filename of the current accepted model, carried forward so the iteration
@@ -475,9 +491,8 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
     lo, hi = cfg.log_bounds
 
     for k in 1:cfg.max_iter
-        # decoupled schedules: Tprop for the proposal, Tacc for the acceptance
-        Tprop = _T_schedule(k; T0=cfg.T0, ak=cfg.cooling_ak)
-        Tacc  = _T_schedule(k; T0=cfg.Tacc0, ak=cfg.cooling_ak_acc)
+        T_prop = _T_schedule(k; T0=T0_chain, ak=ak_prop_chain)
+        T_acc = _T_schedule(k; T0=T0_chain, ak=ak_acc_chain)
 
         #---------- per-trial metropolis against the current state ----------
         n_accepted_iter = 0
@@ -487,7 +502,7 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
         for t in 1:cfg.n_trials
             # propose from the current accepted state
             delta_params_trial = copy(delta_params_current)
-            propose_controls!(delta_params_trial, Tprop, lo, hi, v0_ctrl, nsel_default, rng;
+            propose_controls!(delta_params_trial, T_prop, lo, hi, v0_ctrl, nsel_default, rng;
                               step_scale=cfg.step_scale)
 
             apply_rbf_map!(delta_values_buffer, rbfmap, delta_params_trial)
@@ -502,32 +517,30 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
                                      dobs_filename=dobs_filename, dpred_filename=dpred_filename,
                                      origin=origin, rotation=rotation, cfg=cfg)
 
-            # energy = change in rms^2, downhill auto-accepts, uphill uses exp(-dE/Tacc)
-            dE = dp.rms^2 - rms_current^2
+            # energy = change in rms^2, downhill auto-accepts, uphill uses exp(-dE/T_acc)
+            dE = dp^2 - rms_current^2
             u_acc = rand(rng)
-            # Pacc = 1 downhill, exp(-dE/Tacc) uphill, kept finite for the log
-            p_acc = dE <= 0 ? 1.0 : exp(-dE / max(Tacc, 1e-12))
-            accept_trial = isfinite(dp.chi2) && (u_acc < p_acc)
+            # Pacc = 1 downhill, exp(-dE/T_acc) uphill, kept finite for the log
+            p_acc = dE <= 0 ? 1.0 : exp(-dE / max(T_acc, 1e-12))
+            accept_trial = isfinite(dp) && (u_acc < p_acc)
 
             push!(trial_cache, (
-                chain=chain_id, iter=k, trial=t, Tprop=Tprop, Tacc=Tacc,
-                chi2_prop=dp.chi2, rms_prop=dp.rms,
+                iter=k, trial=t, Tprop=T_prop, Tacc=T_acc,
+                rms_prop=dp,
                 dE=dE, p_acc=p_acc, u_acc=u_acc, accepted=accept_trial,
-                chi2_best=best_chi2, rms_best=best_rms,
+                rms_best=best_rms,
                 model_rel=model_filename
             ))
 
             if accept_trial
                 # advance the chain, next trial starts here
                 delta_params_current .= delta_params_trial
-                chi2_current = dp.chi2
-                rms_current  = dp.rms
+                rms_current  = dp
                 n_accepted_iter += 1
                 last_accepted_trial = t
                 current_model_rel = model_filename
                 # record the global best on improvement, never feed it back
-                if chi2_current < best_chi2
-                    best_chi2 = chi2_current
+                if rms_current < best_rms
                     best_rms  = rms_current
                     cp(joinpath(chain_dir, model_filename), best_model_abs; force=true)
                 end
@@ -567,20 +580,20 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
 
         # write one row per trial
         for tr in trial_cache
-            _append_trial_row_3d(trials_log; chain=tr.chain, iter=tr.iter, trial=tr.trial,
+            _append_trial_row_3d(trials_log; iter=tr.iter, trial=tr.trial,
                               Tprop=tr.Tprop, Tacc=tr.Tacc,
-                              chi2_prop=tr.chi2_prop, rms_prop=tr.rms_prop,
+                              rms_prop=tr.rms_prop,
                               dE=tr.dE, p_acc=tr.p_acc, u_acc=tr.u_acc,
-                              chi2_best=tr.chi2_best, rms_best=tr.rms_best,
+                              rms_best=tr.rms_best,
                               acc=(tr.accepted ? 1 : 0), model_rel=tr.model_rel)
         end
 
         # iteration summary row: current accepted state, named by the model that
         # represents it (carried forward when no trial was accepted this iter)
-        _append_iter_row_3d(iter_log; chain=chain_id, iter=k,
-                         Tprop=Tprop, Tacc=Tacc,
-                         chi2_curr=chi2_current, rms_curr=rms_current,
-                         chi2_best=best_chi2, rms_best=best_rms,
+        _append_iter_row_3d(iter_log; iter=k,
+                         Tprop=T_prop, Tacc=T_acc,
+                         rms_curr=rms_current,
+                         rms_best=best_rms,
                          nacc=n_accepted_iter, model_rel=current_model_rel)
 
         # stop once best rms hits the target
@@ -596,18 +609,18 @@ end
 #---------- main entry point ----------
 
 """
-    VFSA3DMT(start_model_path; dobs_path, cfg=VFSA3DMTConfig())
+    VFSA3DMT(start_model_path; dobs_path, cfg)
 
 Run a 3D VFSA MT inversion. Returns `(best_model_path, iter_log_path)`.
 
 # Arguments
 - `start_model_path::AbstractString`: Path to a WS3D-format starting model (.rho).
 - `dobs_path::AbstractString`: Path to the ModEM observed data file.
-- `cfg::VFSA3DMTConfig`: Configuration struct (see `VFSA3DMTConfig`).
+- `cfg::VFSA3DMTConfig`: Configuration struct (required; see `VFSA3DMTConfig`).
 """
 function VFSA3DMT(start_model_path::AbstractString;
                   dobs_path::AbstractString,
-                  cfg::VFSA3DMTConfig = VFSA3DMTConfig())
+                  cfg::VFSA3DMTConfig)
     start_model_abs = abspath(start_model_path)
     model_dir = dirname(start_model_abs)
 

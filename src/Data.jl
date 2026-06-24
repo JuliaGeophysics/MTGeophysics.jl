@@ -132,7 +132,7 @@ function load_data_modem(path::AbstractString)
                     re = parse(Float64, parts[9]); im = parse(Float64, parts[10])
                     σ  = parse(Float64, parts[11])
                     push!(D,    ComplexF64(re, im))
-                    push!(Derr, ComplexF64(σ, σ))
+                    push!(Derr, ComplexF64(σ, 0.0))
                 end
             end
         end
