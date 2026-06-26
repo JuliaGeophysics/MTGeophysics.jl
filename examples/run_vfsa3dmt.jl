@@ -42,18 +42,15 @@ cfg = VFSA3DMTConfig(
     nprocs                = 39,         # MPI ranks for ModEM
     mpirun_cmd            = "srun",     # MPI launcher
     modem_exe             = MODEM_EXECUTABLE,
-    out_root              = "runs",     # run dir base -> runs_<seed>
+    out_root              = "run",
     n_ctrl                = 900,        # RBF control points
     frac_update_controls  = 0.05,       # fraction of controls perturbed per trial
     log_bounds            = (0.0, 6.0), # log10(Ω·m) model bounds
     step_scale            = 1.0,        # proposal step = step_scale × bound width
     max_iter              = 3000,       # iteration cap
     n_trials              = 4,          # trials per iteration
-    # decoupled temperatures: T0 = temp_kappa*rms_initial^2, cooling as T0*exp(-sqrt(ak)*(k-1)).
-    # T_prop drives proposals, T_acc the metropolis test; each reaches cool_ratio*T0 at its
-    # own fraction of max_iter. acc_freeze_frac >= explore_frac makes acceptance cool slower.
-    temp_kappa            = 1.0,        # T0 = temp_kappa * rms_initial^2
-    explore_frac          = 0.15,       # proposal reaches cool_ratio*T0 at this fraction of max_iter
+    temp_kappa            = 1.0,        # dimensionless start temperature T0
+    explore_frac          = 1.0,        # proposal reaches cool_ratio*T0 at this fraction of max_iter
     acc_freeze_frac       = 1.0,        # acceptance reaches cool_ratio*T0 at this fraction of max_iter
     cool_ratio            = 1e-3,       # cold endpoint T = cool_ratio*T0
     ak                    = nothing,    # set Float to override proposal decay rate

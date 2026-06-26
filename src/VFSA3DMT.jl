@@ -17,11 +17,11 @@ a required keyword with no default — values are supplied by the run script (se
 `examples/run_vfsa3dmt.jl`), so the engine carries no hidden defaults.
 
 `out_root::String` is the base name/path of the run directory holding the
-per-chain ModEM working folders. The seed is appended to it, so the actual run
-directory is `<out_root>_<seed>` (e.g. `out_root="runs"` with seed 1911 gives
-`runs_1911`). A relative `out_root` is created alongside the starting model file;
-an absolute path is used as-is. The iteration/trial logs and the per-chain best
-models are written directly inside this seeded run directory.
+per-chain ModEM working folders. A timestamp is appended, so the actual run
+directory is `<out_root>_<yyyymmdd_HHMMSS>` (e.g. `out_root="run"` gives
+`run_20260626_143000`). A relative `out_root` is created alongside the starting
+model file; an absolute path is used as-is. The iteration/trial logs and the
+per-chain best models are written directly inside this run directory.
 """
 Base.@kwdef mutable struct VFSA3DMTConfig
     nchains::Int
@@ -35,11 +35,6 @@ Base.@kwdef mutable struct VFSA3DMTConfig
     step_scale::Float64
     max_iter::Int
     n_trials::Int
-    # decoupled temperatures: base T0 = temp_kappa * rms_initial^2; each schedule
-    # cools as T0 * exp(-sqrt(ak) * (k-1)). T_prop (proposal) reaches cool_ratio*T0
-    # after explore_frac*max_iter; T_acc (metropolis) after acc_freeze_frac*max_iter.
-    # acc_freeze_frac >= explore_frac makes acceptance cool slower. ak / ak_acc
-    # override the derived rates (nothing = derive from the fracs).
     temp_kappa::Float64
     explore_frac::Float64
     acc_freeze_frac::Float64
@@ -475,9 +470,7 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
                               origin=origin, rotation=rotation, cfg=cfg)
     rms_current = dp0
     best_rms    = rms_current
-    # single coupled temperature: start from the initial-model misfit (rms^2 scale);
-    # this is data-dependent, logged for reproducibility
-    T0_chain = cfg.temp_kappa * rms_current^2
+    T0_chain = cfg.temp_kappa
     ak_prop_chain = _resolve_ak(cfg, cfg.explore_frac, cfg.ak)
     ak_acc_chain = _resolve_ak(cfg, cfg.acc_freeze_frac, cfg.ak_acc)
     _write_trials_header_3d(trials_log; timestamp=timestamp, cfg=cfg, chain_seed=chain_seed, T0_chain=T0_chain, ak_prop=ak_prop_chain, ak_acc=ak_acc_chain)
@@ -517,8 +510,7 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
                                      dobs_filename=dobs_filename, dpred_filename=dpred_filename,
                                      origin=origin, rotation=rotation, cfg=cfg)
 
-            # energy = change in rms^2, downhill auto-accepts, uphill uses exp(-dE/T_acc)
-            dE = dp^2 - rms_current^2
+            dE = (dp^2 - rms_current^2) / max(rms_current^2, eps())
             u_acc = rand(rng)
             # Pacc = 1 downhill, exp(-dE/T_acc) uphill, kept finite for the log
             p_acc = dE <= 0 ? 1.0 : exp(-dE / max(T_acc, 1e-12))
@@ -624,9 +616,9 @@ function VFSA3DMT(start_model_path::AbstractString;
     start_model_abs = abspath(start_model_path)
     model_dir = dirname(start_model_abs)
 
-    # run dir is <out_root>_<seed>, made next to the start model if relative
     run_root_base = isabspath(cfg.out_root) ? cfg.out_root : joinpath(model_dir, cfg.out_root)
-    run_root = string(run_root_base, "_", cfg.seed)
+    t_now = now()
+    run_root = string(run_root_base, "_", Dates.format(t_now, "yyyymmdd_HHMMSS"))
     isdir(run_root) || mkpath(run_root)
 
     dobs_filename = basename(dobs_path)
@@ -634,7 +626,7 @@ function VFSA3DMT(start_model_path::AbstractString;
     cp(abspath(dobs_path), dobs_abs_target; force=true)
 
     # per-chain logs live in chain_NN/, best models flat in run_root for the ensemble readers
-    timestamp = Dates.format(now(), "yyyy-mm-dd HH:MM:SS")
+    timestamp = Dates.format(t_now, "yyyy-mm-dd HH:MM:SS")
 
     for c in 1:cfg.nchains
         _run_chain_3d(c, start_model_abs, dobs_filename, timestamp,
