@@ -3,38 +3,13 @@
 
 using MTGeophysics
 using Dates
-using Statistics
 
-#---------- user-configurable paths ----------
-# resolve relative to this script
-const START_MODEL_PATH = normpath(@__DIR__, "geoenergialoikka", "model.rho")
-const OBSERVED_DATA_PATH = normpath(@__DIR__, "geoenergialoikka", "data.dat") 
+const BASE_DIR = @__DIR__
 const MODEM_EXECUTABLE = "/projappl/project_2005537/Mod3DMT_cc"
 
-function _print_preflight_summary(start_model::AbstractString, observed_data::AbstractString, cfg::VFSA3DMTConfig)
-    m = load_ws3d_model(start_model)
-    ix = core_indices(m.cx; tol = cfg.pad_tol)
-    iy = core_indices(m.cy; tol = cfg.pad_tol)
-    println("3D VFSA preflight summary")
-    println("  Model: $start_model")
-    println("  Data:  $observed_data")
-    println("  Mesh cells: $(m.nx) x $(m.ny) x $(m.nz)")
-    println("  Detected core x-range: $ix ($(length(ix)) cells)")
-    println("  Detected core y-range: $iy ($(length(iy)) cells)")
-    println("  Nominal padding estimate: $(m.npad)")
-    println("  Core cell widths (x median / y median): $(median(m.dx[ix])) / $(median(m.dy[iy]))")
-end
+start_model = joinpath(BASE_DIR, "model.rho")
+observed_data = joinpath(BASE_DIR, "data.dat")
 
-#---------- resolve input paths ----------
-start_model = START_MODEL_PATH
-observed_data = OBSERVED_DATA_PATH
-
-# verify files exist
-for (label, path) in [("Starting model", start_model), ("Observed data", observed_data)]
-    if !isfile(path)
-        error("$label not found: $path")
-    end
-end
 
 #---------- configure the inversion ----------
 cfg = VFSA3DMTConfig(
@@ -42,7 +17,7 @@ cfg = VFSA3DMTConfig(
     nprocs                = 39,         # MPI ranks for ModEM
     mpirun_cmd            = "srun",     # MPI launcher
     modem_exe             = MODEM_EXECUTABLE,
-    out_root              = "run",
+    out_root              = joinpath(BASE_DIR, "run"),
     n_ctrl                = 900,        # RBF control points
     frac_update_controls  = 0.05,       # fraction of controls perturbed per trial
     log_bounds            = (0.0, 6.0), # log10(Ω·m) model bounds
@@ -65,12 +40,6 @@ cfg = VFSA3DMTConfig(
     sigma_scale           = 2.0,        # RBF width in cells (1σ); larger = smoother
     trunc_sigmas          = 3.0,        # RBF support cutoff in σ
 )
-
-#---------- optional preflight (inspect mesh without ModEM) ----------
-if get(ENV, "MTG_PREFLIGHT_ONLY", "0") == "1"
-    _print_preflight_summary(start_model, observed_data, cfg)
-    exit(0)
-end
 
 best_model, iter_log = VFSA3DMT(start_model; dobs_path=observed_data, cfg=cfg)
 
