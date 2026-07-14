@@ -27,11 +27,8 @@ Each iteration proposes `n_trials` models branching from the iteration-start
 state, selects the lowest-RMS trial, and runs a single Metropolis test on that
 winner (`n_trials = 1` is classic VFSA). One temperature schedule drives both
 proposal width and acceptance, cooling from `temp_kappa` to
-`cool_ratio*temp_kappa` at `max_iter`. When the best RMS improves by less than
-`adapt_rtol` (relative) over the last `adapt_window` iterations, greediness
-steps down: `n_trials` halves (never below 1) and, at the first step-down, the
-acceptance temperature freezes at its current value while the proposal
-temperature keeps cooling. `adapt_window = 0` disables adaptation.
+`cool_ratio*temp_kappa` at `max_iter`. Pick `temp_kappa` on the scale of the
+typical uphill `dE_rms2` so the Metropolis test is selective from the start.
 """
 Base.@kwdef mutable struct VFSA3DMTConfig
     nchains::Int
@@ -47,8 +44,6 @@ Base.@kwdef mutable struct VFSA3DMTConfig
     n_trials::Int
     temp_kappa::Float64
     cool_ratio::Float64
-    adapt_window::Int
-    adapt_rtol::Float64
     target_rms::Float64
     seed::Int
     pad_tol::Float64
@@ -340,19 +335,17 @@ function _write_trials_header_3d(path::AbstractString; timestamp::String, cfg::V
                     "  ak=", ak,
                     "  max_iter=", cfg.max_iter,
                     "  target_rms=", cfg.target_rms,
-                    "  n_trials=", cfg.n_trials,
-                    "  adapt_window=", cfg.adapt_window,
-                    "  adapt_rtol=", cfg.adapt_rtol)
-        println(io, repeat("-", 114))
-        @printf(io, "%8s %8s %12s %12s %11s %12s %10s %10s %5s %11s %s\n",
-                "Iter","Trial","Tprop","Tacc",
+                    "  n_trials=", cfg.n_trials)
+        println(io, repeat("-", 102))
+        @printf(io, "%8s %8s %12s %11s %12s %10s %10s %5s %11s %s\n",
+                "Iter","Trial","Temp",
                 "RMS","dE_rms2","Pacc","Uacc","Acc","RMSBest","Model")
-        println(io, repeat("-", 114))
+        println(io, repeat("-", 102))
     end
 end
 
 function _append_trial_row_3d(path::AbstractString; iter::Int, trial::Int,
-                              Tprop::Float64, Tacc::Float64,
+                           T::Float64,
                            rms_prop::Float64,
                            dE::Float64, p_acc::Float64, u_acc::Float64,
                            rms_best::Float64,
@@ -363,8 +356,8 @@ function _append_trial_row_3d(path::AbstractString; iter::Int, trial::Int,
     pacc_str = isnan(p_acc) ? lpad("—", 10) : @sprintf("%10.5f", p_acc)
     uacc_str = isnan(u_acc) ? lpad("—", 10) : @sprintf("%10.5f", u_acc)
     open(path, "a") do io
-        @printf(io, "%8d %8d %12.4g %12.4g %11.5f %12.5f %s %s %5d %11.5f %s\n",
-                iter, trial, Tprop, Tacc, rms_prop, dE, pacc_str, uacc_str, acc, rms_best, model_rel)
+        @printf(io, "%8d %8d %12.4g %11.5f %12.5f %s %s %5d %11.5f %s\n",
+                iter, trial, T, rms_prop, dE, pacc_str, uacc_str, acc, rms_best, model_rel)
     end
 end
 
@@ -381,26 +374,23 @@ function _write_iter_header_3d(path::AbstractString; timestamp::String, cfg::VFS
                     "  ak=", ak,
                     "  max_iter=", cfg.max_iter,
                     "  target_rms=", cfg.target_rms,
-                    "  n_trials=", cfg.n_trials,
-                    "  adapt_window=", cfg.adapt_window,
-                    "  adapt_rtol=", cfg.adapt_rtol)
-        println(io, repeat("-", 100))
-        # current accepted state after the iteration, Nacc = accepted trials this
-        # iter, Ntrl = active trials per iteration (steps down on stagnation)
-        @printf(io, "%8s %12s %12s %11s %11s %6s %6s %s\n",
-                "Iter","Tprop","Tacc","RMS","RMSBest","Nacc","Ntrl","Model")
-        println(io, repeat("-", 100))
+                    "  n_trials=", cfg.n_trials)
+        println(io, repeat("-", 88))
+        # current accepted state after the iteration, Nacc = accepted trials this iter
+        @printf(io, "%8s %12s %11s %11s %6s %s\n",
+                "Iter","Temp","RMS","RMSBest","Nacc","Model")
+        println(io, repeat("-", 88))
     end
 end
 
 function _append_iter_row_3d(path::AbstractString; iter::Int,
-                          Tprop::Float64, Tacc::Float64,
+                          T::Float64,
                           rms_curr::Float64,
                           rms_best::Float64,
-                          nacc::Int, ntrl::Int, model_rel::String)
+                          nacc::Int, model_rel::String)
     open(path, "a") do io
-        @printf(io, "%8d %12.4g %12.4g %11.5f %11.5f %6d %6d %s\n",
-                iter, Tprop, Tacc, rms_curr, rms_best, nacc, ntrl, model_rel)
+        @printf(io, "%8d %12.4g %11.5f %11.5f %6d %s\n",
+                iter, T, rms_curr, rms_best, nacc, model_rel)
     end
 end
 
@@ -489,16 +479,9 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
 
     lo, hi = cfg.log_bounds
 
-    # adaptive greediness: n_trials ratchets down on stagnation, the acceptance
-    # temperature freezes at the first step-down while the proposal keeps cooling
-    n_trials_active = cfg.n_trials
-    best_rms_hist = Float64[]
-    k_last_adapt = 0
-    T_acc_frozen = NaN
-
     for k in 1:cfg.max_iter
-        T_prop = _T_schedule(k; T0=T0_chain, ak=ak_chain)
-        T_acc = isnan(T_acc_frozen) ? T_prop : T_acc_frozen
+        # one schedule drives both proposal width and acceptance
+        T = _T_schedule(k; T0=T0_chain, ak=ak_chain)
 
         #---------- generate and test the trials ----------
         # all trials branch from the iteration-start state, the lowest-rms trial
@@ -511,11 +494,11 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
         best_trial_model_rel = ""
         best_trial_idx = 0
 
-        for t in 1:n_trials_active
+        for t in 1:cfg.n_trials
             # propose from the iteration-start state, the chain only advances
             # after the trial loop
             delta_params_trial = copy(delta_params_current)
-            propose_controls!(delta_params_trial, T_prop, lo, hi, v0_ctrl, nsel_default, rng;
+            propose_controls!(delta_params_trial, T, lo, hi, v0_ctrl, nsel_default, rng;
                               step_scale=cfg.step_scale)
 
             apply_rbf_map!(delta_values_buffer, rbfmap, delta_params_trial)
@@ -532,7 +515,7 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
 
             dE = (dp^2 - rms_iter_start^2) / max(rms_iter_start^2, eps())
             push!(trial_cache, (
-                iter=k, trial=t, Tprop=T_prop, Tacc=T_acc,
+                iter=k, trial=t, T=T,
                 rms_prop=dp,
                 dE=dE, p_acc=NaN, u_acc=NaN, accepted=false,
                 rms_best=best_rms,
@@ -549,8 +532,8 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
         #---------- single metropolis test on the best trial ----------
         dE_best = (best_trial_rms^2 - rms_iter_start^2) / max(rms_iter_start^2, eps())
         u_acc_best = rand(rng)
-        # Pacc = 1 downhill, exp(-dE/T_acc) uphill, kept finite for the log
-        p_acc_best = dE_best <= 0 ? 1.0 : exp(-dE_best / max(T_acc, 1e-12))
+        # Pacc = 1 downhill, exp(-dE/T) uphill, kept finite for the log
+        p_acc_best = dE_best <= 0 ? 1.0 : exp(-dE_best / max(T, 1e-12))
         accept_best = isfinite(best_trial_rms) && (u_acc_best < p_acc_best)
         if accept_best
             delta_params_current .= best_trial_delta_params
@@ -571,7 +554,7 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
         # trial files can only be removed after the best-model copy above;
         # in-loop deletion would lose the winning trial's model file
         if cfg.model_save_every <= 0
-            for t in 1:n_trials_active
+            for t in 1:cfg.n_trials
                 if !cfg.keep_models
                     model_t = joinpath(chain_dir, @sprintf("model_%02d_%03d_%02d.rho", chain_id, k, t))
                     isfile(model_t) && rm(model_t; force=true)
@@ -589,8 +572,8 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
         # iteration. the best model lives in best_model_abs and is never touched here.
         if cfg.model_save_every > 0
             is_checkpoint = (k % cfg.model_save_every == 0)
-            keep_trial = best_trial_idx > 0 ? best_trial_idx : n_trials_active
-            for t in 1:n_trials_active
+            keep_trial = best_trial_idx > 0 ? best_trial_idx : cfg.n_trials
+            for t in 1:cfg.n_trials
                 if is_checkpoint && t == keep_trial
                     continue
                 end
@@ -604,7 +587,7 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
         # write one row per trial
         for tr in trial_cache
             _append_trial_row_3d(trials_log; iter=tr.iter, trial=tr.trial,
-                              Tprop=tr.Tprop, Tacc=tr.Tacc,
+                              T=tr.T,
                               rms_prop=tr.rms_prop,
                               dE=tr.dE, p_acc=tr.p_acc, u_acc=tr.u_acc,
                               rms_best=tr.rms_best,
@@ -614,24 +597,11 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
         # iteration summary row: current accepted state, named by the model that
         # represents it (carried forward when no trial was accepted this iter)
         _append_iter_row_3d(iter_log; iter=k,
-                         Tprop=T_prop, Tacc=T_acc,
+                         T=T,
                          rms_curr=rms_current,
                          rms_best=best_rms,
-                         nacc=n_accepted_iter, ntrl=n_trials_active,
+                         nacc=n_accepted_iter,
                          model_rel=current_model_rel)
-
-        #---------- adaptive greediness: step down on stagnation ----------
-        push!(best_rms_hist, best_rms)
-        if cfg.adapt_window > 0 && n_trials_active > 1 && k - k_last_adapt >= cfg.adapt_window
-            rms_ref = best_rms_hist[k - cfg.adapt_window + 1]
-            if (rms_ref - best_rms) / rms_ref < cfg.adapt_rtol
-                n_trials_active = max(1, n_trials_active ÷ 2)
-                isnan(T_acc_frozen) && (T_acc_frozen = T_acc)
-                k_last_adapt = k
-                @info @sprintf("[chain %02d] stagnant over %d iters at iter %d: n_trials -> %d, T_acc held at %.4g",
-                               chain_id, cfg.adapt_window, k, n_trials_active, T_acc_frozen)
-            end
-        end
 
         # stop once best rms hits the target
         if best_rms <= cfg.target_rms
@@ -658,10 +628,6 @@ Run a 3D VFSA MT inversion. Returns `(best_model_path, iter_log_path)`.
 function VFSA3DMT(start_model_path::AbstractString;
                   dobs_path::AbstractString,
                   cfg::VFSA3DMTConfig)
-    cfg.adapt_window >= 0 ||
-        error("cfg.adapt_window must be >= 0, got $(cfg.adapt_window)")
-    cfg.adapt_window == 0 || 0.0 < cfg.adapt_rtol < 1.0 ||
-        error("cfg.adapt_rtol must be in (0,1), got $(cfg.adapt_rtol)")
     start_model_abs = abspath(start_model_path)
     model_dir = dirname(start_model_abs)
 
