@@ -12,7 +12,7 @@ edit applies to the core model only or to the full model including lateral
 padding.
 
 ```bash
-julia --project=. examples/manipulate_model_by_layers.jl
+julia --project=. examples/manipulate_model_by_layers.jl examples/cascadia/cascad_half_inverse.ws
 ```
 
 ![Replace Slice Resistivity Viewer](assets/replace_slice_resistivity_scope.png)
@@ -30,11 +30,10 @@ julia --project=. examples/manipulate_model_by_layers.jl
 
 ### Configuration
 
-Edit the variables at the top of the script:
+Pass the model path on the command line. Edit the remaining controls at the top
+of the script:
 
 ```julia
-model_file = joinpath(@__DIR__, "Cascadia", "cascad_half_inverse.ws")
-
 target_resistivity      = 1000.0     # replacement value (Ω·m)
 blend_previous_percent  = 0          # 0-100, blend the layer above cutoff
 replace_scope           = :core_only # or :full_model
@@ -60,7 +59,7 @@ Draw polygon zones on depth slices and replace resistivity within selected
 depth intervals. Supports undo, transition layers, and optional all-depths mode.
 
 ```bash
-julia --project=. examples/manipulate_model_by_drawing.jl
+julia --project=. examples/manipulate_model_by_drawing.jl examples/cascadia/cascad_half_inverse.ws
 ```
 
 ![Draw and Replace Zone Editor](assets/draw_and_replace.png)
@@ -78,11 +77,10 @@ julia --project=. examples/manipulate_model_by_drawing.jl
 
 ### Configuration
 
-Edit the variables at the top of the script:
+Pass the model path on the command line. Edit the remaining controls at the top
+of the script:
 
 ```julia
-model_file = joinpath(@__DIR__, "Cascadia", "cascad_half_inverse.ws")
-
 replacement_resistivity = 10000.0
 layers_above            = 2
 layers_below            = 2

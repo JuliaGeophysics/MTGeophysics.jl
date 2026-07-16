@@ -11,7 +11,18 @@ include(joinpath(dirname(@__DIR__), "src", "Model.jl"))
 include(joinpath(dirname(@__DIR__), "src", "CoreUtils3D.jl"))
 include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
 
-model_file = joinpath(@__DIR__, "Cascadia", "cascad_half_inverse.ws")
+# Paths must be passed on the command line:
+#   julia --project=. examples/manipulate_model_by_layers.jl <model_file>
+# Example (Cascadia):
+#   julia --project=. examples/manipulate_model_by_layers.jl examples/cascadia/cascad_half_inverse.ws
+model_file = length(ARGS) >= 1 ? ARGS[1] : ""
+
+function _print_cli_usage()
+    println("Usage:")
+    println("  julia --project=. examples/manipulate_model_by_layers.jl <model_file>")
+    println("Example (Cascadia):")
+    println("  julia --project=. examples/manipulate_model_by_layers.jl examples/cascadia/cascad_half_inverse.ws")
+end
 
 target_resistivity = 1000.0
 blend_previous_percent = 0
@@ -515,8 +526,20 @@ function set_textbox_text!(tb, value::AbstractString)
 end
 
 function main()
+    if isempty(model_file)
+        println("="^60)
+        println("ERROR: Missing model file argument.")
+        _print_cli_usage()
+        println("="^60)
+        return nothing, nothing
+    end
+
     if !isfile(model_file)
-        println("ERROR: Model file not found: $model_file")
+        println("="^60)
+        println("ERROR: Model file not found!")
+        println("Current path: $model_file")
+        _print_cli_usage()
+        println("="^60)
         return nothing, nothing
     end
 

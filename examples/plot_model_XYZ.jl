@@ -18,19 +18,33 @@ include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
 # =========================
 # User controls (edit here)
 # =========================
-# Paths may be passed on the command line; otherwise the defaults below are used:
-#   julia --project=. examples/plot_model_XYZ.jl [model_file] [data_file]
-model_file = length(ARGS) >= 1 ? ARGS[1] : joinpath(@__DIR__, "geoenergialoikka", "best_model_chain01.rho")
-data_file  = length(ARGS) >= 2 ? ARGS[2] : joinpath(@__DIR__, "geoenergialoikka", "data.dat")   # needed for EPSG:3067 / EPSG:4326
+# Paths must be passed on the command line:
+#   julia --project=. examples/plot_model_XYZ.jl <model_file> <data_file> [target_crs]
+# Example (Cascadia):
+#   julia --project=. examples/plot_model_XYZ.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat
+# If target_crs is omitted, the viewer stays in the project-local coordinates
+# implied by the ModEM data file (local transverse Mercator / survey metres).
+# To reproject into another map CRS, pass an explicit EPSG code such as
+# "EPSG:3067" or "EPSG:32610".
+model_file = length(ARGS) >= 1 ? ARGS[1] : ""
+data_file  = length(ARGS) >= 2 ? ARGS[2] : ""   # needed to resolve or apply any georeferenced plotting CRS
 
-# you can add your shapefiles here 
-shapefile_path = joinpath(@__DIR__, "geoenergialoikka", "BatholithOutline", "BatholithOutline.shp")
+function _print_cli_usage()
+    println("Usage:")
+    println("  julia --project=. examples/plot_model_XYZ.jl <model_file> <data_file> [target_crs]")
+    println("Example (Cascadia):")
+    println("  julia --project=. examples/plot_model_XYZ.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat")
+end
+
+# you can add your shapefiles here (set to nothing to skip)
+shapefile_path = nothing
+#shapefile_path = joinpath(@__DIR__, "geoenergialoikka", "BatholithOutline", "BatholithOutline.shp")
 #shapefile_path = joinpath(@__DIR__, "geoenergialoikka", "MTSites", "MTSites.shp")
 
 log10_scale = true
 colormap = :Spectral
 resistivity_range = (0.0, 4.0)
-max_depth = 40000.0
+max_depth = 5000.0
 show_padding = false
 pad_tolerance = 0.2
 viewer_figsize = (1800, 920)      # interactive viewer window size (points)
@@ -44,14 +58,20 @@ overlay_point_color = :black
 overlay_line_color = :black
 overlay_point_size = 7
 overlay_line_width = 1.5
-target_crs = "EPSG:3067"
+target_crs = length(ARGS) >= 3 ? ARGS[3] : "PROJECT"
 show_north_arrow = true
 show_scale_bar = true
 annotation_color = :black
 annotation_line_width = 2.0
 
+function _local_tm_proj_string(lat0::Real, lon0::Real)
+    return "+proj=tmerc +lat_0=$(float(lat0)) +lon_0=$(float(lon0)) +k=0.9996 +x_0=500000 +y_0=0 +datum=WGS84 +units=m +no_defs"
+end
+
+_is_project_local_crs(crs::AbstractString) = uppercase(strip(crs)) == "PROJECT"
+
 function _local_tm_to_wgs84_transform(lat0::Real, lon0::Real)
-    src = "+proj=tmerc +lat_0=$(float(lat0)) +lon_0=$(float(lon0)) +k=0.9996 +x_0=500000 +y_0=0 +datum=WGS84 +units=m +no_defs"
+    src = _local_tm_proj_string(lat0, lon0)
     return Proj.Transformation(src, "EPSG:4326"; always_xy = true)
 end
 
@@ -100,10 +120,16 @@ function model_xy_to_latlon_centers(M, d)
     return lat_centers, lon_centers, lat0, lon0, shiftlat, shiftlon
 end
 
-function _resolve_wgs84_to_target_xy_transform(target_crs::AbstractString)
+function _resolve_wgs84_to_target_xy_transform(target_crs::AbstractString, lat0::Real, lon0::Real)
     crs = uppercase(strip(target_crs))
     if crs == "EPSG:4326"
         return (lon, lat) -> (Float64(lon), Float64(lat))
+    elseif _is_project_local_crs(crs)
+        trans = Proj.Transformation("EPSG:4326", _local_tm_proj_string(lat0, lon0); always_xy = true)
+        return (lon, lat) -> begin
+            p = trans((Float64(lon), Float64(lat)))
+            return Float64(p[1]), Float64(p[2])
+        end
     end
 
     trans = Proj.Transformation("EPSG:4326", strip(target_crs); always_xy = true)
@@ -113,35 +139,89 @@ function _resolve_wgs84_to_target_xy_transform(target_crs::AbstractString)
     end
 end
 
+function _suggest_utm_crs(lat::Real, lon::Real)
+    zone = clamp(floor(Int, (Float64(lon) + 180.0) / 6.0) + 1, 1, 60)
+    prefix = lat >= 0 ? 326 : 327
+    return "EPSG:$(prefix)$(lpad(string(zone), 2, '0'))"
+end
+
+_is_finland_extent(lat::Real, lon::Real) = 58.0 <= lat <= 71.5 && 18.0 <= lon <= 33.5
+
+function _normalize_target_crs(requested_crs::AbstractString)
+    crs = strip(requested_crs)
+    crs_up = uppercase(crs)
+    if _is_project_local_crs(crs_up)
+        return "PROJECT"
+    end
+    startswith(crs_up, "EPSG:") && return crs_up
+    error("Unsupported target_crs: \"$requested_crs\". Use \"PROJECT\" for the safe local survey coordinates, or pass an explicit EPSG code such as \"EPSG:3067\" or \"EPSG:32610\".")
+end
+
+function _warn_if_target_crs_looks_unexpected(d, target_crs::AbstractString)
+    size(d.loc, 1) == 0 && return
+
+    crs = uppercase(strip(target_crs))
+    _is_project_local_crs(crs) && return
+    lat_mean = mean(d.loc[:, 1])
+    lon_mean = mean(d.loc[:, 2])
+    in_finland = _is_finland_extent(lat_mean, lon_mean)
+
+    if crs == "EPSG:3067" && !in_finland
+        utm_hint = _suggest_utm_crs(lat_mean, lon_mean)
+        @warn "target_crs=EPSG:3067 is Finland-specific and does not match the data-file coordinates. Use a projected CRS for the survey region instead." mean_lat=lat_mean mean_lon=lon_mean suggested_projected_crs=utm_hint
+    elseif crs == "EPSG:4326"
+        projected_hint = in_finland ? "EPSG:3067" : _suggest_utm_crs(lat_mean, lon_mean)
+        @warn "3D viewing in EPSG:4326 mixes degree-based horizontal axes with metre-based depth, so the model can look distorted. Prefer a projected CRS." mean_lat=lat_mean mean_lon=lon_mean suggested_projected_crs=projected_hint
+    end
+end
+
+function _axis_metadata_for_crs(target_crs::AbstractString)
+    crs = uppercase(strip(target_crs))
+    if crs == "EPSG:4326"
+        return (x_name = "Longitude", y_name = "Latitude", unit = "deg")
+    end
+    return (x_name = "Easting", y_name = "Northing", unit = "m")
+end
+
 function model_xy_to_target_crs_centers(M, d, target_crs::AbstractString)
     lat_centers, lon_centers, lat0, lon0, shiftlat, shiftlon = model_xy_to_latlon_centers(M, d)
     lat_ref = mean(lat_centers)
     lon_ref = mean(lon_centers)
 
-    src_local_tm = "+proj=tmerc +lat_0=$(float(lat0)) +lon_0=$(float(lon0)) +k=0.9996 +x_0=500000 +y_0=0 +datum=WGS84 +units=m +no_defs"
-    local_tm_to_target = Proj.Transformation(src_local_tm, strip(target_crs); always_xy = true)
-
-    # Standard GIS orientation for plotting:
-    # X axis = Easting (from model local y)
-    # Y axis = Northing (from model local x)
     x_target = Float64[]
-    for y_local in M.cy
-        p = local_tm_to_target((Float64(y_local) + 500000.0, 0.0))
-        push!(x_target, Float64(p[1]))
-    end
-
     y_target = Float64[]
-    for x_local in M.cx
-        p = local_tm_to_target((500000.0, Float64(x_local)))
-        push!(y_target, Float64(p[2]))
-    end
-
     station_tx = Float64[]
     station_ty = Float64[]
-    for i in eachindex(d.x)
-        p = local_tm_to_target((Float64(d.y[i]) + 500000.0, Float64(d.x[i])))
-        push!(station_tx, Float64(p[1]))
-        push!(station_ty, Float64(p[2]))
+
+    if _is_project_local_crs(target_crs)
+        # Project coordinates are the local TM metres implied by the ModEM
+        # origin and station XY offsets: Easting from local y, Northing from local x.
+        x_target = collect(Float64.(M.cy .+ 500000.0))
+        y_target = collect(Float64.(M.cx))
+        station_tx = collect(Float64.(d.y .+ 500000.0))
+        station_ty = collect(Float64.(d.x))
+    else
+        src_local_tm = _local_tm_proj_string(lat0, lon0)
+        local_tm_to_target = Proj.Transformation(src_local_tm, strip(target_crs); always_xy = true)
+
+        # Standard GIS orientation for plotting:
+        # X axis = Easting (from model local y)
+        # Y axis = Northing (from model local x)
+        for y_local in M.cy
+            p = local_tm_to_target((Float64(y_local) + 500000.0, 0.0))
+            push!(x_target, Float64(p[1]))
+        end
+
+        for x_local in M.cx
+            p = local_tm_to_target((500000.0, Float64(x_local)))
+            push!(y_target, Float64(p[2]))
+        end
+
+        for i in eachindex(d.x)
+            p = local_tm_to_target((Float64(d.y[i]) + 500000.0, Float64(d.x[i])))
+            push!(station_tx, Float64(p[1]))
+            push!(station_ty, Float64(p[2]))
+        end
     end
 
     epsv = eps(Float64)
@@ -299,8 +379,8 @@ function plot_shapefile_on_3d!(ax, shapefile_path;
     post_transform = (x, y) -> (x, y),
     xlim::Union{Nothing, Tuple{<:Real, <:Real}} = nothing,
     ylim::Union{Nothing, Tuple{<:Real, <:Real}} = nothing)
-    if !isfile(shapefile_path)
-        @warn "Shapefile not found: $shapefile_path"
+    if isnothing(shapefile_path) || !isfile(shapefile_path)
+        isnothing(shapefile_path) || @warn "Shapefile not found: $shapefile_path"
         return 0
     end
     table = Shapefile.Table(shapefile_path)
@@ -388,6 +468,7 @@ function modem_3d_viewer(
     max_depth::Union{Nothing, Real} = nothing,
     pad_tol::Real = 0.2,
     resistivity_range::Union{Nothing, Tuple{<:Real,<:Real}} = nothing,
+    target_crs::AbstractString,
     overlay_transform = (x, y) -> (x, y),
     north_axis::Symbol = :y,
     site_e::Vector{Float64} = Float64[],
@@ -398,6 +479,7 @@ function modem_3d_viewer(
     y_all = M.cy
     z_all = M.cz
     A_all = log10scale ? log10.(M.A) : M.A
+    axis_meta = _axis_metadata_for_crs(target_crs)
 
     ix_full = 1:length(x_all)
     iy_full = 1:length(y_all)
@@ -414,7 +496,6 @@ function modem_3d_viewer(
 
     x = x_all[ix]
     y = y_all[iy]
-    R = @view A_all[ix, iy, :]
 
     if isnothing(max_depth)
         kz = 1:length(z_all)
@@ -475,7 +556,7 @@ function modem_3d_viewer(
                         colormap = current_colormap[], 
                         colorrange = (cmin, cmax), 
                         bbox_visible = true)
-    plot_shapefile_on_3d!(ax.scene, shapefile_path;
+    !isnothing(shapefile_path) && plot_shapefile_on_3d!(ax.scene, shapefile_path;
         z_fixed = overlay_z_fixed,
         point_color = overlay_point_color,
         line_color = overlay_line_color,
@@ -531,14 +612,14 @@ function modem_3d_viewer(
     sl_yz = Slider(controls[1, 3], range = 1:length(x), startvalue = round(Int, length(x) / 2), width = 180)
     btn_next_yz = Button(controls[1, 4], label = "Next", fontsize = 10)
     tog_yz = Toggle(controls[1, 5], active = true)
-    lbl_yz = Label(controls[1, 6], "$(round(x[sl_yz.value[]], digits=0)) m", fontsize = 10, color = :gray35)
+    lbl_yz = Label(controls[1, 6], "$(round(x[sl_yz.value[]], digits=3)) $(axis_meta.unit)", fontsize = 10, color = :gray35)
 
     Label(controls[1, 7], "Y:", halign = :right, fontsize = 12)
     btn_prev_xz = Button(controls[1, 8], label = "Prev", fontsize = 10)
     sl_xz = Slider(controls[1, 9], range = 1:length(y), startvalue = round(Int, length(y) / 2), width = 180)
     btn_next_xz = Button(controls[1, 10], label = "Next", fontsize = 10)
     tog_xz = Toggle(controls[1, 11], active = true)
-    lbl_xz = Label(controls[1, 12], "$(round(y[sl_xz.value[]], digits=0)) m", fontsize = 10, color = :gray35)
+    lbl_xz = Label(controls[1, 12], "$(round(y[sl_xz.value[]], digits=3)) $(axis_meta.unit)", fontsize = 10, color = :gray35)
 
     Label(controls[1, 13], "Z:", halign = :right, fontsize = 12)
     btn_prev_xy = Button(controls[1, 14], label = "Prev", fontsize = 10)
@@ -565,7 +646,7 @@ function modem_3d_viewer(
         sx = xv[sl_yz.value[]]
         sy = yv[sl_xz.value[]]
         sz = -zv[sl_xy.value[]]
-        axis_info[] = "X: [$(round(minimum(xv), digits=0)), $(round(maximum(xv), digits=0))] m   Y: [$(round(minimum(yv), digits=0)), $(round(maximum(yv), digits=0))] m   Depth: [0, $(round(maximum(-zv), digits=0))] m   |   Slice: X=$(round(sx, digits=0)) m, Y=$(round(sy, digits=0)) m, Depth=$(round(sz, digits=0)) m"
+        axis_info[] = "$(axis_meta.x_name): [$(round(minimum(xv), digits=3)), $(round(maximum(xv), digits=3))] $(axis_meta.unit)   $(axis_meta.y_name): [$(round(minimum(yv), digits=3)), $(round(maximum(yv), digits=3))] $(axis_meta.unit)   Depth: [0, $(round(maximum(-zv), digits=0))] m   |   Slice: $(axis_meta.x_name)=$(round(sx, digits=3)) $(axis_meta.unit), $(axis_meta.y_name)=$(round(sy, digits=3)) $(axis_meta.unit), Depth=$(round(sz, digits=0)) m"
     end
 
     function apply_plane_visibility!()
@@ -650,7 +731,7 @@ function modem_3d_viewer(
                                 colormap = new_cmap, 
                                 colorrange = (cmin, cmax), 
                                 bbox_visible = true)
-        plot_shapefile_on_3d!(ax.scene, shapefile_path;
+        !isnothing(shapefile_path) && plot_shapefile_on_3d!(ax.scene, shapefile_path;
             z_fixed = overlay_z_fixed,
             point_color = overlay_point_color,
             line_color = overlay_line_color,
@@ -690,8 +771,8 @@ function modem_3d_viewer(
         mid_x = round(Int, length(new_x) / 2)
         mid_y = round(Int, length(new_y) / 2)
         mid_z = round(Int, length(new_z) / 2)
-        lbl_yz.text[] = "$(round(new_x[mid_x], digits=0)) m"
-        lbl_xz.text[] = "$(round(new_y[mid_y], digits=0)) m"
+        lbl_yz.text[] = "$(round(new_x[mid_x], digits=3)) $(axis_meta.unit)"
+        lbl_xz.text[] = "$(round(new_y[mid_y], digits=3)) $(axis_meta.unit)"
         lbl_xy.text[] = "Depth: $(round(-new_z[mid_z], digits=0)) m"
         update_axis_info!()
 
@@ -847,14 +928,48 @@ function modem_3d_viewer(
 end
 
 function main()
+    if isempty(model_file) || isempty(data_file)
+        println("="^60)
+        println("ERROR: Missing required CLI arguments.")
+        _print_cli_usage()
+        println("="^60)
+        return nothing, nothing
+    end
+
+    if !isfile(model_file)
+        println("="^60)
+        println("ERROR: Model file not found!")
+        println("Current path: $model_file")
+        _print_cli_usage()
+        println("="^60)
+        return nothing, nothing
+    end
+
+    if !isfile(data_file)
+        println("="^60)
+        println("ERROR: Data file not found!")
+        println("Current path: $data_file")
+        _print_cli_usage()
+        println("="^60)
+        return nothing, nothing
+    end
+
     println("Loading ModEM model from: $model_file")
     M = load_model_modem(model_file)
     println("Loading ModEM data for georeference from: $data_file")
     d = load_data_modem(data_file)
 
+    resolved_target_crs = _normalize_target_crs(target_crs)
+    _warn_if_target_crs_looks_unexpected(d, resolved_target_crs)
+
+    if _is_project_local_crs(resolved_target_crs)
+        println("Using project-local coordinates from data origin:")
+        println("  Coordinate system: local transverse Mercator / survey metres")
+    end
+
     x_target, y_target, lat0, lon0, shiftlat, shiftlon, lat_ref, lon_ref, mismatch_dim_consistent, station_tx, station_ty =
-        model_xy_to_target_crs_centers(M, d, target_crs)
-    wgs84_to_target = _resolve_wgs84_to_target_xy_transform(target_crs)
+        model_xy_to_target_crs_centers(M, d, resolved_target_crs)
+    wgs84_to_target = _resolve_wgs84_to_target_xy_transform(resolved_target_crs, lat0, lon0)
     overlay_transform = (lon, lat) -> begin
         lon_aligned = Float64(lon) + Float64(shiftlon)
         lat_aligned = Float64(lat) + Float64(shiftlat)
@@ -875,8 +990,9 @@ function main()
     println("  Y cells: $(length(M.cy))")
     println("  Z cells: $(length(M.cz))")
     println("Target CRS plotting:")
-    println("  Target CRS: $target_crs")
-    println("  Axis convention: X=Easting, Y=Northing (GIS-standard)")
+    println("  Target CRS: $resolved_target_crs")
+    axis_meta = _axis_metadata_for_crs(resolved_target_crs)
+    println("  Axis convention: X=$(axis_meta.x_name), Y=$(axis_meta.y_name)")
     println("  Axis consistency mismatch: $(round(mismatch_dim_consistent, digits=4))")
     println("  X range: [$(round(minimum(x_target), digits=3)), $(round(maximum(x_target), digits=3))]")
     println("  Y range: [$(round(minimum(y_target), digits=3)), $(round(maximum(y_target), digits=3))]")
@@ -902,6 +1018,7 @@ function main()
         max_depth = max_depth,
         pad_tol = pad_tolerance,
         resistivity_range = resistivity_range,
+        target_crs = resolved_target_crs,
         overlay_transform = overlay_transform,
         north_axis = north_axis,
         site_e = collect(Float64.(station_tx)),

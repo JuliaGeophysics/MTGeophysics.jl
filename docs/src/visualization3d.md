@@ -8,7 +8,7 @@ Interactive GLMakie viewers for exploring 3D resistivity models with depth slice
 ## Full 3D slice viewer
 
 ```bash
-julia --project=. examples/plot_model_XYZ.jl
+julia --project=. examples/plot_model_XYZ.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat
 ```
 
 Combined XY/XZ/YZ slices with depth controls, padding toggle, shapefile overlays, and figure export.
@@ -18,7 +18,7 @@ Combined XY/XZ/YZ slices with depth controls, padding toggle, shapefile overlays
 ## XY depth slices
 
 ```bash
-julia --project=. examples/plot_model_XY_slices.jl
+julia --project=. examples/plot_model_XY_slices.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat EPSG:32610
 ```
 
 Horizontal map-view slices at selectable depths.
@@ -28,23 +28,23 @@ Horizontal map-view slices at selectable depths.
 ## XY depth slices with shapefile overlays
 
 ```bash
-julia --project=. examples/plot_model_XY_with_shapefiles.jl
+julia --project=. examples/plot_model_XY_with_shapefiles.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat EPSG:32610
 ```
 
 Same viewer with any number of shapefiles overlaid on the map view; configure
 the `shapefiles` list at the top of the script. Each shapefile is reprojected
 from its native CRS (`.prj` sidecar) into the chosen coordinate system.
 
-## Lat/lon map view (any projected CRS)
+## XY map view with shapefiles (any projected CRS)
 
 ```bash
-julia --project=. examples/plot_model_LL_with_shapefiles.jl
+julia --project=. examples/plot_model_XY_with_shapefiles.jl
 ```
 
-Generalized map view with shapefile overlays that works in WGS 84 lat/lon
-(default) or **any** projected EPSG CRS — e.g. `EPSG:3067` (Finland),
-`EPSG:32610` / `EPSG:26910` (Cascadia UTM 10N), `EPSG:3005` (BC Albers).
-GIS exports carry a `.prj` generated for the chosen CRS.
+Map view with shapefile overlays that works in WGS 84 lat/lon or **any**
+projected EPSG CRS — e.g. `EPSG:3067` (Finland), `EPSG:32610` / `EPSG:26910`
+(Cascadia UTM 10N), `EPSG:3005` (BC Albers). GIS exports carry a `.prj`
+generated for the chosen CRS.
 
 ## XZ cross-sections
 
@@ -68,7 +68,7 @@ East-West vertical sections at selectable North-South positions.
 
 ## Coordinate systems
 
-Switch the coordinate mode at the top of each viewer script:
+Pass the coordinate mode on the command line for the 2-D viewers:
 
 | Mode | Description |
 |:-----|:------------|
@@ -76,9 +76,12 @@ Switch the coordinate mode at the top of each viewer script:
 | `"EPSG:3067"` | Finnish national grid |
 | `"EPSG:4326"` | WGS84 latitude/longitude |
 
+The XY-with-shapefiles viewer also accepts any projected `EPSG:XXXX` code,
+such as `EPSG:32610`, `EPSG:26910`, or `EPSG:3005`.
+
 ## GIS overlays
 
-Add shapefile overlays by setting `shapefile_path` in the viewer script:
+Add 3-D shapefile overlays by setting `shapefile_path` in the XYZ viewer script:
 
 ```julia
 shapefile_path = "path/to/coastline.shp"
@@ -87,4 +90,5 @@ target_crs     = "EPSG:3067"
 
 ## Example data
 
-The Cascadia 3D example is not bundled. Download it from [ModEM-Examples](https://github.com/magnetotellurics/ModEM-Examples/tree/main/Magnetotelluric/3D_MT/Cascadia) and place it in `examples/Cascadia/`.
+Checked-in example data are available under `examples/cascadia/` and
+`examples/MT3DINV4/` in this checkout.

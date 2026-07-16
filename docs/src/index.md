@@ -37,10 +37,9 @@ julia --project=. examples/run_vfsa2dmt.jl
 julia --project=. examples/run_vfsa3dmt.jl
 
 # Interactive 3-D viewers (requires GLMakie)
-julia --project=. examples/plot_model_XYZ.jl
-julia --project=. examples/plot_model_XY_slices.jl
-julia --project=. examples/plot_model_XY_with_shapefiles.jl
-julia --project=. examples/plot_model_LL_with_shapefiles.jl
-julia --project=. examples/plot_model_XZ_slices.jl
-julia --project=. examples/plot_model_YZ_slices.jl
+julia --project=. examples/plot_model_XYZ.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat
+julia --project=. examples/plot_model_XY_slices.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat EPSG:32610
+julia --project=. examples/plot_model_XY_with_shapefiles.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat EPSG:32610
+julia --project=. examples/plot_model_XZ_slices.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat
+julia --project=. examples/plot_model_YZ_slices.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat
 ```
