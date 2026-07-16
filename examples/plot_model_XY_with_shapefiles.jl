@@ -5,14 +5,19 @@
 # (configured in the `shapefiles` list below) on the map view.
 #
 # The user chooses the visualisation coordinate system at the top of the script:
-#   coordinate_system = "EPSG:3067"   — ETRS-TM35FIN (default, metres)
+#   coordinate_system = "EPSG:3067"   — ETRS-TM35FIN, Finland (default, metres)
 #   coordinate_system = "EPSG:4326"   — WGS 84 lat/lon (degrees)
 #   coordinate_system = "model"       — raw model XY (metres, no reprojection)
+#   coordinate_system = "EPSG:XXXX"   — any other projected CRS, e.g. for Cascadia:
+#       "EPSG:32610"  — WGS 84 / UTM zone 10N (Washington / Oregon coast)
+#       "EPSG:26910"  — NAD83  / UTM zone 10N
+#       "EPSG:3005"   — NAD83  / BC Albers
 #
 # When using a projected or geographic CRS the script needs a ModEM data file
 # (data_file) for georeferencing (origin lat/lon + station coordinates).
 # Shapefiles are automatically reprojected to the chosen CRS using their .prj
-# sidecar files (via Proj.jl).
+# sidecar files (via Proj.jl), and GIS exports carry a matching .prj generated
+# for whichever CRS is selected.
 
 using GLMakie
 using Statistics
@@ -27,18 +32,62 @@ include(joinpath(dirname(@__DIR__), "src", "CoreUtils3D.jl"))
 include(joinpath(dirname(@__DIR__), "src", "ShapefileOverlay.jl"))
 include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
 
+# ---------- Shapefile overlay configuration ----------
+# Define all overlay shapefiles here.
+#
+# Each entry is a NamedTuple with the following fields:
+#   path        – absolute or relative path to the .shp file
+#   enabled     – true / false — set to false to skip without deleting the entry
+#   color       – any Makie colour  (e.g. :red, :black, "#00FF00", RGBf(0,0,1))
+#   alpha       – transparency  0.0 (invisible) … 1.0 (opaque)
+#   point_size  – marker size for point geometries
+#   line_width  – line width for line / polygon geometries
+#
+# Enabled shapefiles that exist on disk are plotted automatically.
+# Missing shapefiles are skipped with a message.
+# Shapefiles are automatically reprojected from their native CRS (detected
+# from the .prj sidecar file) into the chosen `coordinate_system`.
+#
+# Leave the list empty if you don't want any shapefile overlay:
+#   shapefiles = []
+
+shapefiles = [
+    # (path = joinpath(@__DIR__, "gis", "2023MeasPts", "2023MeasPts.shp"), enabled = true, color = :black, alpha = 0.9, point_size = 7, line_width = 1.5),
+     (path = joinpath(@__DIR__, "geoenergialoikka", "gis", "Tnew", "Tnew.shp"), enabled = true, color = :black, alpha = 0.8, point_size = 5, line_width = 2.0),
+]
+
 # ---------- Model & data files ----------
-# Paths may be passed on the command line; otherwise the defaults below are used:
-#   julia --project=. examples/plot_model_XY_with_shapefiles.jl [model_file] [data_file]
-model_file = length(ARGS) >= 1 ? ARGS[1] : joinpath(@__DIR__, "geoenergialoikka", "best_model_chain01.rho")
-data_file  = length(ARGS) >= 2 ? ARGS[2] : joinpath(@__DIR__, "geoenergialoikka", "data.dat")   # needed for EPSG:3067 / EPSG:4326
+# Paths must be passed on the command line:
+#   julia --project=. examples/plot_model_XY_with_shapefiles.jl <model_file> [data_file] [coordinate_system]
+#   julia --project=. examples/plot_model_XY_with_shapefiles.jl <model_file> model
+# Example (Cascadia):
+#   julia --project=. examples/plot_model_XY_with_shapefiles.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat EPSG:32610
+
+function _looks_like_coordinate_system_arg(arg::AbstractString)
+    arg_up = uppercase(strip(arg))
+    return arg_up == "MODEL" || startswith(arg_up, "EPSG:")
+end
+
+model_file = length(ARGS) >= 1 ? ARGS[1] : ""
+data_file  = length(ARGS) >= 2 && !_looks_like_coordinate_system_arg(ARGS[2]) ? ARGS[2] : ""   # needed for EPSG:3067 / EPSG:4326
+
+function _print_cli_usage()
+    println("Usage:")
+    println("  julia --project=. examples/plot_model_XY_with_shapefiles.jl <model_file> [data_file] [coordinate_system]")
+    println("  julia --project=. examples/plot_model_XY_with_shapefiles.jl <model_file> model")
+    println("Example (Cascadia):")
+    println("  julia --project=. examples/plot_model_XY_with_shapefiles.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat EPSG:32610")
+end
 
 # ---------- Coordinate system ----------
 # Choose how the map axes are labelled and how model centres are converted:
 #   "EPSG:3067"  — ETRS-TM35FIN (Easting / Northing in metres)  ← default
 #   "EPSG:4326"  — WGS 84 geographic (Longitude / Latitude in degrees)
 #   "model"      — raw model XY (no conversion; data_file is not needed)
-coordinate_system = "EPSG:3067"
+#   any other projected "EPSG:XXXX" code, e.g. for Cascadia:
+#     "EPSG:32610" (WGS 84 / UTM 10N), "EPSG:26910" (NAD83 / UTM 10N),
+#     "EPSG:3005" (NAD83 / BC Albers)
+coordinate_system = length(ARGS) >= 3 ? ARGS[3] : (length(ARGS) >= 2 && _looks_like_coordinate_system_arg(ARGS[2]) ? ARGS[2] : "EPSG:3067")
 
 # ---------- Visualisation controls ----------
 log10_scale       = true
@@ -66,28 +115,6 @@ pad_tol           = 0.5
 custom_extent = nothing
 
 # custom_extent = (min_lat = 63.0, max_lat = 65.0, min_lon = 25.0, max_lon = 28.0)
-
-# ---------- Shapefile overlay configuration ----------
-# Define shapefiles to overlay on the depth-slice map view.
-# Each entry is a NamedTuple with the following fields:
-#
-#   path        – absolute or relative path to the .shp file
-#   enabled     – true / false — set to false to skip without deleting the entry
-#   color       – any Makie colour  (e.g. :red, :black, "#00FF00", RGBf(0,0,1))
-#   alpha       – transparency  0.0 (invisible) … 1.0 (opaque)
-#   point_size  – marker size for point geometries
-#   line_width  – line width for line / polygon geometries
-#
-# Shapefiles are automatically reprojected from their native CRS (detected
-# from the .prj sidecar file) into the chosen `coordinate_system`.
-#
-# Leave the list empty if you don't want any shapefile overlay:
-#   shapefiles = []
-
-shapefiles = [
-   # (path = joinpath(@__DIR__, "gis", "2023MeasPts", "2023MeasPts.shp"), enabled = true,  color = :black, alpha = 0.9, point_size = 7,  line_width = 1.5),
-    (path = joinpath(@__DIR__, "geoenergialoikka","gis", "Tnew", "Tnew.shp"),              enabled = true,  color = :black,   alpha = 0.8, point_size = 5,  line_width = 2.0),
-]
 
 # ---------- Export settings ----------
 viewer_figsize = (1100, 950)      # interactive viewer window size (points)
@@ -352,10 +379,10 @@ function _distance_based_aspect(lat_vals::AbstractVector{<:Real}, lon_vals::Abst
     return width_km / max(height_km, eps(Float64)), lat_ref
 end
 
-function _latlon_to_epsg3067(lat_centers, lon_centers)
-    # Convert independent lat/lon axis arrays to ETRS-TM35FIN (EPSG:3067).
+function _latlon_to_projected(lat_centers, lon_centers, crs::AbstractString)
+    # Convert independent lat/lon axis arrays to any projected CRS.
     # Each axis is converted independently using a reference value for the other.
-    trans = Proj.Transformation("EPSG:4326", "EPSG:3067"; always_xy = true)
+    trans = Proj.Transformation("EPSG:4326", uppercase(strip(crs)); always_xy = true)
     ref_lon = mean(lon_centers)
     ref_lat = mean(lat_centers)
 
@@ -416,21 +443,18 @@ function _build_model_in_crs(M, d, crs::AbstractString, crs_extent = nothing)
         println("    Distance-based aspect (W/H): $(round(map_asp, digits=4)) at lat̄=$(round(lat_ref, digits=3))°")
         return M_out, xlabel, ylabel, aspect
 
-    elseif crs_up == "EPSG:3067"
-        # ETRS-TM35FIN
-        northing, easting = _latlon_to_epsg3067(lat_centers, lon_centers)
+    else
+        # Any projected CRS (EPSG:3067, EPSG:32610, EPSG:26910, EPSG:3005, ...)
+        northing, easting = _latlon_to_projected(lat_centers, lon_centers, crs_up)
         M_out = (A = M.A, cx = northing, cy = easting, cz = M.cz)
         xlabel = "Easting (m)"
         ylabel = "Northing (m)"
         aspect = nothing   # DataAspect — metres in both axes
 
-        println("  Coordinate system: ETRS-TM35FIN (EPSG:3067)")
+        println("  Coordinate system: $crs_up (projected)")
         println("    Easting range:  $(minimum(easting)) to $(maximum(easting))")
         println("    Northing range: $(minimum(northing)) to $(maximum(northing))")
         return M_out, xlabel, ylabel, aspect
-
-    else
-        error("Unsupported coordinate_system: \"$crs\".  Use \"EPSG:3067\", \"EPSG:4326\", or \"model\".")
     end
 end
 
@@ -446,9 +470,15 @@ end
 
 function _resolve_prj_wkt_for_crs(crs::AbstractString)
     c = uppercase(strip(crs))
+    c == "MODEL" && return ""
     c == "EPSG:4326" && return _default_wgs84_wkt()
     c == "EPSG:3067" && return _default_tm35fin_wkt()
-    return ""
+    try
+        return Proj.proj_as_wkt(Proj.CRS(c), Proj.PJ_WKT1_ESRI)
+    catch e
+        @warn "Could not derive .prj WKT for $crs ($e); sidecar files will be omitted"
+        return ""
+    end
 end
 
 # ---------- GIS shapefile export for all depth slices ----------
@@ -606,11 +636,9 @@ function _stations_in_crs(d, crs::AbstractString)
         return (collect(Float64.(d.y)), collect(Float64.(d.x)))
     elseif crs_up == "EPSG:4326"
         return (collect(Float64.(d.loc[:, 2])), collect(Float64.(d.loc[:, 1])))
-    elseif crs_up == "EPSG:3067"
-        northing, easting = _latlon_to_epsg3067(collect(Float64.(d.loc[:, 1])), collect(Float64.(d.loc[:, 2])))
-        return (collect(Float64.(easting)), collect(Float64.(northing)))
     else
-        return (Float64[], Float64[])
+        northing, easting = _latlon_to_projected(collect(Float64.(d.loc[:, 1])), collect(Float64.(d.loc[:, 2])), crs_up)
+        return (collect(Float64.(easting)), collect(Float64.(northing)))
     end
 end
 
@@ -1044,11 +1072,19 @@ end
 # ---------- Main ----------
 
 function main()
+    if isempty(model_file)
+        println("="^60)
+        println("ERROR: Missing model file argument.")
+        _print_cli_usage()
+        println("="^60)
+        return nothing, nothing
+    end
+
     if !isfile(model_file)
         println("="^60)
         println("ERROR: Model file not found!")
-        println("Please edit this script and set 'model_file' to your ModEM model path.")
         println("Current path: $model_file")
+        _print_cli_usage()
         println("="^60)
         return nothing, nothing
     end
@@ -1068,15 +1104,16 @@ function main()
     need_data = crs_up != "MODEL"
 
     d = nothing
-    if isfile(data_file)
+    if !isempty(data_file) && isfile(data_file)
         println("\nLoading ModEM data: $data_file")
         d = load_data_modem(data_file)
     elseif need_data
         println("="^60)
-        println("ERROR: Data file not found!")
+        println(isempty(data_file) ? "ERROR: Missing data file argument!" : "ERROR: Data file not found!")
         println("  A ModEM data file is required for coordinate_system = \"$coordinate_system\".")
-        println("  Set data_file at the top of this script, or use coordinate_system = \"model\".")
+        println("  Pass data_file on the command line, or use coordinate_system = \"model\".")
         println("  Current path: $data_file")
+        _print_cli_usage()
         println("="^60)
         return nothing, nothing
     end
@@ -1149,7 +1186,11 @@ function main()
         println("  - $(length(loaded_shapefiles)) shapefile(s) overlaid on the depth slice")
     end
 
+    Makie.update_state_before_display!(fig)
     screen = display(fig)
+    if screen isa GLMakie.Screen && GLMakie.requires_update(screen)
+        GLMakie.render_frame(screen)
+    end
 
     println("\nClose the figure window to exit...")
     wait(screen)

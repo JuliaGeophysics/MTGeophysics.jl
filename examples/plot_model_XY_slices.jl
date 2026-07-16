@@ -2,7 +2,7 @@
 # Author: @pankajkmishra
 # This script loads a model, builds 2D map slices by depth, and provides controls
 # for browsing/export.  For shapefile overlays use plot_model_XY_with_shapefiles.jl
-# (same viewer plus overlays) or plot_model_LL_with_shapefiles.jl (any projected CRS).
+# (same viewer plus overlays and any projected CRS support).
 #
 # The user chooses the visualisation coordinate system at the top of the script:
 #   coordinate_system = "EPSG:3067"   — ETRS-TM35FIN (default, metres)
@@ -24,24 +24,41 @@ include(joinpath(dirname(@__DIR__), "src", "CoreUtils3D.jl"))
 include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
 
 # ---------- Model & data files ----------
-# Paths may be passed on the command line; otherwise the defaults below are used:
-#   julia --project=. examples/plot_model_XY_slices.jl [model_file] [data_file]
-model_file = length(ARGS) >= 1 ? ARGS[1] : joinpath(@__DIR__, "geoenergialoikka", "best_model_chain01.rho")
-data_file  = length(ARGS) >= 2 ? ARGS[2] : joinpath(@__DIR__, "geoenergialoikka", "data.dat")   # needed for EPSG:3067 / EPSG:4326
+# Paths must be passed on the command line:
+#   julia --project=. examples/plot_model_XY_slices.jl <model_file> [data_file] [coordinate_system]
+#   julia --project=. examples/plot_model_XY_slices.jl <model_file> model
+# Example (Cascadia):
+#   julia --project=. examples/plot_model_XY_slices.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat EPSG:32610
+
+function _looks_like_coordinate_system_arg(arg::AbstractString)
+    arg_up = uppercase(strip(arg))
+    return arg_up == "MODEL" || startswith(arg_up, "EPSG:")
+end
+
+model_file = length(ARGS) >= 1 ? ARGS[1] : ""
+data_file  = length(ARGS) >= 2 && !_looks_like_coordinate_system_arg(ARGS[2]) ? ARGS[2] : ""   # needed for EPSG:3067 / EPSG:4326
+
+function _print_cli_usage()
+    println("Usage:")
+    println("  julia --project=. examples/plot_model_XY_slices.jl <model_file> [data_file] [coordinate_system]")
+    println("  julia --project=. examples/plot_model_XY_slices.jl <model_file> model")
+    println("Example (Cascadia):")
+    println("  julia --project=. examples/plot_model_XY_slices.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat EPSG:32610")
+end
 
 # ---------- Coordinate system ----------
 # Choose how the map axes are labelled and how model centres are converted:
 #   "EPSG:3067"  — ETRS-TM35FIN (Easting / Northing in metres)  ← default
 #   "EPSG:4326"  — WGS 84 geographic (Longitude / Latitude in degrees)
 #   "model"      — raw model XY (no conversion; data_file is not needed)
-coordinate_system = "EPSG:3067"
+coordinate_system = length(ARGS) >= 3 ? ARGS[3] : (length(ARGS) >= 2 && _looks_like_coordinate_system_arg(ARGS[2]) ? ARGS[2] : "EPSG:4326")   # "EPSG:4326", "EPSG:3067", or "model"
 
 # ---------- Visualisation controls ----------
 log10_scale       = true
 colormap          = :Spectral
 with_padding      = false          # false → start with core/extent view (default)
 max_depth         = nothing
-resistivity_range = (1.0, 4.0)
+resistivity_range = (0.0, 4.0)
 show_grid         = true
 grid_color        = :black
 grid_linewidth    = 0.5
@@ -902,11 +919,19 @@ end
 # ---------- Main ----------
 
 function main()
+    if isempty(model_file)
+        println("="^60)
+        println("ERROR: Missing model file argument.")
+        _print_cli_usage()
+        println("="^60)
+        return nothing, nothing
+    end
+
     if !isfile(model_file)
         println("="^60)
         println("ERROR: Model file not found!")
-        println("Please edit this script and set 'model_file' to your ModEM model path.")
         println("Current path: $model_file")
+        _print_cli_usage()
         println("="^60)
         return nothing, nothing
     end
@@ -926,15 +951,16 @@ function main()
     need_data = crs_up != "MODEL"
 
     d = nothing
-    if isfile(data_file)
+    if !isempty(data_file) && isfile(data_file)
         println("\nLoading ModEM data: $data_file")
         d = load_data_modem(data_file)
     elseif need_data
         println("="^60)
-        println("ERROR: Data file not found!")
+        println(isempty(data_file) ? "ERROR: Missing data file argument!" : "ERROR: Data file not found!")
         println("  A ModEM data file is required for coordinate_system = \"$coordinate_system\".")
-        println("  Set data_file at the top of this script, or use coordinate_system = \"model\".")
+        println("  Pass data_file on the command line, or use coordinate_system = \"model\".")
         println("  Current path: $data_file")
+        _print_cli_usage()
         println("="^60)
         return nothing, nothing
     end

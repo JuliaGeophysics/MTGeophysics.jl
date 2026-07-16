@@ -49,7 +49,11 @@ function read_mackie3d_model(fname::AbstractString, block::Bool=true)
             push!(ints, v)
         end
     end
-    nx, ny, nz, nzAir = ints[1], ints[2], ints[3], ints[4]
+    nx, ny = ints[1], ints[2]
+    uses_values_header = occursin("VALUES", uppercase(hdr))
+    nzAir = ints[4]
+    nz = uses_values_header ? ints[3] + nzAir : ints[3]
+    nzEarth = uses_values_header ? ints[3] : (nz - nzAir)
     type = occursin("LOGE", hdr) ? "LOGE" : "LINEAR"
     function take_floats!(n::Int)
         vals = Float64[]
@@ -68,11 +72,68 @@ function read_mackie3d_model(fname::AbstractString, block::Bool=true)
         end
         return vals
     end
+    if uses_values_header
+        while i ≤ length(lines) && isempty(strip(lines[i]))
+            i += 1
+        end
+        if i ≤ length(lines)
+            type_line = strip(lines[i])
+            if occursin("LOGE", uppercase(type_line))
+                type = "LOGE"
+            elseif occursin("LOG10", uppercase(type_line))
+                type = "LOG10"
+            elseif occursin("LINEAR", uppercase(type_line))
+                type = "LINEAR"
+            end
+            i += 1
+        end
+    end
     dx = take_floats!(nx)
     dy = take_floats!(ny)
-    dz = take_floats!(nz)
-    A = zeros(nx, ny, nz)
-    if block
+    dz = zeros(Float64, nz)
+    if uses_values_header
+        dz_earth = take_floats!(nzEarth)
+        dz[(nzAir + 1):end] = dz_earth
+        alpha = 3.0
+        ii = nzAir + 1
+        jj = 0
+        for iz in nzAir:-1:1
+            jj += 1
+            dz[iz] = (alpha^(jj - 1)) * dz[ii]
+            ii += 1
+        end
+        if nzAir > 0 && dz[1] < 30000
+            dz[1] = 30000.0
+        end
+    else
+        dz .= take_floats!(nz)
+    end
+
+    A = fill(NaN, nx, ny, nz)
+    if uses_values_header
+        for k in 1:nzEarth
+            while i ≤ length(lines) && isempty(strip(lines[i]))
+                i += 1
+            end
+            which_layer = k
+            if i ≤ length(lines)
+                ks = split(strip(lines[i]))
+                ints_layer = Int[]
+                for t in ks
+                    v = tryparse(Int, t)
+                    v === nothing || push!(ints_layer, v)
+                end
+                if !isempty(ints_layer)
+                    which_layer = ints_layer[1]
+                    i += 1
+                end
+            end
+            for iy in 1:ny
+                vals = take_floats!(nx)
+                A[:, iy, nzAir + which_layer] = vals
+            end
+        end
+    elseif block
         for k in 1:nz
             vals = take_floats!(nx*ny)
             tmp = reshape(vals, nx, ny)
@@ -128,6 +189,9 @@ function read_mackie3d_model(fname::AbstractString, block::Bool=true)
             rotation = nums[1]
         end
     end
+    if uses_values_header
+        origin .*= 1000.0
+    end
     return dx, dy, dz, A, nzAir, type, origin, rotation
 end
 
@@ -173,40 +237,71 @@ function load_model_modem(name::AbstractString)
     return m
 end
 
-function write_model_modem(outputfile::AbstractString, m::Model)
-    write_model_modem(outputfile, m.dx, m.dy, m.dz, m.A, m.origin)
+function write_model_modem(outputfile::AbstractString, m::Model; nzAir::Integer = 0, rotation::Real = 0.0, mackie_values::Bool = false)
+    write_model_modem(outputfile, m.dx, m.dy, m.dz, m.A, m.origin; rotation = rotation, nzAir = nzAir, mackie_values = mackie_values)
 end
 
 function write_model_modem(outputfile::AbstractString,
                            dx::AbstractVector, dy::AbstractVector, dz::AbstractVector,
                            A::Array{<:Real,3}, origin::AbstractVector;
-                           rotation::Real = 0.0)
+                           rotation::Real = 0.0,
+                           nzAir::Integer = 0,
+                           mackie_values::Bool = false)
     nx, ny, nz = size(A)
+    nz_air = max(0, Int(nzAir))
+    nz_earth = nz - nz_air
+    nz_earth > 0 || error("Model must contain at least one earth layer.")
 
     Aw = copy(Float64.(A))
     Aw[isnan.(Aw)] .= 1e17
     Aw .= log.(Aw)
 
     open(outputfile, "w") do io
-        println(io, "# Written by MTGeophysics.jl write_model_modem")
-        println(io, "$nx $ny $nz 0 LOGE")
+        if mackie_values
+            @printf(io, "%5d%5d%5d%5d%8s\n", nx, ny, nz_earth, nz_air, "VALUES")
+            println(io, "LOGE")
 
-        for v in dx; print(io, "$v "); end; println(io)
-        for v in dy; print(io, "$v "); end; println(io)
-        for v in dz; print(io, "$v "); end; println(io)
+            for v in dx; @printf(io, "%12.3f", Float64(v)); end; println(io)
+            for v in dy; @printf(io, "%12.3f", Float64(v)); end; println(io)
+            for v in dz[(nz_air + 1):end]; @printf(io, "%12.3f", Float64(v)); end; println(io)
 
-        for k in 1:nz
-            println(io)
-            for j in 1:ny
-                for i in nx:-1:1
-                    @printf(io, "%15.5E", Aw[i, j, k])
+            for k in 1:nz_earth
+                @printf(io, "%5d\n", k)
+                for j in 1:ny
+                    write(io, "  ")
+                    for i in 1:nx
+                        @printf(io, "%13.5E", Aw[i, j, nz_air + k])
+                    end
+                    println(io)
                 end
-                println(io)
             end
-        end
 
-        println(io, "$(origin[1]) $(origin[2]) $(origin[3])")
-        println(io, "$rotation")
+            println(io, "ModEM")
+            println(io, "site")
+            println(io, "1 1")
+            @printf(io, "%12.3f%12.3f%12.3f\n", Float64(origin[1]) / 1000.0, Float64(origin[2]) / 1000.0, Float64(origin[3]) / 1000.0)
+            @printf(io, "%12.3f\n", Float64(rotation))
+        else
+            println(io, "# Written by MTGeophysics.jl write_model_modem")
+            println(io, "$nx $ny $nz $nz_air LOGE")
+
+            for v in dx; print(io, "$v "); end; println(io)
+            for v in dy; print(io, "$v "); end; println(io)
+            for v in dz; print(io, "$v "); end; println(io)
+
+            for k in 1:nz
+                println(io)
+                for j in 1:ny
+                    for i in nx:-1:1
+                        @printf(io, "%15.5E", Aw[i, j, k])
+                    end
+                    println(io)
+                end
+            end
+
+            println(io, "$(origin[1]) $(origin[2]) $(origin[3])")
+            println(io, "$rotation")
+        end
     end
 
     println("Model written to: $outputfile")

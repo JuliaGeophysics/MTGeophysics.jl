@@ -158,26 +158,31 @@ Each viewer accepts the model and data files (paths included) as optional
 command-line arguments:
 
 ```powershell
-julia --project=. .\examples\<viewer>.jl [model_file] [data_file]
+julia --project=. .\examples\<viewer>.jl <model_file> [data_file] [coordinate_system_or_target_crs]
 ```
 
-If no arguments are given, the defaults at the top of each script are used
-(`examples/Cascadia/...` for the 3-D/XZ/YZ viewers, `examples/geoenergialoikka/...`
-for the XY viewer). The `data_file` is only needed for the `"EPSG:3067"` and
-`"EPSG:4326"` coordinate modes; in `"model"` mode it is ignored.
+Current CLI conventions:
+
+- `plot_model_XYZ.jl` expects `<model_file> <data_file> [target_crs]`
+- `plot_model_XY_slices.jl`, `plot_model_XY_with_shapefiles.jl`,
+	`plot_model_XZ_slices.jl`, and `plot_model_YZ_slices.jl` expect
+	`<model_file> [data_file] [coordinate_system]`
+- For the 2-D viewers, `data_file` is only needed for georeferenced modes such
+	as `"EPSG:3067"`, `"EPSG:4326"`, or any other projected `EPSG:XXXX`; it can
+	be omitted in `"model"` mode.
 
 ### Full 3-D slice viewer
 
 ```powershell
-julia --project=. .\examples\plot_model_XYZ.jl
-julia --project=. .\examples\plot_model_XYZ.jl examples\Cascadia\cascad_half_inverse.ws examples\Cascadia\cascad_errfl5.dat
+julia --project=. .\examples\plot_model_XYZ.jl examples\cascadia\cascad_half_inverse.ws examples\cascadia\cascad_errfl5.dat
+julia --project=. .\examples\plot_model_XYZ.jl examples\MT3DINV4\I_NLCG.rho examples\MT3DINV4\data5pc.dat EPSG:26918
 ```
 
 ### XY depth-slice viewer
 
 ```powershell
-julia --project=. .\examples\plot_model_XY_slices.jl
-julia --project=. .\examples\plot_model_XY_slices.jl examples\geoenergialoikka\best_model_chain01.rho examples\geoenergialoikka\data.dat
+julia --project=. .\examples\plot_model_XY_slices.jl examples\cascadia\cascad_half_inverse.ws examples\cascadia\cascad_errfl5.dat EPSG:32610
+julia --project=. .\examples\plot_model_XY_slices.jl examples\cascadia\cascad_half_inverse.ws model
 ```
 
 ### XY depth-slice viewer with shapefile overlays
@@ -186,34 +191,33 @@ Same viewer plus any number of shapefile overlays, configured in the
 `shapefiles` list at the top of the script:
 
 ```powershell
-julia --project=. .\examples\plot_model_XY_with_shapefiles.jl
+julia --project=. .\examples\plot_model_XY_with_shapefiles.jl examples\cascadia\cascad_half_inverse.ws examples\cascadia\cascad_errfl5.dat EPSG:32610
 ```
 
-### Lat/lon map view with shapefiles (any projected CRS)
+### XY depth-slice viewer with shapefile overlays (any projected CRS)
 
-Map view in WGS 84 lat/lon by default, switchable to any projected EPSG code
-(e.g. `EPSG:3067` for Finland, `EPSG:32610` / `EPSG:26910` for Cascadia):
+Map view with shapefile overlays, switchable to WGS 84 lat/lon or any projected
+EPSG code (e.g. `EPSG:3067` for Finland, `EPSG:32610` / `EPSG:26910` for Cascadia):
 
 ```powershell
-julia --project=. .\examples\plot_model_LL_with_shapefiles.jl
+julia --project=. .\examples\plot_model_XY_with_shapefiles.jl examples\geoenergialoikka\model.rho examples\geoenergialoikka\data.dat EPSG:4326
 ```
 
 ### XZ cross-section viewer
 
 ```powershell
-julia --project=. .\examples\plot_model_XZ_slices.jl
-julia --project=. .\examples\plot_model_XZ_slices.jl examples\Cascadia\cascad_half_inverse.ws examples\Cascadia\cascad_errfl5.dat
+julia --project=. .\examples\plot_model_XZ_slices.jl examples\cascadia\cascad_half_inverse.ws examples\cascadia\cascad_errfl5.dat
+julia --project=. .\examples\plot_model_XZ_slices.jl examples\cascadia\cascad_half_inverse.ws model
 ```
 
 ### YZ cross-section viewer
 
 ```powershell
-julia --project=. .\examples\plot_model_YZ_slices.jl
-julia --project=. .\examples\plot_model_YZ_slices.jl examples\Cascadia\cascad_half_inverse.ws examples\Cascadia\cascad_errfl5.dat
+julia --project=. .\examples\plot_model_YZ_slices.jl examples\cascadia\cascad_half_inverse.ws examples\cascadia\cascad_errfl5.dat
+julia --project=. .\examples\plot_model_YZ_slices.jl examples\cascadia\cascad_half_inverse.ws model
 ```
 
-In the slice-viewer scripts, switch the coordinate mode at the top of the file
-to one of:
+In the slice-viewer scripts, pass the coordinate mode on the command line as:
 
 - `"EPSG:3067"`
 - `"EPSG:4326"`
@@ -225,7 +229,7 @@ Interactively replace resistivity below a chosen depth layer, with scope
 control (core-only or full model including padding):
 
 ```powershell
-julia --project=. .\examples\manipulate_model_by_layers.jl
+julia --project=. .\examples\manipulate_model_by_layers.jl examples\cascadia\cascad_half_inverse.ws
 ```
 
 Use the depth slider to pick a cutoff layer, enter a target resistivity and
@@ -239,7 +243,7 @@ Draw polygon zones on depth slices and replace resistivity within selected
 depth intervals, with undo and transition layers:
 
 ```powershell
-julia --project=. .\examples\manipulate_model_by_drawing.jl
+julia --project=. .\examples\manipulate_model_by_drawing.jl examples\cascadia\cascad_half_inverse.ws
 ```
 
 ## 10. Recommended first session
@@ -255,8 +259,8 @@ julia --project=. .\examples\response_2d.jl
 julia --project=. .\examples\run_vfsa2dmt.jl
 ```
 
-Then, if you have downloaded the Cascadia dataset:
+Then, to try a checked-in 3-D example:
 
 ```powershell
-julia --project=. .\examples\plot_model_XY_slices.jl
+julia --project=. .\examples\plot_model_XY_slices.jl examples\cascadia\cascad_half_inverse.ws examples\cascadia\cascad_errfl5.dat EPSG:32610
 ```
