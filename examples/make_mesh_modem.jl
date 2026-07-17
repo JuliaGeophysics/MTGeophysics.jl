@@ -1,4 +1,4 @@
-# Interactive ModEM mesh builder.
+# Interactive ModEM mesh builder with DEM-derived station elevations.
 # Inputs (optional CLI args):
 #   [1] data_file (ModEM .dat)
 #   [2] out_model (.rho)
@@ -6,6 +6,8 @@
 #   [4] out_covariance (optional, defaults to C3.dat beside the model)
 #   [5] covariance value (optional, defaults to 0.3)
 #   [6] mode (optional: gui|nogui)
+# This variant also writes a new `*_topo.dat` copy whose station elevations are
+# derived from the GeoTIFF/topography workflow instead of the input site Z values.
 # Set ENV["MTGEO_MESH_MODE"] = "nogui" to build+write the mesh headlessly.
 
 using MTGeophysics
@@ -20,11 +22,21 @@ GLMakie.activate!()
 
 #----- user controls (edit here) -----
 const MODE            = length(ARGS) >= 6 ? lowercase(ARGS[6]) : lowercase(get(ENV, "MTGEO_MESH_MODE", "gui"))
-const DATA_PATH       = length(ARGS) >= 1 ? ARGS[1] : normpath(@__DIR__, "MT3DINV4", "data5pc.dat")
+const DATA_PATH       = length(ARGS) >= 1 ? ARGS[1] : normpath(@__DIR__, "MT3DINV4", "data7O10Dg.dat")
 const OUT_PATH        = length(ARGS) >= 2 ? ARGS[2] : joinpath(dirname(DATA_PATH), "mesh_start_model.rho")
 const DEFAULT_TOPO_PATH = normpath(@__DIR__, "MT3DINV4", "ArcticDEM_30m_EPSG26918.tif")
 const TOPO_PATH       = length(ARGS) >= 3 ? ARGS[3] : (isfile(DEFAULT_TOPO_PATH) ? DEFAULT_TOPO_PATH : "")
 const OUT_COV_PATH    = length(ARGS) >= 4 ? ARGS[4] : joinpath(dirname(OUT_PATH), "C3.dat")
+const OUT_DATA_PATH   = let base = basename(DATA_PATH)
+    outbase = if occursin(r"(?i)_topo\.dat$", base)
+        base
+    elseif occursin(r"(?i)\.dat$", base)
+        replace(base, r"(?i)\.dat$" => "_topo.dat")
+    else
+        base * "_topo.dat"
+    end
+    joinpath(dirname(DATA_PATH), outbase)
+end
 const COV_VALUE0      = length(ARGS) >= 5 ? something(tryparse(Float64, ARGS[5]), 0.3) : 0.3
 const CELL_WIDTH_FRAC = 0.5
 const N_PAD           = 12
@@ -49,9 +61,25 @@ const USE_TOPO        = !isempty(strip(TOPO_PATH))
 
 const TOPO_CACHE = Ref{Any}(nothing)
 
+USE_TOPO || error("make_mesh_modem2.jl requires a topography GeoTIFF because station elevations are derived from the DEM.")
+
+# modem's covariance reader skips exactly 16 header lines - keep this 16 lines long
 const COV_HEADER = """
 +-----------------------------------------------------------------------------+
-| This file defines model covariance . See ModEM documentation for details. |
+| This file defines model covariance for a recursive autoregression scheme.   |
+| The model space may be divided into distinct areas using integer masks.     |
+| Mask 0 is reserved for air; mask 9 is reserved for ocean. Smoothing between |
+| air, ocean and the rest of the model is turned off automatically. You can   |
+| also define exceptions to override smoothing between any two model areas.   |
+| To turn off smoothing set it to zero. This header is 16 lines long.         |
+| 1. Grid dimensions excluding air layers (Nx, Ny, NzEarth)                   |
+| 2. Smoothing in the X direction (NzEarth real values)                       |
+| 3. Smoothing in the Y direction (NzEarth real values)                       |
+| 4. Vertical smoothing (1 real value)                                        |
+| 5. Number of times the smoothing should be applied (1 integer >= 0)         |
+| 6. Number of exceptions (1 integer >= 0)                                    |
+| 7. Exceptions in the form e.g. 2 3 0. (to turn off smoothing between 2 & 3) |
+| 8. Two integer layer indices and Nx x Ny block of masks, repeated as needed.|
 +-----------------------------------------------------------------------------+
 """
 
@@ -133,6 +161,17 @@ function _mesh_target_bbox(m, ctx)
     yt = Float64[]
     for x in (m.x_edges[1], m.x_edges[end]), y in (m.y_edges[1], m.y_edges[end])
         px, py = _local_xy_to_target_xy(ctx, x, y)
+        push!(xt, px)
+        push!(yt, py)
+    end
+    return (minimum(xt), maximum(xt), minimum(yt), maximum(yt))
+end
+
+function _data_target_bbox(d, ctx)
+    xt = Float64[]
+    yt = Float64[]
+    for i in 1:d.ns
+        px, py = _local_xy_to_target_xy(ctx, d.x[i], d.y[i])
         push!(xt, px)
         push!(yt, py)
     end
@@ -289,6 +328,39 @@ function _sample_surface_local(m, d, ctx)
     fallback_count == 0 || @warn("Used median DEM elevation fallback for padded mesh columns that still sampled nodata.", fallback_count = fallback_count)
 
     return surface_local, datum_elev
+end
+
+function _derive_topography_data(d, ctx)
+    bbox = _data_target_bbox(d, ctx)
+    topo = _ensure_topography(TOPO_PATH, bbox)
+
+    station_elev_abs = Vector{Float64}(undef, d.ns)
+    for i in 1:d.ns
+        tx, ty = _local_xy_to_target_xy(ctx, d.x[i], d.y[i])
+        elev_abs = _sample_topography(topo, tx, ty)
+        isfinite(elev_abs) || error("Could not derive a finite DEM elevation for site $(d.site[i]).")
+        station_elev_abs[i] = elev_abs
+    end
+
+    # Use the highest sampled station elevation as the local vertical datum so the
+    # derived site Z values depend only on the DEM, not on the input data file.
+    datum_elev = maximum(station_elev_abs)
+    topo_z = datum_elev .- station_elev_abs
+    delta_z = topo_z .- Float64.(d.z)
+
+    d_topo = deepcopy(d)
+    d_topo.z = collect(Float64.(topo_z))
+    d_topo.loc[:, 3] .= topo_z
+
+    return d_topo, (
+        ns = d.ns,
+        datum_elev = datum_elev,
+        zmin = minimum(topo_z),
+        zmax = maximum(topo_z),
+        nchanged = count(abs.(delta_z) .> 1e-6),
+        median_shift = median(abs.(delta_z)),
+        max_shift = maximum(abs.(delta_z)),
+    )
 end
 
 #----- build the mesh from sites, padding and depth settings -----
@@ -483,6 +555,235 @@ function write_covariance_file(path::AbstractString, mask::Array{<:Integer, 3};
     return path
 end
 
+function _earth_only_z_edges(m)
+    z0 = m.origin[3] + sum(m.dz[1:m.nz_air])
+    return z0 .+ vcat(0.0, cumsum(m.dz[(m.nz_air + 1):end]))
+end
+
+function _site_column_constraints(m, d)
+    cols = Dict{Tuple{Int, Int}, Tuple{String, Float64}}()
+    for isite in 1:d.ns
+        ix = clamp(searchsortedlast(m.x_edges, d.x[isite]), 1, m.nx)
+        iy = clamp(searchsortedlast(m.y_edges, d.y[isite]), 1, m.ny)
+        key = (ix, iy)
+        site_z = Float64(d.z[isite])
+        current = get(cols, key, ("", Inf))
+        if site_z < current[2]
+            cols[key] = (String(d.site[isite]), site_z)
+        end
+    end
+    return cols
+end
+
+function _apply_site_surface_constraints(m, d, surface_local)
+    surface_local === nothing && return nothing, (
+        nadjusted = 0,
+        adjustments = NamedTuple[],
+        impossible = NamedTuple[],
+        text = "Covariance follows topography only.",
+    )
+
+    earth_z_edges = _earth_only_z_edges(m)
+    earth_z_centers = Float64.(m.z_centers[(m.nz_air + 1):end])
+    adjusted = copy(surface_local)
+    adjustments = NamedTuple[]
+    impossible = NamedTuple[]
+
+    for ((ix, iy), (site_name, site_z)) in _site_column_constraints(m, d)
+        max_first = searchsortedlast(earth_z_edges, site_z)
+        if max_first < 1
+            push!(impossible, (
+                site = site_name,
+                ix = ix,
+                iy = iy,
+                site_z = site_z,
+                top_edge = Float64(earth_z_edges[1]),
+                clearance = site_z - Float64(earth_z_edges[1]),
+            ))
+            continue
+        end
+
+        desired_first = min(max_first, m.nz_earth)
+        old_surface = Float64(adjusted[ix, iy])
+        new_surface = min(old_surface, earth_z_centers[desired_first])
+        adjusted[ix, iy] = new_surface
+
+        if new_surface < old_surface - 1e-9
+            push!(adjustments, (
+                site = site_name,
+                ix = ix,
+                iy = iy,
+                site_z = site_z,
+                surface_from = old_surface,
+                surface_to = new_surface,
+                lift = old_surface - new_surface,
+            ))
+        end
+    end
+
+    sort!(adjustments; by = row -> -row.lift)
+    sort!(impossible; by = row -> row.clearance)
+    text = isempty(adjustments) ?
+        "Covariance follows topography only." :
+        @sprintf("Covariance auto-adjusted in %d station column(s) to honour site elevations.", length(adjustments))
+
+    return adjusted, (
+        nadjusted = length(adjustments),
+        adjustments = adjustments,
+        impossible = impossible,
+        text = text,
+    )
+end
+
+function _site_air_report(m, d)
+    earth_z_edges = _earth_only_z_edges(m)
+    bad = NamedTuple[]
+
+    for isite in 1:d.ns
+        ix = clamp(searchsortedlast(m.x_edges, d.x[isite]), 1, m.nx)
+        iy = clamp(searchsortedlast(m.y_edges, d.y[isite]), 1, m.ny)
+        first_earth = findfirst(!=(0), vec(m.cov_mask[ix, iy, :]))
+        first_earth === nothing && error("No earth cells remain in covariance column for site $(d.site[isite]) at mesh column ($ix, $iy).")
+
+        top_edge = earth_z_edges[first_earth]
+        clearance = Float64(d.z[isite]) - Float64(top_edge)
+        if clearance < 0.0
+            push!(bad, (
+                site = String(d.site[isite]),
+                ix = ix,
+                iy = iy,
+                site_z = Float64(d.z[isite]),
+                top_edge = Float64(top_edge),
+                clearance = clearance,
+            ))
+        end
+    end
+
+    sort!(bad; by = row -> row.clearance)
+    nbad = length(bad)
+    ok = nbad == 0
+    sample_rows = bad[1:min(end, 5)]
+    sample = isempty(sample_rows) ? "" : join([
+        @sprintf("%s needs %.1f m", row.site, -row.clearance) for row in sample_rows
+    ], ", ")
+    max_raise = isempty(bad) ? 0.0 : -bad[1].clearance
+    summary = ok ?
+        @sprintf("✓ All %d sites lie at or below the first non-air covariance cell.", d.ns) :
+        @sprintf("• %d site(s) lie in air relative to the written covariance mask. Raise the local model surface at those XY columns until the top of the first non-air cell is at or above each site Z. Example adjustments: %s.",
+            nbad, sample)
+    fix = ok ? "" :
+        "Fix the model, not the data: remove leading air-mask 0 values in the flagged covariance columns and raise the matching topography/model surface until every flagged site has nonnegative clearance (site_z - top_of_first_earth >= 0)."
+
+    return (
+        ok = ok,
+        nbad = nbad,
+        rows = bad,
+        sample = sample,
+        max_raise = max_raise,
+        text = summary,
+        fix = fix,
+    )
+end
+
+function _print_site_surface_report(m)
+    if m.site_surface.nadjusted > 0
+        println(m.site_surface.text)
+        for row in m.site_surface.adjustments[1:min(end, 10)]
+            println(@sprintf(
+                "  %s: xcell=%d ycell=%d surface %.3f -> %.3f (lift %.3f m)",
+                row.site, row.ix, row.iy, row.surface_from, row.surface_to, row.lift))
+        end
+        if m.site_surface.nadjusted > 10
+            println(@sprintf("  ... %d more adjusted column(s) omitted.", m.site_surface.nadjusted - 10))
+        end
+    end
+
+    if !isempty(m.site_surface.impossible)
+        @warn(@sprintf("%d site(s) still sit above the shallowest earth cell; revise the vertical mesh or topography datum.", length(m.site_surface.impossible)))
+        for row in m.site_surface.impossible[1:min(end, 10)]
+            println(@sprintf(
+                "  %s: xcell=%d ycell=%d site_z=%.3f shallowest_earth=%.3f clearance=%.3f",
+                row.site, row.ix, row.iy, row.site_z, row.top_edge, row.clearance))
+        end
+        if length(m.site_surface.impossible) > 10
+            println(@sprintf("  ... %d more impossible site(s) omitted.", length(m.site_surface.impossible) - 10))
+        end
+    end
+    return nothing
+end
+
+function _print_site_air_report(m)
+    m.site_air.ok && return nothing
+
+    @warn(@sprintf("%d site(s) are in air relative to the written covariance mask.", m.site_air.nbad))
+    println(m.site_air.fix)
+    println(@sprintf("Worst-case upward surface adjustment needed: %.1f m.", m.site_air.max_raise))
+    for row in m.site_air.rows[1:min(end, 10)]
+        println(@sprintf(
+            "  %s: xcell=%d ycell=%d site_z=%.3f top_of_first_earth=%.3f clearance=%.3f",
+            row.site, row.ix, row.iy, row.site_z, row.top_edge, row.clearance))
+    end
+    if m.site_air.nbad > 10
+        println(@sprintf("  ... %d more site(s) omitted.", m.site_air.nbad - 10))
+    end
+    return nothing
+end
+
+function _has_finite_complex(A)
+    return any(isfinite.(real.(A))) || any(isfinite.(imag.(A)))
+end
+
+function _print_topography_data_report(diag)
+    println(@sprintf(
+        "Topography-derived data: %s | datum %.3f m | site z range %.3f to %.3f m | updated %d/%d site elevations | median |Δz| %.3f m | max |Δz| %.3f m",
+        basename(OUT_DATA_PATH), diag.datum_elev, diag.zmin, diag.zmax,
+        diag.nchanged, diag.ns, diag.median_shift, diag.max_shift))
+    return nothing
+end
+
+function _format_like_token(value::Real, template::AbstractString)
+    t = strip(template)
+    if occursin('E', t) || occursin('e', t)
+        mantissa = split(replace(t, 'e' => 'E'), 'E')[1]
+        decimals = occursin('.', mantissa) ? length(split(mantissa, '.')[2]) : 0
+        return @sprintf("%.*E", decimals, Float64(value))
+    end
+    if occursin('.', t)
+        decimals = length(split(t, '.')[2])
+        return @sprintf("%.*f", decimals, Float64(value))
+    end
+    return string(round(Int, value))
+end
+
+function _is_data_line(line::AbstractString)
+    t = strip(line)
+    return !isempty(t) && !startswith(t, "#") && !startswith(t, ">") && occursin(r"^[\s\+\-\.0-9]", t)
+end
+
+function _write_topography_data_copy(input_path::AbstractString, output_path::AbstractString, d_topo::Data)
+    site_z = Dict{String, Float64}(d_topo.site[i] => Float64(d_topo.z[i]) for i in 1:d_topo.ns)
+    open(input_path, "r") do io_in
+        open(output_path, "w") do io_out
+            for line in eachline(io_in)
+                t = strip(line)
+                if _is_data_line(t)
+                    parts = split(line)
+                    if length(parts) >= 11
+                        site = parts[2]
+                        haskey(site_z, site) || error("Site $site from $input_path was not found in the topo-corrected data object.")
+                        parts[7] = _format_like_token(site_z[site], parts[7])
+                        println(io_out, join(parts, " "))
+                        continue
+                    end
+                end
+                println(io_out, line)
+            end
+        end
+    end
+    println("ModEM data written to: $output_path")
+    return output_path
+end
+
 function build_mesh_bundle(d, sx, sy, Tobs;
                            ρ_bg, dx_core, dy_core, nx_core, ny_core,
                            nx_pad, ny_pad, pad_factor, z_first, z_factor, depth_mult,
@@ -523,28 +824,49 @@ function build_mesh_bundle(d, sx, sy, Tobs;
             air_first = max(5.0, Float64(z_first) / AIR_FIRST_DIV))
     end
 
+    site_surface = (
+        nadjusted = 0,
+        adjustments = NamedTuple[],
+        impossible = NamedTuple[],
+        text = "Covariance follows topography only.",
+    )
+    if surface_local !== nothing
+        surface_local, site_surface = _apply_site_surface_constraints(base, d, surface_local)
+    end
+
     A = _build_resistivity_model(base, surface_local)
     cov_mask = _build_covariance_mask(base, surface_local)
+    site_air = _site_air_report((; base..., A = A, cov_mask = cov_mask), d)
     return (; base..., A = A, cov_mask = cov_mask, cov_value = Float64(cov_value),
               topo_active = surface_local !== nothing,
               topo_name = surface_local === nothing ? "flat" : basename(TOPO_PATH),
-              datum_elev = datum_elev)
+              datum_elev = datum_elev,
+              site_surface = site_surface,
+              site_air = site_air)
 end
 
-function save_outputs(m)
+function save_outputs(m, d_out, d_topo_diag)
     _write_start_model_ws(OUT_PATH, m; rotation = 0.0)
     write_covariance_file(OUT_COV_PATH, m.cov_mask; cov_x = m.cov_value, cov_y = m.cov_value, cov_z = m.cov_value)
+    _write_topography_data_copy(DATA_PATH, OUT_DATA_PATH, d_out)
+    _print_topography_data_report(d_topo_diag)
+    _print_site_surface_report(m)
+    _print_site_air_report(m)
     return nothing
 end
 
 #----- snap a value to the nearest in a range -----
 snap(v, r) = collect(r)[argmin(abs.(collect(r) .- v))]
 
-d = load_data_modem(DATA_PATH)
+d_raw = load_data_modem(DATA_PATH)
+d_raw.name = DATA_PATH
+d_raw.origin = collect(Float64.(d_raw.origin))
+d_raw.loc = Float64.(d_raw.loc)
+topo_ctx = _local_tm_to_target_context(d_raw, TOPO_CRS)
+d, d_topo_diag = _derive_topography_data(d_raw, topo_ctx)
 sx = collect(Float64.(d.x))
 sy = collect(Float64.(d.y))
 Tobs = collect(Float64.(d.T))
-topo_ctx = USE_TOPO ? _local_tm_to_target_context(d, TOPO_CRS) : nothing
 
 spacing = nearest_neighbour_spacing(sx, sy)
 ρ_off = filter(x -> isfinite(x) && x > 0, vec(d.ρ[:, [2, 3], :]))
@@ -558,9 +880,9 @@ nx_core0 = max(1, ceil(Int, span_x0 / dx_core0))
 ny_core0 = max(1, ceil(Int, span_y0 / dy_core0))
 z_first0 = snap(skin_depth(Float64(ρ_bg0), minimum(Tobs)) / FIRST_LAYER_DIV, 5:5:2000)
 
-@info @sprintf("Loaded %d sites, %d periods (%.3g–%.3g s); median spacing %.0f m; suggested background ρ = %.0f Ω·m; topography %s",
+@info @sprintf("Loaded %d sites, %d periods (%.3g–%.3g s); median spacing %.0f m; suggested background ρ = %.0f Ω·m; topography %s; topo-data output %s",
                length(sx), length(Tobs), minimum(Tobs), maximum(Tobs), spacing.median, ρ_bg_data,
-               USE_TOPO ? basename(TOPO_PATH) : "off")
+               basename(TOPO_PATH), basename(OUT_DATA_PATH))
 
 if MODE == "nogui"
     m = build_mesh_bundle(d, sx, sy, Tobs;
@@ -569,12 +891,13 @@ if MODE == "nogui"
         nx_pad = N_PAD, ny_pad = N_PAD,
         pad_factor = PAD_FACTOR, z_first = Float64(z_first0), z_factor = VERTICAL_FACTOR,
         depth_mult = DEPTH_MULT, cov_value = COV_VALUE0, topo_ctx = topo_ctx)
-    @printf("grid %d×%d×%d (%d cells); core %d×%d @ %.0f×%.0f m; air %d; max sites/cell %d; occupied %.0f%%; pad %.0f km/side; depth %.0f km; cov %.2f (topography)\n",
+    @printf("grid %d×%d×%d (%d cells); core %d×%d @ %.0f×%.0f m; air %d; max sites/cell %d; occupied %.0f%%; pad %.0f km/side; depth %.0f km; cov %.2f (DEM-derived surface + DEM-derived site z)\n",
         m.nx, m.ny, m.nz, m.nx * m.ny * m.nz, m.nx_core, m.ny_core, m.dx_core, m.dy_core,
         m.nz_air, m.maxper, 100 * m.occupied, m.pad_extent_km, m.depth_km, m.cov_value)
-    save_outputs(m)
+    save_outputs(m, d, d_topo_diag)
     @printf("wrote %s\n", OUT_PATH)
     @printf("wrote %s\n", OUT_COV_PATH)
+    @printf("wrote %s\n", OUT_DATA_PATH)
     exit(0)
 end
 
@@ -592,6 +915,9 @@ function suggestions(m)
         "the boundary should sit at least one skin depth at the longest period (δ(Tmax)) from the core.")
     m.depth_km < m.δmax_km && push!(msgs,
         "• Model is too shallow — increase 'Depth × δ(Tmax)' so the mesh spans the depth of investigation.")
+    !isempty(m.site_surface.impossible) && push!(msgs,
+        "• Some sites still sit above the shallowest available earth cell — reduce the top air thickness or revise the topography/datum so the earth model starts above those site elevations.")
+    m.site_air.ok || push!(msgs, m.site_air.text * " " * m.site_air.fix)
     ok = isempty(msgs)
     text = ok ? "✓ Mesh looks well-sized for ModEM inversion." : join(msgs, "    ")
     return (text = text, ok = ok)
@@ -656,7 +982,7 @@ end
 
 fig = Figure(size = FIG_SIZE, figure_padding = (40, 14, 14, 14))
 
-status = Observable("Outputs → $(basename(OUT_PATH)), $(basename(OUT_COV_PATH))")
+status = Observable("Outputs → $(basename(OUT_PATH)), $(basename(OUT_COV_PATH)), $(basename(OUT_DATA_PATH))")
 help_obs = Observable("Click  ?  next to a parameter for an explanation.")
 sug_obs = Observable("")
 sug_color = Observable(RGBf(0.15, 0.5, 0.25))
@@ -674,8 +1000,10 @@ infotext = join([
     @sprintf("periods   >  %d   (%.3g – %.3g s)", length(Tobs), minimum(Tobs), maximum(Tobs)),
     @sprintf("spacing   >  %.1f km", spacing.median / 1000),
     @sprintf("rho(data) >  %.0f ohm-m", ρ_bg_data),
-    @sprintf("topo      >  %s", USE_TOPO ? basename(TOPO_PATH) : "off"),
-    @sprintf("cov(mode) >  topography"),
+    @sprintf("topo      >  %s", basename(TOPO_PATH)),
+    @sprintf("elev(src) >  DEM-derived, input site z ignored"),
+    @sprintf("data(out) >  %s", basename(OUT_DATA_PATH)),
+    @sprintf("cov(mode) >  DEM-derived surface + DEM-derived site z"),
     @sprintf("cov(out)  >  %s", basename(OUT_COV_PATH)),
 ], "\n")
 Label(left[1, 1:3], infotext; font = "Consolas", fontsize = 13, halign = :left,
@@ -717,7 +1045,7 @@ colsize!(viewgrid, 1, Relative(0.5)); colsize!(viewgrid, 2, Relative(0.5))
 colgap!(viewgrid, 8)
 
 actiongrid = GridLayout(left[(next_row[] += 1), 1:3])
-savebtn   = Button(actiongrid[1, 1]; label = "Save model + cov", fontsize = 14, tellwidth = false)
+savebtn   = Button(actiongrid[1, 1]; label = "Save model + cov + data", fontsize = 14, tellwidth = false)
 exportbtn = Button(actiongrid[1, 2]; label = "Export figure", fontsize = 14, tellwidth = false)
 colsize!(actiongrid, 1, Relative(0.5)); colsize!(actiongrid, 2, Relative(0.5))
 colgap!(actiongrid, 8)
@@ -794,8 +1122,11 @@ function refresh!(m)
     apply_limits!(ax, m)
     s = suggestions(m)
     topo_info = m.topo_active ? @sprintf("topo %s · datum %.1f m · air %d", m.topo_name, m.datum_elev, m.nz_air) : "topo flat"
-    gridinfo = @sprintf("%d × %d × %d cells · core %d × %d (%.0f × %.0f m) · max sites/cell %d · depth %.0f km · cov %.2f (topography) · %s",
-        m.nx, m.ny, m.nz, m.nx_core, m.ny_core, m.dx_core, m.dy_core, m.maxper, m.depth_km, m.cov_value, topo_info)
+    site_info = m.site_air.ok ?
+        (m.site_surface.nadjusted == 0 ? "all sites below surface" : @sprintf("all sites below surface (%d auto-adjusted column(s))", m.site_surface.nadjusted)) :
+        @sprintf("%d site(s) in air", m.site_air.nbad)
+    gridinfo = @sprintf("%d × %d × %d cells · core %d × %d (%.0f × %.0f m) · max sites/cell %d · depth %.0f km · cov %.2f (DEM-derived surface + DEM-derived site z) · %s · %s",
+        m.nx, m.ny, m.nz, m.nx_core, m.ny_core, m.dx_core, m.dy_core, m.maxper, m.depth_km, m.cov_value, topo_info, site_info)
     sug_obs[] = gridinfo * "\n" * s.text
     sug_color[] = s.ok ? RGBf(0.15, 0.5, 0.25) : RGBf(0.75, 0.2, 0.15)
     return nothing
@@ -829,8 +1160,11 @@ end
 
 on(savebtn.clicks) do _
     m = mesh[]
-    save_outputs(m)
-    status[] = @sprintf("Saved %d×%d×%d model → %s | covariance %.2f (topography) → %s", m.nx, m.ny, m.nz, OUT_PATH, m.cov_value, OUT_COV_PATH)
+    save_outputs(m, d, d_topo_diag)
+    air_status = m.site_air.ok ?
+        (m.site_surface.nadjusted == 0 ? "all sites below surface" : @sprintf("all sites below surface after %d auto-adjusted column(s)", m.site_surface.nadjusted)) :
+        @sprintf("WARNING: %d site(s) in air; see guidance above", m.site_air.nbad)
+    status[] = @sprintf("Saved %d×%d×%d model → %s | covariance %.2f (DEM-derived surface + DEM-derived site z) → %s | topo-data → %s | %s", m.nx, m.ny, m.nz, OUT_PATH, m.cov_value, OUT_COV_PATH, OUT_DATA_PATH, air_status)
     @info status[]
 end
 
