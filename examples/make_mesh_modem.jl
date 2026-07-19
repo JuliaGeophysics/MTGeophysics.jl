@@ -61,8 +61,6 @@ const USE_TOPO        = !isempty(strip(TOPO_PATH))
 
 const TOPO_CACHE = Ref{Any}(nothing)
 
-USE_TOPO || error("make_mesh_modem2.jl requires a topography GeoTIFF because station elevations are derived from the DEM.")
-
 # modem's covariance reader skips exactly 16 header lines - keep this 16 lines long
 const COV_HEADER = """
 +-----------------------------------------------------------------------------+
@@ -729,61 +727,6 @@ function _print_site_air_report(m)
     return nothing
 end
 
-function _has_finite_complex(A)
-    return any(isfinite.(real.(A))) || any(isfinite.(imag.(A)))
-end
-
-function _print_topography_data_report(diag)
-    println(@sprintf(
-        "Topography-derived data: %s | datum %.3f m | site z range %.3f to %.3f m | updated %d/%d site elevations | median |Δz| %.3f m | max |Δz| %.3f m",
-        basename(OUT_DATA_PATH), diag.datum_elev, diag.zmin, diag.zmax,
-        diag.nchanged, diag.ns, diag.median_shift, diag.max_shift))
-    return nothing
-end
-
-function _format_like_token(value::Real, template::AbstractString)
-    t = strip(template)
-    if occursin('E', t) || occursin('e', t)
-        mantissa = split(replace(t, 'e' => 'E'), 'E')[1]
-        decimals = occursin('.', mantissa) ? length(split(mantissa, '.')[2]) : 0
-        return @sprintf("%.*E", decimals, Float64(value))
-    end
-    if occursin('.', t)
-        decimals = length(split(t, '.')[2])
-        return @sprintf("%.*f", decimals, Float64(value))
-    end
-    return string(round(Int, value))
-end
-
-function _is_data_line(line::AbstractString)
-    t = strip(line)
-    return !isempty(t) && !startswith(t, "#") && !startswith(t, ">") && occursin(r"^[\s\+\-\.0-9]", t)
-end
-
-function _write_topography_data_copy(input_path::AbstractString, output_path::AbstractString, d_topo::Data)
-    site_z = Dict{String, Float64}(d_topo.site[i] => Float64(d_topo.z[i]) for i in 1:d_topo.ns)
-    open(input_path, "r") do io_in
-        open(output_path, "w") do io_out
-            for line in eachline(io_in)
-                t = strip(line)
-                if _is_data_line(t)
-                    parts = split(line)
-                    if length(parts) >= 11
-                        site = parts[2]
-                        haskey(site_z, site) || error("Site $site from $input_path was not found in the topo-corrected data object.")
-                        parts[7] = _format_like_token(site_z[site], parts[7])
-                        println(io_out, join(parts, " "))
-                        continue
-                    end
-                end
-                println(io_out, line)
-            end
-        end
-    end
-    println("ModEM data written to: $output_path")
-    return output_path
-end
-
 function build_mesh_bundle(d, sx, sy, Tobs;
                            ρ_bg, dx_core, dy_core, nx_core, ny_core,
                            nx_pad, ny_pad, pad_factor, z_first, z_factor, depth_mult,
@@ -848,8 +791,6 @@ end
 function save_outputs(m, d_out, d_topo_diag)
     _write_start_model_ws(OUT_PATH, m; rotation = 0.0)
     write_covariance_file(OUT_COV_PATH, m.cov_mask; cov_x = m.cov_value, cov_y = m.cov_value, cov_z = m.cov_value)
-    _write_topography_data_copy(DATA_PATH, OUT_DATA_PATH, d_out)
-    _print_topography_data_report(d_topo_diag)
     _print_site_surface_report(m)
     _print_site_air_report(m)
     return nothing
@@ -891,7 +832,7 @@ if MODE == "nogui"
         nx_pad = N_PAD, ny_pad = N_PAD,
         pad_factor = PAD_FACTOR, z_first = Float64(z_first0), z_factor = VERTICAL_FACTOR,
         depth_mult = DEPTH_MULT, cov_value = COV_VALUE0, topo_ctx = topo_ctx)
-    @printf("grid %d×%d×%d (%d cells); core %d×%d @ %.0f×%.0f m; air %d; max sites/cell %d; occupied %.0f%%; pad %.0f km/side; depth %.0f km; cov %.2f (DEM-derived surface + DEM-derived site z)\n",
+    @printf("grid %d×%d×%d (%d cells); core %d×%d @ %.0f×%.0f m; air %d; max sites/cell %d; occupied %.0f%%; pad %.0f km/side; depth %.0f km; cov %.2f (topography + sites)\n",
         m.nx, m.ny, m.nz, m.nx * m.ny * m.nz, m.nx_core, m.ny_core, m.dx_core, m.dy_core,
         m.nz_air, m.maxper, 100 * m.occupied, m.pad_extent_km, m.depth_km, m.cov_value)
     save_outputs(m, d, d_topo_diag)
@@ -1000,10 +941,8 @@ infotext = join([
     @sprintf("periods   >  %d   (%.3g – %.3g s)", length(Tobs), minimum(Tobs), maximum(Tobs)),
     @sprintf("spacing   >  %.1f km", spacing.median / 1000),
     @sprintf("rho(data) >  %.0f ohm-m", ρ_bg_data),
-    @sprintf("topo      >  %s", basename(TOPO_PATH)),
-    @sprintf("elev(src) >  DEM-derived, input site z ignored"),
-    @sprintf("data(out) >  %s", basename(OUT_DATA_PATH)),
-    @sprintf("cov(mode) >  DEM-derived surface + DEM-derived site z"),
+    @sprintf("topo      >  %s", USE_TOPO ? basename(TOPO_PATH) : "off"),
+    @sprintf("cov(mode) >  topography + site elevations"),
     @sprintf("cov(out)  >  %s", basename(OUT_COV_PATH)),
 ], "\n")
 Label(left[1, 1:3], infotext; font = "Consolas", fontsize = 13, halign = :left,
@@ -1125,7 +1064,7 @@ function refresh!(m)
     site_info = m.site_air.ok ?
         (m.site_surface.nadjusted == 0 ? "all sites below surface" : @sprintf("all sites below surface (%d auto-adjusted column(s))", m.site_surface.nadjusted)) :
         @sprintf("%d site(s) in air", m.site_air.nbad)
-    gridinfo = @sprintf("%d × %d × %d cells · core %d × %d (%.0f × %.0f m) · max sites/cell %d · depth %.0f km · cov %.2f (DEM-derived surface + DEM-derived site z) · %s · %s",
+    gridinfo = @sprintf("%d × %d × %d cells · core %d × %d (%.0f × %.0f m) · max sites/cell %d · depth %.0f km · cov %.2f (topography + sites) · %s · %s",
         m.nx, m.ny, m.nz, m.nx_core, m.ny_core, m.dx_core, m.dy_core, m.maxper, m.depth_km, m.cov_value, topo_info, site_info)
     sug_obs[] = gridinfo * "\n" * s.text
     sug_color[] = s.ok ? RGBf(0.15, 0.5, 0.25) : RGBf(0.75, 0.2, 0.15)
@@ -1160,11 +1099,11 @@ end
 
 on(savebtn.clicks) do _
     m = mesh[]
-    save_outputs(m, d, d_topo_diag)
+    save_outputs(m)
     air_status = m.site_air.ok ?
         (m.site_surface.nadjusted == 0 ? "all sites below surface" : @sprintf("all sites below surface after %d auto-adjusted column(s)", m.site_surface.nadjusted)) :
         @sprintf("WARNING: %d site(s) in air; see guidance above", m.site_air.nbad)
-    status[] = @sprintf("Saved %d×%d×%d model → %s | covariance %.2f (DEM-derived surface + DEM-derived site z) → %s | topo-data → %s | %s", m.nx, m.ny, m.nz, OUT_PATH, m.cov_value, OUT_COV_PATH, OUT_DATA_PATH, air_status)
+    status[] = @sprintf("Saved %d×%d×%d model → %s | covariance %.2f (topography + sites) → %s | %s", m.nx, m.ny, m.nz, OUT_PATH, m.cov_value, OUT_COV_PATH, air_status)
     @info status[]
 end
 

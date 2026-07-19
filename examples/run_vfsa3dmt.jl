@@ -1,8 +1,4 @@
 # cascadia 3D VFSA MT inversion via MTGeophysics.jl
-# pure vfsa (single trial), schedule calibrated to the observed misfit scale
-# from the jul-13 runs: uphill dE_rms2 median ~0.015, p90 ~0.03, stationary
-# over the whole run. T0=0.05 gives ~75% uphill acceptance at the start,
-# ~50% mid-run, quench near the end — annealing is active throughout.
 # needs the external ModEM forward solver and an MPI runtime (OpenMPI or MPICH)
 
 using MTGeophysics
@@ -29,7 +25,7 @@ cfg = VFSA3DMTConfig(
     log_bounds            = (-0.5, 4.0), # log10(Ω·m) model bounds
     step_scale            = 0.05,       # proposal step = step_scale × bound width 
     max_iter              = 5000,       # iteration cap
-    n_trials              = 4,          # classic vfsa: one proposal, one metropolis test
+    n_trials              = 4,          # greedy best-of-4, deferred metropolis on the winner
     temp_kappa            = 0.05,       # T0 ~ 3x median uphill dE -> ~75% uphill acceptance at start
     cool_ratio            = 0.02,       # T_end = 1e-3: ~50% acceptance mid-run, quench by 5000
     target_rms            = 3.0,        # early-stop only; harmless if never reached
@@ -39,8 +35,12 @@ cfg = VFSA3DMTConfig(
     keep_models           = false,      # discard trial models (this one was added because on CSC supercomputer limited storage)
     keep_dpred            = false,      # discard predicted-data files
     model_save_every      = 100,        # keep the winning trial model every 100 iters
-    sigma_scale           = 2.0,        # RBF width in cells (1σ); larger = smoother
+    sigma_scale           = 2.0,        # RBF width in cells (1σ) at the top of the core
+    sigma_scale_deep      = 2.0,        # RBF width at the bottom; log-depth interpolated
     trunc_sigmas          = 3.0,        # RBF support cutoff in σ
+    ctrl_depth_power      = 0.25,       # mild shallow bias; p>=0.5 starves the deep (ceiling test v5)
+    water_log10           = 0.5,        # freeze start-model cells below this (ocean at -0.523)
+    bathymetry_file       = "",         # "" = derive mask from the start model
 )
 
 best_model, iter_log = VFSA3DMT(start_model; dobs_path=observed_data, cfg=cfg)

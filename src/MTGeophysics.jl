@@ -16,6 +16,7 @@ using Proj
 include("Data.jl")
 include("Model.jl")
 include("Chi2RMS.jl")
+include("Distortion.jl")
 
 #----- Headless core/padding utilities (always available) ------------------#
 
@@ -28,6 +29,10 @@ include("ShapefileOverlay.jl")
 #----- WS3D format model I/O (log10 internal) -----------------------------#
 
 include("WS3DModel.jl")
+
+#----- Bathymetry extraction and water masks ------------------------------#
+
+include("Bathymetry3D.jl")
 
 #----- Visualization (optional, requires GLMakie) -------------------------#
 
@@ -57,6 +62,7 @@ export Data, Model, ModEMData, ModEMModel
 export load_data_modem, write_data_modem, make_nan_data, calc_rho_pha
 export read_mackie3d_model, load_model_modem, write_model_modem
 export chi2_and_rms
+export chi2_and_rms_distorted, DistortionFit, write_distortion_file
 
 #----- Exports: Core utilities (always available) -------------------------#
 
@@ -72,6 +78,11 @@ export load_shapefile_geometries, prepare_shapefiles
 
 export WS3DModel
 export load_ws3d_model, read_ws3d_model, write_ws3d_model
+
+#----- Exports: Bathymetry / water masks ----------------------------------#
+
+export extract_bathymetry, write_bathymetry, read_bathymetry
+export water_mask_from_bathymetry, water_mask_from_model
 
 #----- Exports: 3-D VFSA inversion ---------------------------------------#
 
