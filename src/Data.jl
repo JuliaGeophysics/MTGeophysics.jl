@@ -301,9 +301,73 @@ function _write_data_block_header!(io;
     println(io, "> $(nf) $(ns)")
 end
 
+_canonical_modem_units(units::AbstractString) = lowercase(replace(strip(units), " " => ""))
+
+function _read_data_convention(path::AbstractString)
+    sign = nothing
+    units = nothing
+
+    open(path, "r") do io
+        while !eof(io)
+            line = readline(io)
+            t = strip(line)
+            if isempty(t) || startswith(t, "#")
+                continue
+            end
+            if startswith(t, ">")
+                hdr = String[t]
+                for _ in 1:5
+                    eof(io) && break
+                    push!(hdr, readline(io))
+                end
+
+                block_sign = occursin("-", lowercase(strip_gt(hdr[2]))) ? -1 : 1
+                block_units = strip_gt(hdr[3])
+
+                if sign === nothing
+                    sign = block_sign
+                elseif sign != block_sign
+                    error("Sign convention is inconsistent between data blocks in $path")
+                end
+
+                if units === nothing
+                    units = block_units
+                elseif _canonical_modem_units(units) != _canonical_modem_units(block_units)
+                    error("Unit convention is inconsistent between data blocks in $path")
+                end
+            end
+        end
+    end
+
+    return (
+        sign = something(sign, 1),
+        units = something(units, "[V/m]/[T]"),
+    )
+end
+
+function _resolved_write_convention(d::Data,
+    sign::Union{Nothing, Int},
+    units::Union{Nothing, AbstractString})
+    inferred = (sign = 1, units = "[V/m]/[T]")
+    if !isempty(d.name) && isfile(d.name)
+        inferred = _read_data_convention(d.name)
+    end
+    return (
+        sign = something(sign, inferred.sign),
+        units = something(units, inferred.units),
+    )
+end
+
+function _impedance_output_scale(units::AbstractString)
+    _canonical_modem_units(units) == "[mv/km]/[nt]" && return 1.0 / (4π * 1e-7 * 1000.0)
+    return 1.0
+end
+
+_output_response(z::ComplexF64, sign::Int, scale::Real) = (sign == -1 ? conj(z) : z) * scale
+
 function write_data_modem(outputfile::AbstractString, d::Data;
-    sign::Int = 1,
-    units::AbstractString = "[V/m]/[T]",
+    sign::Union{Nothing, Int} = nothing,
+    units::Union{Nothing, AbstractString} = nothing,
     rotation::Union{Nothing, Real} = nothing,
     include_impedance::Bool = true,
     include_tipper::Bool = true)
@@ -325,6 +389,11 @@ function write_data_modem(outputfile::AbstractString, d::Data;
         float(rotation)
     end
 
+    conv = _resolved_write_convention(d, sign, units)
+    sign_val = conv.sign
+    units_val = conv.units
+    impedance_scale = _impedance_output_scale(units_val)
+
     origin_lat = length(d.origin) >= 1 ? d.origin[1] : 0.0
     origin_lon = length(d.origin) >= 2 ? d.origin[2] : 0.0
 
@@ -334,8 +403,8 @@ function write_data_modem(outputfile::AbstractString, d::Data;
         if include_impedance
             _write_data_block_header!(io;
                 datatype = "Full_Impedance",
-                sign = sign,
-                units = units,
+                sign = sign_val,
+                units = units_val,
                 rotation = rotation_val,
                 origin_lat = origin_lat,
                 origin_lon = origin_lon,
@@ -354,9 +423,9 @@ function write_data_modem(outputfile::AbstractString, d::Data;
                 for ip in 1:nf
                     T = d.T[ip]
                     for ic in 1:4
-                        zval = d.Z[ip, ic, is]
+                        zval = _output_response(d.Z[ip, ic, is], sign_val, impedance_scale)
                         if isfinite(real(zval)) && isfinite(imag(zval))
-                            err = abs(d.Zerr[ip, ic, is])
+                            err = abs(d.Zerr[ip, ic, is]) * impedance_scale
                             err_out = (isfinite(err) && err > 0) ? err : 1e12
                             println(io, "$(T) $(site) $(lat) $(lon) $(x) $(y) $(elev) $(comp_labels[ic]) $(real(zval)) $(imag(zval)) $(err_out)")
                         end
@@ -368,8 +437,8 @@ function write_data_modem(outputfile::AbstractString, d::Data;
         if include_tipper
             _write_data_block_header!(io;
                 datatype = "Full_Vertical_Components",
-                sign = sign,
-                units = units,
+                sign = sign_val,
+                units = units_val,
                 rotation = rotation_val,
                 origin_lat = origin_lat,
                 origin_lon = origin_lon,
@@ -388,7 +457,7 @@ function write_data_modem(outputfile::AbstractString, d::Data;
                 for ip in 1:nf
                     T = d.T[ip]
                     for ic in 1:2
-                        tval = d.tip[ip, ic, is]
+                        tval = _output_response(d.tip[ip, ic, is], sign_val, 1.0)
                         if isfinite(real(tval)) && isfinite(imag(tval))
                             err = abs(d.tiperr[ip, ic, is])
                             err_out = (isfinite(err) && err > 0) ? err : 1e12

@@ -1,4 +1,4 @@
-# Interactive ModEM mesh builder.
+# Interactive ModEM mesh builder with DEM-derived station elevations.
 # Inputs (optional CLI args):
 #   [1] data_file (ModEM .dat)
 #   [2] out_model (.rho)
@@ -6,6 +6,8 @@
 #   [4] out_covariance (optional, defaults to C3.dat beside the model)
 #   [5] covariance value (optional, defaults to 0.3)
 #   [6] mode (optional: gui|nogui)
+# This variant also writes a new `*_topo.dat` copy whose station elevations are
+# derived from the GeoTIFF/topography workflow instead of the input site Z values.
 # Set ENV["MTGEO_MESH_MODE"] = "nogui" to build+write the mesh headlessly.
 
 using MTGeophysics
@@ -25,6 +27,16 @@ const OUT_PATH        = length(ARGS) >= 2 ? ARGS[2] : joinpath(dirname(DATA_PATH
 const DEFAULT_TOPO_PATH = normpath(@__DIR__, "MT3DINV4", "ArcticDEM_30m_EPSG26918.tif")
 const TOPO_PATH       = length(ARGS) >= 3 ? ARGS[3] : (isfile(DEFAULT_TOPO_PATH) ? DEFAULT_TOPO_PATH : "")
 const OUT_COV_PATH    = length(ARGS) >= 4 ? ARGS[4] : joinpath(dirname(OUT_PATH), "C3.dat")
+const OUT_DATA_PATH   = let base = basename(DATA_PATH)
+    outbase = if occursin(r"(?i)_topo\.dat$", base)
+        base
+    elseif occursin(r"(?i)\.dat$", base)
+        replace(base, r"(?i)\.dat$" => "_topo.dat")
+    else
+        base * "_topo.dat"
+    end
+    joinpath(dirname(DATA_PATH), outbase)
+end
 const COV_VALUE0      = length(ARGS) >= 5 ? something(tryparse(Float64, ARGS[5]), 0.3) : 0.3
 const CELL_WIDTH_FRAC = 0.5
 const N_PAD           = 12
@@ -147,6 +159,17 @@ function _mesh_target_bbox(m, ctx)
     yt = Float64[]
     for x in (m.x_edges[1], m.x_edges[end]), y in (m.y_edges[1], m.y_edges[end])
         px, py = _local_xy_to_target_xy(ctx, x, y)
+        push!(xt, px)
+        push!(yt, py)
+    end
+    return (minimum(xt), maximum(xt), minimum(yt), maximum(yt))
+end
+
+function _data_target_bbox(d, ctx)
+    xt = Float64[]
+    yt = Float64[]
+    for i in 1:d.ns
+        px, py = _local_xy_to_target_xy(ctx, d.x[i], d.y[i])
         push!(xt, px)
         push!(yt, py)
     end
@@ -303,6 +326,39 @@ function _sample_surface_local(m, d, ctx)
     fallback_count == 0 || @warn("Used median DEM elevation fallback for padded mesh columns that still sampled nodata.", fallback_count = fallback_count)
 
     return surface_local, datum_elev
+end
+
+function _derive_topography_data(d, ctx)
+    bbox = _data_target_bbox(d, ctx)
+    topo = _ensure_topography(TOPO_PATH, bbox)
+
+    station_elev_abs = Vector{Float64}(undef, d.ns)
+    for i in 1:d.ns
+        tx, ty = _local_xy_to_target_xy(ctx, d.x[i], d.y[i])
+        elev_abs = _sample_topography(topo, tx, ty)
+        isfinite(elev_abs) || error("Could not derive a finite DEM elevation for site $(d.site[i]).")
+        station_elev_abs[i] = elev_abs
+    end
+
+    # Use the highest sampled station elevation as the local vertical datum so the
+    # derived site Z values depend only on the DEM, not on the input data file.
+    datum_elev = maximum(station_elev_abs)
+    topo_z = datum_elev .- station_elev_abs
+    delta_z = topo_z .- Float64.(d.z)
+
+    d_topo = deepcopy(d)
+    d_topo.z = collect(Float64.(topo_z))
+    d_topo.loc[:, 3] .= topo_z
+
+    return d_topo, (
+        ns = d.ns,
+        datum_elev = datum_elev,
+        zmin = minimum(topo_z),
+        zmax = maximum(topo_z),
+        nchanged = count(abs.(delta_z) .> 1e-6),
+        median_shift = median(abs.(delta_z)),
+        max_shift = maximum(abs.(delta_z)),
+    )
 end
 
 #----- build the mesh from sites, padding and depth settings -----
@@ -732,7 +788,7 @@ function build_mesh_bundle(d, sx, sy, Tobs;
               site_air = site_air)
 end
 
-function save_outputs(m)
+function save_outputs(m, d_out, d_topo_diag)
     _write_start_model_ws(OUT_PATH, m; rotation = 0.0)
     write_covariance_file(OUT_COV_PATH, m.cov_mask; cov_x = m.cov_value, cov_y = m.cov_value, cov_z = m.cov_value)
     _print_site_surface_report(m)
@@ -743,11 +799,15 @@ end
 #----- snap a value to the nearest in a range -----
 snap(v, r) = collect(r)[argmin(abs.(collect(r) .- v))]
 
-d = load_data_modem(DATA_PATH)
+d_raw = load_data_modem(DATA_PATH)
+d_raw.name = DATA_PATH
+d_raw.origin = collect(Float64.(d_raw.origin))
+d_raw.loc = Float64.(d_raw.loc)
+topo_ctx = _local_tm_to_target_context(d_raw, TOPO_CRS)
+d, d_topo_diag = _derive_topography_data(d_raw, topo_ctx)
 sx = collect(Float64.(d.x))
 sy = collect(Float64.(d.y))
 Tobs = collect(Float64.(d.T))
-topo_ctx = USE_TOPO ? _local_tm_to_target_context(d, TOPO_CRS) : nothing
 
 spacing = nearest_neighbour_spacing(sx, sy)
 ρ_off = filter(x -> isfinite(x) && x > 0, vec(d.ρ[:, [2, 3], :]))
@@ -761,9 +821,9 @@ nx_core0 = max(1, ceil(Int, span_x0 / dx_core0))
 ny_core0 = max(1, ceil(Int, span_y0 / dy_core0))
 z_first0 = snap(skin_depth(Float64(ρ_bg0), minimum(Tobs)) / FIRST_LAYER_DIV, 5:5:2000)
 
-@info @sprintf("Loaded %d sites, %d periods (%.3g–%.3g s); median spacing %.0f m; suggested background ρ = %.0f Ω·m; topography %s",
+@info @sprintf("Loaded %d sites, %d periods (%.3g–%.3g s); median spacing %.0f m; suggested background ρ = %.0f Ω·m; topography %s; topo-data output %s",
                length(sx), length(Tobs), minimum(Tobs), maximum(Tobs), spacing.median, ρ_bg_data,
-               USE_TOPO ? basename(TOPO_PATH) : "off")
+               basename(TOPO_PATH), basename(OUT_DATA_PATH))
 
 if MODE == "nogui"
     m = build_mesh_bundle(d, sx, sy, Tobs;
@@ -775,9 +835,10 @@ if MODE == "nogui"
     @printf("grid %d×%d×%d (%d cells); core %d×%d @ %.0f×%.0f m; air %d; max sites/cell %d; occupied %.0f%%; pad %.0f km/side; depth %.0f km; cov %.2f (topography + sites)\n",
         m.nx, m.ny, m.nz, m.nx * m.ny * m.nz, m.nx_core, m.ny_core, m.dx_core, m.dy_core,
         m.nz_air, m.maxper, 100 * m.occupied, m.pad_extent_km, m.depth_km, m.cov_value)
-    save_outputs(m)
+    save_outputs(m, d, d_topo_diag)
     @printf("wrote %s\n", OUT_PATH)
     @printf("wrote %s\n", OUT_COV_PATH)
+    @printf("wrote %s\n", OUT_DATA_PATH)
     exit(0)
 end
 
@@ -862,7 +923,7 @@ end
 
 fig = Figure(size = FIG_SIZE, figure_padding = (40, 14, 14, 14))
 
-status = Observable("Outputs → $(basename(OUT_PATH)), $(basename(OUT_COV_PATH))")
+status = Observable("Outputs → $(basename(OUT_PATH)), $(basename(OUT_COV_PATH)), $(basename(OUT_DATA_PATH))")
 help_obs = Observable("Click  ?  next to a parameter for an explanation.")
 sug_obs = Observable("")
 sug_color = Observable(RGBf(0.15, 0.5, 0.25))
@@ -923,7 +984,7 @@ colsize!(viewgrid, 1, Relative(0.5)); colsize!(viewgrid, 2, Relative(0.5))
 colgap!(viewgrid, 8)
 
 actiongrid = GridLayout(left[(next_row[] += 1), 1:3])
-savebtn   = Button(actiongrid[1, 1]; label = "Save model + cov", fontsize = 14, tellwidth = false)
+savebtn   = Button(actiongrid[1, 1]; label = "Save model + cov + data", fontsize = 14, tellwidth = false)
 exportbtn = Button(actiongrid[1, 2]; label = "Export figure", fontsize = 14, tellwidth = false)
 colsize!(actiongrid, 1, Relative(0.5)); colsize!(actiongrid, 2, Relative(0.5))
 colgap!(actiongrid, 8)

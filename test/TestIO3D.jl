@@ -74,6 +74,20 @@
             d4 = load_data_modem(file3)
             @test all(z -> isnan(real(z)), d4.tip)
             @test d4.responses == ["ZXX", "ZXY", "ZYX", "ZYY"]
+
+            file4 = joinpath(dir, "source_convention.dat")
+            write_data_modem(file4, d; sign = -1, units = "[mV/km]/[nT]")
+            d5 = load_data_modem(file4)
+            preserved = joinpath(dir, "preserved_convention.dat")
+            write_data_modem(preserved, d5)
+            d6 = load_data_modem(preserved)
+            @test isnan(real(d6.Z[nan_idx...]))
+            finite_mask = isfinite.(real.(d5.Z)) .& isfinite.(imag.(d5.Z))
+            @test d6.Z[finite_mask] ≈ d5.Z[finite_mask]
+            @test d6.tip ≈ d5.tip
+            lines = readlines(preserved)
+            @test any(contains("exp(-iωt)"), lines)
+            @test any(contains("[mV/km]/[nT]"), lines)
         end
     end
 
