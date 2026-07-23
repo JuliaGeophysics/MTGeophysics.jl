@@ -1,7 +1,7 @@
 # 3D VFSA MT inversion engine
 # Author: @pankajkmishra
 # Very Fast Simulated Annealing for MT, Gaussian-RBF parameterization, ModEM forward solver
-# Includes ensemble statistics for multi-chain analysis
+# Includes ensemble statistics for multi-run analysis
 
 using Random
 using Dates
@@ -19,19 +19,20 @@ exceptions are the galvanic-distortion fields `distortion_mode` and
 `distortion_damping`, which are optional and default to the previous behavior
 (no distortion handling), keeping existing run scripts working unchanged.
 
-With `distortion_mode = :full` each misfit evaluation solves, per site, a real
+With `distortion_mode = :on` each misfit evaluation solves, per site, a real
 frequency-independent 2x2 matrix `C` minimizing the error-weighted misfit
 `Zobs ~ C*Zpred` (variable projection, damped toward the identity by
 `distortion_damping`), and anneals on the corrected rms. The per-site matrices
-of the current best model are written to `chain_XX/distortion_best.txt`, sorted
+of the current best model are written to `distortion_best.txt`, sorted
 by distortion severity, identifying which sites are galvanically distorted.
 
-`out_root::String` is the base name/path of the run directory holding the
-per-chain ModEM working folders. A timestamp is appended, so the actual run
+`out_root::String` is the base name/path of the run directory, which is also
+the ModEM working folder. A timestamp is appended, so the actual run
 directory is `<out_root>_<yyyymmdd_HHMMSS>` (e.g. `out_root="run"` gives
 `run_20260626_143000`). A relative `out_root` is created alongside the starting
 model file; an absolute path is used as-is. The iteration/trial logs and the
-per-chain best models are written directly inside this run directory.
+best model are written directly inside this run directory. One process runs one
+chain; run several jobs with different seeds and out_roots for an ensemble.
 
 Each iteration proposes `n_trials` models branching from the iteration-start
 state, selects the lowest-RMS trial, and runs a single Metropolis test on that
@@ -54,7 +55,6 @@ start-model cells with `log10 ρ < water_log10` (NaN disables); a model-derived
 water mask is exported to `bathymetry.dat` in the run directory for reuse.
 """
 Base.@kwdef mutable struct VFSA3DMTConfig
-    nchains::Int
     nprocs::Int
     mpirun_cmd::String
     modem_exe::String
@@ -85,10 +85,15 @@ Base.@kwdef mutable struct VFSA3DMTConfig
     water_log10::Float64
     # bathymetry_file: build the water mask from this file instead ("" = off)
     bathymetry_file::String
-    # distortion_mode: :none = current behavior; :full = per-site 2x2 galvanic C
-    distortion_mode::Symbol = :none
+    # distortion_mode: :off = no distortion handling; :on = per-site 2x2 galvanic C
+    distortion_mode::Symbol = :off
     # distortion_damping: relative damping toward C=I (lambda = a*tr(N)/2); Inf = C≡I
     distortion_damping::Float64 = 0.01
+    # fwd_ctrl: ModEM forward-solver control file (F.dat); "" = omit the argument
+    # and let the binary use its compiled-in defaults. Worth setting explicitly:
+    # those defaults differ between ModEM builds (BICG in the maintained tree,
+    # QMR in ModEM-GPU), and the CUDA build only accelerates BICG.
+    fwd_ctrl::String = ""
 end
 
 #---------- internal helpers ----------
@@ -105,7 +110,11 @@ end
 
 function _find_model_files(dir::AbstractString, pattern::Regex)
     isdir(dir) || error("Directory not found: $dir")
-    sort([joinpath(dir, f) for f in readdir(dir) if occursin(pattern, f)])
+    files = String[]
+    for (root, _, fs) in walkdir(dir), f in fs
+        occursin(pattern, f) && push!(files, joinpath(root, f))
+    end
+    sort(files)
 end
 
 #---------- core region helpers ----------
@@ -357,8 +366,15 @@ function forward_and_misfit!(m::WS3DModel;
     dobs_abs  = joinpath(run_dir, dobs_filename)
     write_ws3d_model(model_abs, m.dx, m.dy, m.dz, m.A, origin; rotation=rotation, type_str="LOGE")
     ok = true
+    # absolute: the command runs with run_dir as cwd
+    fwd_ctrl_abs = isempty(cfg.fwd_ctrl) ? "" : abspath(cfg.fwd_ctrl)
     cd(run_dir) do
-        cmd = `$(cfg.mpirun_cmd) -n $(cfg.nprocs) $(cfg.modem_exe) -F $(model_filename) $(dobs_filename) $(dpred_filename)`
+        # -F takes the control file in slot 5, behind wFile_EMsoln; "n" is a
+        # placeholder that leaves it unwritten (ModEM gates the write on
+        # len_trim(wFile_EMsoln) > 1), so no EM solution is dumped per eval
+        cmd = isempty(fwd_ctrl_abs) ?
+            `$(cfg.mpirun_cmd) -n $(cfg.nprocs) $(cfg.modem_exe) -F $(model_filename) $(dobs_filename) $(dpred_filename)` :
+            `$(cfg.mpirun_cmd) -n $(cfg.nprocs) $(cfg.modem_exe) -F $(model_filename) $(dobs_filename) $(dpred_filename) n $(fwd_ctrl_abs)`
         try
             run(pipeline(cmd, stdout="0runlog.dat"))
         catch e
@@ -370,7 +386,7 @@ function forward_and_misfit!(m::WS3DModel;
         _cleanup_modem_artifacts!(run_dir)
         return Inf, nothing
     end
-    if cfg.distortion_mode == :full
+    if cfg.distortion_mode == :on
         fit = chi2_and_rms_distorted(dobs_abs, dpred_abs; damping=cfg.distortion_damping)
         _cleanup_modem_artifacts!(run_dir)
         return fit.rms, fit
@@ -382,15 +398,14 @@ end
 
 #---------- logging ----------
 
-function _write_trials_header_3d(path::AbstractString; timestamp::String, cfg::VFSA3DMTConfig, chain_seed::Int, T0_chain::Float64, ak::Float64)
+function _write_trials_header_3d(path::AbstractString; timestamp::String, cfg::VFSA3DMTConfig, T0::Float64, ak::Float64)
     open(path, "w") do io
         println(io, "# VFSA 3D MT detailed trials — ", timestamp)
-        println(io, "# chains=", cfg.nchains,
-                    "  seed=", chain_seed,
+        println(io, "# seed=", cfg.seed,
                     "  n_ctrl=", cfg.n_ctrl,
                     "  frac_update_controls=", cfg.frac_update_controls,
                     "  temp_kappa=", cfg.temp_kappa,
-                    "  T0=", T0_chain,
+                    "  T0=", T0,
                     "  cool_ratio=", cfg.cool_ratio,
                     "  ak=", ak,
                     "  max_iter=", cfg.max_iter,
@@ -425,15 +440,14 @@ function _append_trial_row_3d(path::AbstractString; iter::Int, trial::Int,
     end
 end
 
-function _write_iter_header_3d(path::AbstractString; timestamp::String, cfg::VFSA3DMTConfig, chain_seed::Int, T0_chain::Float64, ak::Float64)
+function _write_iter_header_3d(path::AbstractString; timestamp::String, cfg::VFSA3DMTConfig, T0::Float64, ak::Float64)
     open(path, "w") do io
         println(io, "# VFSA 3D MT iteration best — ", timestamp)
-        println(io, "# chains=", cfg.nchains,
-                    "  seed=", chain_seed,
+        println(io, "# seed=", cfg.seed,
                     "  n_ctrl=", cfg.n_ctrl,
                     "  frac_update_controls=", cfg.frac_update_controls,
                     "  temp_kappa=", cfg.temp_kappa,
-                    "  T0=", T0_chain,
+                    "  T0=", T0,
                     "  cool_ratio=", cfg.cool_ratio,
                     "  ak=", ak,
                     "  max_iter=", cfg.max_iter,
@@ -467,24 +481,15 @@ _T_schedule(k::Int; T0::Float64, ak::Float64) = T0 * exp(-sqrt(ak) * (k - 1))
 # decay rate so T reaches cool_ratio*T0 at max_iter
 _resolve_ak(cfg::VFSA3DMTConfig) = (log(1.0 / cfg.cool_ratio) / max(cfg.max_iter - 1.0, 1.0))^2
 
-#---------- single-chain vfsa loop ----------
+#---------- vfsa loop ----------
 
-function _run_chain_3d(chain_id::Int, start_model_path::String,
-                       dobs_filename::String, timestamp::String,
-                       run_root::String, results_root::String; cfg::VFSA3DMTConfig)
-    chain_seed = cfg.seed + 1000*(chain_id-1)
-    rng = MersenneTwister(chain_seed)
-    chain_dir = joinpath(run_root, @sprintf("chain_%02d", chain_id))
-    mkpath(chain_dir)
+function _run_vfsa3d(start_model_path::String,
+                     dobs_filename::String, timestamp::String,
+                     run_root::String; cfg::VFSA3DMTConfig)
+    rng = MersenneTwister(cfg.seed)
 
-    # each chain keeps its own logs so chains stay independent and parallel-safe
-    trials_log = joinpath(chain_dir, "0vfsa3DMT_detailed.log")
-    iter_log   = joinpath(chain_dir, "0vfsa3DMT.log")
-
-    dobs_chain_path = joinpath(chain_dir, dobs_filename)
-    if !isfile(dobs_chain_path)
-        cp(joinpath(run_root, dobs_filename), dobs_chain_path; force=true)
-    end
+    trials_log = joinpath(run_root, "0vfsa3DMT_detailed.log")
+    iter_log   = joinpath(run_root, "0vfsa3DMT.log")
 
     m = load_ws3d_model(start_model_path)
     _, _, _, _, _, _, origin, rotation = read_ws3d_model(start_model_path, true)
@@ -519,9 +524,9 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
     elseif !isnan(cfg.water_log10)
         mask .= v0_core_log10 .< cfg.water_log10
         # export the model-derived mask for reuse on future grids
-        if chain_id == 1 && count(mask) > 0
+        if count(mask) > 0
             bathy = extract_bathymetry(m; water_log10=cfg.water_log10)
-            write_bathymetry(joinpath(results_root, "bathymetry.dat"), bathy;
+            write_bathymetry(joinpath(run_root, "bathymetry.dat"), bathy;
                              water_log10=cfg.water_log10)
         end
     end
@@ -540,8 +545,8 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
     M = length(rbfmap.ci)
     if n_frozen > 0 || cfg.ctrl_depth_power != 0.0
         z_ctrl = [abs(m.cz[k]) for k in rbfmap.ck]
-        @info @sprintf("[chain %02d] mask: %d air + %d water cells frozen; %d controls, median depth %.0f m, %d above 6 km",
-                       chain_id, n_air, n_water, M, median(z_ctrl), count(<(6000.0), z_ctrl))
+        @info @sprintf("mask: %d air + %d water cells frozen; %d controls, median depth %.0f m, %d above 6 km",
+                       n_air, n_water, M, median(z_ctrl), count(<(6000.0), z_ctrl))
     end
 
     v0_ctrl = Vector{Float64}(undef, M)
@@ -554,25 +559,25 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
     nsel_default = max(1, round(Int, cfg.frac_update_controls * M))
 
     # initial forward on the start model
-    model0_filename = @sprintf("model_%02d_%03d_%02d.rho", chain_id, 0, 0)
-    dpred0_filename = @sprintf("dpred_%02d_%03d_%02d.dat", chain_id, 0, 0)
+    model0_filename = @sprintf("model_%03d_%02d.rho", 0, 0)
+    dpred0_filename = @sprintf("dpred_%03d_%02d.dat", 0, 0)
 
     embed_core!(m, v0_core_log10, ix, iy)
     smooth_padding_decay_xy!(m, ix, iy, background_log10, cfg.padding_decay_length)
 
-    dp0, fit0 = forward_and_misfit!(m; run_dir=chain_dir, model_filename=model0_filename,
+    dp0, fit0 = forward_and_misfit!(m; run_dir=run_root, model_filename=model0_filename,
                                     dobs_filename=dobs_filename, dpred_filename=dpred0_filename,
                                     origin=origin, rotation=rotation, cfg=cfg)
     rms_current = dp0
     best_rms    = rms_current
-    T0_chain = cfg.temp_kappa
-    ak_chain = _resolve_ak(cfg)
-    _write_trials_header_3d(trials_log; timestamp=timestamp, cfg=cfg, chain_seed=chain_seed, T0_chain=T0_chain, ak=ak_chain)
-    _write_iter_header_3d(iter_log; timestamp=timestamp, cfg=cfg, chain_seed=chain_seed, T0_chain=T0_chain, ak=ak_chain)
-    best_model_abs = joinpath(results_root, @sprintf("best_model_chain%02d.rho", chain_id))
-    cp(joinpath(chain_dir, model0_filename), best_model_abs; force=true)
+    T0 = cfg.temp_kappa
+    ak = _resolve_ak(cfg)
+    _write_trials_header_3d(trials_log; timestamp=timestamp, cfg=cfg, T0=T0, ak=ak)
+    _write_iter_header_3d(iter_log; timestamp=timestamp, cfg=cfg, T0=T0, ak=ak)
+    best_model_abs = joinpath(run_root, "best_model.rho")
+    cp(joinpath(run_root, model0_filename), best_model_abs; force=true)
     # per-site distortion of the current best model, refreshed on every new best
-    distortion_abs = joinpath(chain_dir, "distortion_best.txt")
+    distortion_abs = joinpath(run_root, "distortion_best.txt")
     fit0 !== nothing && write_distortion_file(distortion_abs, fit0;
                                               iter=0, rms=dp0, damping=cfg.distortion_damping)
     # filename of the current accepted model, carried forward so the iteration
@@ -583,7 +588,7 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
 
     for k in 1:cfg.max_iter
         # one schedule drives both proposal width and acceptance
-        T = _T_schedule(k; T0=T0_chain, ak=ak_chain)
+        T = _T_schedule(k; T0=T0, ak=ak)
 
         #---------- generate and test the trials ----------
         # all trials branch from the iteration-start state, the lowest-rms trial
@@ -612,9 +617,9 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
             embed_core!(m, v_trial, ix, iy)
             smooth_padding_decay_xy!(m, ix, iy, background_log10, cfg.padding_decay_length)
 
-            model_filename = @sprintf("model_%02d_%03d_%02d.rho", chain_id, k, t)
-            dpred_filename = @sprintf("dpred_%02d_%03d_%02d.dat", chain_id, k, t)
-            dp, fit_t = forward_and_misfit!(m; run_dir=chain_dir, model_filename=model_filename,
+            model_filename = @sprintf("model_%03d_%02d.rho", k, t)
+            dpred_filename = @sprintf("dpred_%03d_%02d.dat", k, t)
+            dp, fit_t = forward_and_misfit!(m; run_dir=run_root, model_filename=model_filename,
                                             dobs_filename=dobs_filename, dpred_filename=dpred_filename,
                                             origin=origin, rotation=rotation, cfg=cfg)
 
@@ -649,7 +654,7 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
             # record the global best on improvement, never feed it back
             if rms_current < best_rms
                 best_rms = rms_current
-                cp(joinpath(chain_dir, best_trial_model_rel), best_model_abs; force=true)
+                cp(joinpath(run_root, best_trial_model_rel), best_model_abs; force=true)
                 best_trial_fit !== nothing && write_distortion_file(distortion_abs, best_trial_fit;
                                                                     iter=k, rms=best_rms,
                                                                     damping=cfg.distortion_damping)
@@ -665,11 +670,11 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
         if cfg.model_save_every <= 0
             for t in 1:cfg.n_trials
                 if !cfg.keep_models
-                    model_t = joinpath(chain_dir, @sprintf("model_%02d_%03d_%02d.rho", chain_id, k, t))
+                    model_t = joinpath(run_root, @sprintf("model_%03d_%02d.rho", k, t))
                     isfile(model_t) && rm(model_t; force=true)
                 end
                 if !cfg.keep_dpred
-                    dpred_t = joinpath(chain_dir, @sprintf("dpred_%02d_%03d_%02d.dat", chain_id, k, t))
+                    dpred_t = joinpath(run_root, @sprintf("dpred_%03d_%02d.dat", k, t))
                     isfile(dpred_t) && rm(dpred_t; force=true)
                 end
             end
@@ -686,9 +691,9 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
                 if is_checkpoint && t == keep_trial
                     continue
                 end
-                model_t = joinpath(chain_dir, @sprintf("model_%02d_%03d_%02d.rho", chain_id, k, t))
+                model_t = joinpath(run_root, @sprintf("model_%03d_%02d.rho", k, t))
                 isfile(model_t) && rm(model_t; force=true)
-                dpred_t = joinpath(chain_dir, @sprintf("dpred_%02d_%03d_%02d.dat", chain_id, k, t))
+                dpred_t = joinpath(run_root, @sprintf("dpred_%03d_%02d.dat", k, t))
                 isfile(dpred_t) && rm(dpred_t; force=true)
             end
         end
@@ -714,12 +719,12 @@ function _run_chain_3d(chain_id::Int, start_model_path::String,
 
         # stop once best rms hits the target
         if best_rms <= cfg.target_rms
-            @info @sprintf("[chain %02d] target RMS %.3f reached at iter %d (best RMS %.5f); stopping.",
-                           chain_id, cfg.target_rms, k, best_rms)
+            @info @sprintf("target RMS %.3f reached at iter %d (best RMS %.5f); stopping.",
+                           cfg.target_rms, k, best_rms)
             break
         end
     end
-    return nothing
+    return best_model_abs, iter_log
 end
 
 #---------- main entry point ----------
@@ -743,6 +748,12 @@ function VFSA3DMT(start_model_path::AbstractString;
         error("cfg.sigma_scale_deep must be > 0, got $(cfg.sigma_scale_deep)")
     isempty(cfg.bathymetry_file) || isfile(cfg.bathymetry_file) ||
         error("cfg.bathymetry_file not found: $(cfg.bathymetry_file)")
+    isempty(cfg.fwd_ctrl) || isfile(cfg.fwd_ctrl) ||
+        error("cfg.fwd_ctrl not found: $(cfg.fwd_ctrl)")
+    cfg.distortion_mode in (:off, :on) ||
+        error("cfg.distortion_mode must be :off or :on, got $(cfg.distortion_mode)")
+    cfg.distortion_mode == :off || cfg.distortion_damping >= 0 ||
+        error("cfg.distortion_damping must be >= 0, got $(cfg.distortion_damping)")
     start_model_abs = abspath(start_model_path)
     model_dir = dirname(start_model_abs)
 
@@ -755,24 +766,16 @@ function VFSA3DMT(start_model_path::AbstractString;
     dobs_abs_target = abspath(joinpath(run_root, dobs_filename))
     cp(abspath(dobs_path), dobs_abs_target; force=true)
 
-    # per-chain logs live in chain_NN/, best models flat in run_root for the ensemble readers
     timestamp = Dates.format(t_now, "yyyy-mm-dd HH:MM:SS")
 
-    for c in 1:cfg.nchains
-        _run_chain_3d(c, start_model_abs, dobs_filename, timestamp,
-                      run_root, run_root; cfg=cfg)
-    end
-
-    best_model = joinpath(run_root, @sprintf("best_model_chain%02d.rho", 1))
-    iter_log   = joinpath(run_root, @sprintf("chain_%02d", 1), "0vfsa3DMT.log")
-    return best_model, iter_log
+    return _run_vfsa3d(start_model_abs, dobs_filename, timestamp, run_root; cfg=cfg)
 end
 
 #---------- ensemble statistics ----------
 
 function _intersect_ranges(r1::UnitRange{Int}, r2::UnitRange{Int})
     a = max(first(r1), first(r2)); b = min(last(r1), last(r2))
-    b < a && error("Empty intersection across chains.")
+    b < a && error("Empty intersection across runs.")
     a:b
 end
 
@@ -795,11 +798,11 @@ function _assert_grid_match!(mref, m, ix, iy, iz; grid_atol::Float64, grid_rtol:
     if !(sdx <= grid_atol + grid_rtol * maximum(abs.(dxr)) &&
          sdy <= grid_atol + grid_rtol * maximum(abs.(dyr)) &&
          sdz <= grid_atol + grid_rtol * maximum(abs.(dzr)))
-        error("Grid mismatch across chains within the overlapping index ranges.")
+        error("Grid mismatch across runs within the overlapping index ranges.")
     end
     if length(mref.origin) >= 3 && length(m.origin) >= 3
         dor = maximum(abs.(mref.origin[1:3] .- m.origin[1:3]))
-        dor <= 1e-6 || error("Origin mismatch across chains.")
+        dor <= 1e-6 || error("Origin mismatch across runs.")
     end
     nothing
 end
@@ -848,10 +851,10 @@ end
     AnalyseEnsemble3D(input_dir; pattern=r"^best_model.*\\.rho\$",
                       grid_atol=1e-8, grid_rtol=1e-8)
 
-Load all matching model files from `input_dir`, validate grid consistency,
-compute ensemble mean/median/std, and write them as WS3D model files. The default
-pattern matches the per-chain best models (`best_model_chainNN.rho`) that VFSA3DMT
-writes into the starting model's directory.
+Load all matching model files from `input_dir` (searched recursively), validate
+grid consistency, compute ensemble mean/median/std, and write them as WS3D model
+files. Each VFSA3DMT job writes `best_model.rho` into its own run directory, so
+point `input_dir` at the parent directory holding the run directories.
 
 Returns `(mean_path, median_path, std_path)`.
 """

@@ -79,9 +79,11 @@ function _accumulate_chi2_distorted!(accχ2::Base.RefValue{Float64}, accN::Base.
                                      Ze::AbstractMatrix{ComplexF64},
                                      c11::Float64, c12::Float64, c21::Float64, c22::Float64,
                                      λ1::Float64, λ2::Float64)
-    @inbounds for i in 1:size(Zo, 1)
-        for (oc, ac, bc, c1, c2) in ((1, 1, 3, c11, c12), (2, 2, 4, c11, c12),
-                                     (3, 1, 3, c21, c22), (4, 2, 4, c21, c22))
+    # component-outer, period-inner matches _accumulate_chi2!'s column-major
+    # order, so damping=Inf sums bit-identically to chi2_and_rms
+    @inbounds for (oc, ac, bc, c1, c2) in ((1, 1, 3, c11, c12), (2, 2, 4, c11, c12),
+                                           (3, 1, 3, c21, c22), (4, 2, 4, c21, c22))
+        for i in 1:size(Zo, 1)
             zo = Zo[i, oc]; ze = Ze[i, oc]
             (isfinite(real(zo)) && isfinite(imag(zo)) &&
              isfinite(real(ze)) && isfinite(imag(ze))) || continue

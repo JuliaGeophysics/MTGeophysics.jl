@@ -1,8 +1,10 @@
 # 3D VFSA Inversion
 
 Run a 3D magnetotelluric inversion using Very Fast Simulated Annealing (VFSA)
-with Gaussian-RBF parameterization, multi-chain ensemble sampling, and the
-external [ModEM](https://github.com/magnetotellurics/ModEM) forward solver.
+with Gaussian-RBF parameterization and the external
+[ModEM](https://github.com/magnetotellurics/ModEM) forward solver. Each run is
+a single chain; for an ensemble, submit several jobs with different seeds and
+output directories.
 
 ![VFSA 3D benchmark — ensemble mean and std vs deterministic ModEM inversion](assets/VFSA3DBenchmark.png)
 
@@ -26,12 +28,11 @@ it prints setup instructions and exits.
 using MTGeophysics
 
 cfg = VFSA3DMTConfig(
-    nchains   = 2,
     nprocs    = 21,
     n_ctrl    = 900,
     log_bounds = (0.0, 5.0),
     max_iter  = 3000,
-    n_trials  = 4,
+    n_trials  = 1,
     seed      = 1911,
     keep_models = true,
 )
@@ -45,21 +46,19 @@ best_model, iter_log = VFSA3DMT(
 
 ## Configuration
 
-| Parameter | Default | Description |
+| Parameter | Example | Description |
 |:----------|:--------|:------------|
-| `nchains` | 1 | Independent Markov chains |
 | `nprocs` | 21 | MPI processes for ModEM forward calls |
 | `mpirun_cmd` | `"mpirun"` | MPI launcher command |
 | `modem_exe` | `"Mod3DMT_2025"` | ModEM executable name |
 | `n_ctrl` | 900 | Gaussian-RBF control points in the core |
 | `log_bounds` | (0, 5) | log₁₀(Ω·m) search bounds |
 | `step_scale` | 0.05 | VFSA proposal step size |
-| `max_iter` | 3000 | Iterations per chain |
-| `n_trials` | 4 | Trial perturbations per iteration |
-| `T0_prop` | 1.0 | Initial proposal temperature |
-| `Tf_prop` | 1e-3 | Final proposal temperature |
-| `T0_acc` | 1.0 | Initial acceptance temperature |
-| `Tf_acc` | 1e-3 | Final acceptance temperature |
+| `max_iter` | 3000 | Iteration cap |
+| `n_trials` | 1 | Trial perturbations per iteration (1 = classic VFSA) |
+| `temp_kappa` | 0.05 | Initial temperature (proposal and acceptance) |
+| `cool_ratio` | 0.02 | Final temperature as a fraction of `temp_kappa` |
+| `target_rms` | 3.0 | Early-stop RMS |
 | `seed` | 1911 | Random seed for reproducibility |
 | `pad_tol` | 0.2 | Tolerance for core/padding detection |
 | `padding_decay_length` | 10.0 | Horizontal padding blend (cell widths) |
@@ -82,11 +81,12 @@ write_ws3d_model("output.rho", m.dx, m.dy, m.dz, m.A, m.origin)
 
 ## Ensemble analysis
 
-When multiple chains are run, compute ensemble statistics over the collected
-best models:
+Run several jobs with different seeds, then point `AnalyseEnsemble3D` at the
+parent directory of the run directories (searched recursively for
+`best_model.rho`):
 
 ```julia
-mean_path, median_path, std_path = AnalyseEnsemble3D("runs/20260406_120000")
+mean_path, median_path, std_path = AnalyseEnsemble3D("runs")
 ```
 
 This writes `model.mean`, `model.median`, and `model.std` in WS3D format.
@@ -99,16 +99,18 @@ median, and standard deviation over an array of 3D resistivity cubes.
 The result directory contains:
 
 ```text
-runs/<timestamp>/
+run_<timestamp>/
 ├── 0vfsa3DMT.log              # per-iteration summary
 ├── 0vfsa3DMT_detailed.log     # per-trial detail
-├── best_model_chain01.rho     # best model per chain
-├── chain01_iter0001.rho       # trial models (if keep_models=true)
-├── ...
-├── model.mean                 # ensemble mean (if nchains > 1)
-├── model.median               # ensemble median
-└── model.std                  # ensemble std
+├── best_model.rho             # best model of the run
+├── model_001_01.rho           # trial models (if keep_models=true)
+├── dpred_001_01.dat           # predicted data (if keep_dpred=true)
+├── distortion_best.txt        # per-site distortion (if distortion_mode=:on)
+└── ...
 ```
+
+`AnalyseEnsemble3D` writes `model.mean`, `model.median`, and `model.std` into
+the parent directory it is given.
 
 ## Example data
 

@@ -1,12 +1,12 @@
-# This helper script recomputes the 3D ensemble statistics from saved chain models.
+# This helper script recomputes the 3D ensemble statistics from saved run models.
 #
 # Usage:
-#   julia --project=. helpers/run_statistics_3D.jl <run_dir>
-#   julia --project=. helpers/run_statistics_3D.jl <run_dir> "^chain.*\.rho$"
+#   julia --project=. helpers/run_statistics_3D.jl <parent_dir>
+#   julia --project=. helpers/run_statistics_3D.jl <parent_dir> "^model.*\.rho$"
 #
-# VFSA3DMT writes the per-chain best models (best_model_chainNN.rho) directly into
-# the starting model's directory, so <run_dir> is that directory. The optional
-# second argument is a regex pattern to match model filenames
+# Each VFSA3DMT job writes best_model.rho into its own run directory; <parent_dir>
+# is the directory holding those run directories (searched recursively). The
+# optional second argument is a regex pattern to match model filenames
 # (default: "^best_model.*\.rho$").
 
 using MTGeophysics

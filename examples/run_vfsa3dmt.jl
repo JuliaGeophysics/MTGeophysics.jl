@@ -15,7 +15,6 @@ seed = length(ARGS) >= 1 ? parse(Int, ARGS[1]) : 1911
 
 #---------- configure the inversion ----------
 cfg = VFSA3DMTConfig(
-    nchains               = 1,          # independent chains
     nprocs                = 21,         # MPI ranks for ModEM
     mpirun_cmd            = "srun",     # MPI launcher
     modem_exe             = MODEM_EXECUTABLE,
@@ -41,6 +40,9 @@ cfg = VFSA3DMTConfig(
     ctrl_depth_power      = 0.25,       # mild shallow bias; p>=0.5 starves the deep (ceiling test v5)
     water_log10           = 0.5,        # freeze start-model cells below this (ocean at -0.523)
     bathymetry_file       = "",         # "" = derive mask from the start model
+    # optional galvanic distortion correction (variable projection), off by default:
+    # distortion_mode     = :on,        # per-site 2x2 C solved each misfit eval
+    # distortion_damping  = 1.0,        # relative damping toward C=I; Inf = C≡I
 )
 
 best_model, iter_log = VFSA3DMT(start_model; dobs_path=observed_data, cfg=cfg)
