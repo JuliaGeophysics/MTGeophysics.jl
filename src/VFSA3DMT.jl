@@ -15,9 +15,16 @@ Configuration for the 3D VFSA MT inversion. All VFSA hyper-parameters,
 file-management switches, and external-solver settings live here. Every field is
 a required keyword with no default — values are supplied by the run script (see
 `examples/run_vfsa3dmt.jl`), so the engine carries no hidden defaults. The only
-exceptions are the galvanic-distortion fields `distortion_mode` and
-`distortion_damping`, which are optional and default to the previous behavior
-(no distortion handling), keeping existing run scripts working unchanged.
+exceptions are fields added after that convention was set (`z_core_skin_depths`,
+`z_core_depth`, the galvanic-distortion fields, `fwd_ctrl`), which default to
+sensible behavior and keep existing run scripts working unchanged.
+
+The perturbable core is truncated in depth: deep layers exist for the forward
+solver, not for the inversion. The core extends to `z_core_skin_depths` skin
+depths `δ = 503·sqrt(ρ_bg·T_max)` derived from the observed data (median
+off-diagonal apparent resistivity, longest period), or to the top `z_core_cells`
+z layers when set. Controls are placed and perturbation applied only inside
+that depth; `Inf` skin depths restores the full-column behavior.
 
 With `distortion_mode = :on` each misfit evaluation solves, per site, a real
 frequency-independent 2x2 matrix `C` minimizing the error-weighted misfit
@@ -42,10 +49,13 @@ proposal width and acceptance, cooling from `temp_kappa` to
 typical uphill `dE_rms2` so the Metropolis test is selective from the start.
 
 Control-point density can decrease with depth: sampling weight per cell is
-`(z_center + z1)^(-ctrl_depth_power)` (0 = uniform, 1 ≈ uniform per log-depth).
-Kernel widths grade from `sigma_scale` (cells) at the top of the core to
-`sigma_scale_deep` at the bottom, interpolated in log-depth over the grid's own
-depth range; equal values give uniform widths.
+`(depth + z1)^(-ctrl_depth_power)`, depth measured from the model top (0 =
+uniform per cell). The weight is per cell, not per volume, so on meshes whose
+dz grows with depth the mesh's own coarsening compounds with the exponent —
+tune `ctrl_depth_power` for the grid at hand. Kernel widths grade from
+`sigma_scale` (cells) at the top of the core to `sigma_scale_deep` at the
+bottom, interpolated in log-depth over the core's own depth range; equal
+values give uniform widths.
 
 Frozen cells never receive control points, are never perturbed, and are never
 bound-clamped. Topographic air (tagged as NaN in the loaded model) is always
@@ -71,6 +81,12 @@ Base.@kwdef mutable struct VFSA3DMTConfig
     seed::Int
     pad_tol::Float64
     padding_decay_length::Float64
+    # z_core_skin_depths: perturbable core depth in data skin depths; Inf = full column
+    z_core_skin_depths::Float64 = 1.0
+    # z_core_cells: explicit core depth as the top N z layers; 0 = derive from data
+    z_core_cells::Int = 0
+    # padding_decay_length_z: below-core blend e-fold, in multiples of the median core dz
+    padding_decay_length_z::Float64 = 10.0
     keep_models::Bool
     keep_dpred::Bool
     # model_save_every: 0 = behave per keep_models; >0 = retain trial models only
@@ -125,12 +141,58 @@ function core_ranges(m::WS3DModel; tol::Real=0.2)
     return ix, iy
 end
 
-extract_core_array(m::WS3DModel, ix::UnitRange{Int}, iy::UnitRange{Int}) = @view m.A[ix, iy, :]
+# bad z-core / decay settings fall back to defaults instead of aborting a queued job
+function _sanitize_cfg!(cfg::VFSA3DMTConfig)
+    if !(cfg.z_core_skin_depths > 0)
+        @warn "z_core_skin_depths invalid ($(cfg.z_core_skin_depths)); using 1.0"
+        cfg.z_core_skin_depths = 1.0
+    end
+    if cfg.z_core_cells < 0
+        @warn "z_core_cells invalid ($(cfg.z_core_cells)); using 0 (derive from data)"
+        cfg.z_core_cells = 0
+    end
+    if !(isfinite(cfg.padding_decay_length_z) && cfg.padding_decay_length_z > 0)
+        @warn "padding_decay_length_z invalid ($(cfg.padding_decay_length_z)); using 10.0"
+        cfg.padding_decay_length_z = 10.0
+    end
+    if !(isfinite(cfg.padding_decay_length) && cfg.padding_decay_length > 0)
+        @warn "padding_decay_length invalid ($(cfg.padding_decay_length)); using 10.0"
+        cfg.padding_decay_length = 10.0
+    end
+    return cfg
+end
+
+# δ = 503·sqrt(ρ_bg·T_max), ρ_bg = median finite off-diagonal apparent resistivity
+function _z_core_max_depth(dobs_abs::AbstractString, cfg::VFSA3DMTConfig)
+    isfinite(cfg.z_core_skin_depths) || return Inf
+    d = try
+        load_data_modem(dobs_abs)
+    catch e
+        @warn "z-core: could not load observed data, using full model depth" error=e
+        return Inf
+    end
+    rho_off = filter(x -> isfinite(x) && x > 0, vec(d.ρ[:, 2:3, :]))
+    if isempty(rho_off) || isempty(d.T)
+        @warn "z-core: no finite off-diagonal apparent resistivities, using full model depth"
+        return Inf
+    end
+    return cfg.z_core_skin_depths * 503.0 * sqrt(median(rho_off) * maximum(d.T))
+end
+
+# cz carries origin[3], so cz[k] <= max_depth counts depth below the datum
+function z_core_range(m::WS3DModel, max_depth::Real)
+    kz_last = searchsortedlast(m.cz, max_depth)
+    kz_last >= 1 || error("z-core depth $(max_depth) m is above the first layer center")
+    return 1:kz_last
+end
+
+extract_core_array(m::WS3DModel, ix::UnitRange{Int}, iy::UnitRange{Int}, kz::UnitRange{Int}) =
+    @view m.A[ix, iy, kz]
 
 function embed_core!(m::WS3DModel, A_core::AbstractArray{<:Real,3},
-                     ix::UnitRange{Int}, iy::UnitRange{Int})
-    @assert size(A_core,1)==length(ix) && size(A_core,2)==length(iy) && size(A_core,3)==m.nz
-    @views m.A[ix, iy, :] .= A_core
+                     ix::UnitRange{Int}, iy::UnitRange{Int}, kz::UnitRange{Int})
+    @assert size(A_core,1)==length(ix) && size(A_core,2)==length(iy) && size(A_core,3)==length(kz)
+    @views m.A[ix, iy, kz] .= A_core
     return m
 end
 
@@ -162,6 +224,29 @@ function smooth_padding_decay_xy!(m::WS3DModel, ix::UnitRange{Int}, iy::UnitRang
     return m
 end
 
+#---------- vertical padding decay (below the z core) ----------
+
+# each core column continues its last perturbed value downward, blending toward
+# background; runs before the xy decay so deep pad corners see the filled columns
+function smooth_padding_decay_z!(m::WS3DModel, ix::UnitRange{Int}, iy::UnitRange{Int},
+                                 kz::UnitRange{Int}, background_res_log10::Float64,
+                                 decay_length::Float64)
+    klast = last(kz)
+    klast == m.nz && return m
+    # physical distance: dz is strongly graded, index distance misrepresents it
+    L = decay_length * median(view(m.dz, kz))
+    @inbounds for k in (klast+1):m.nz
+        weight = exp(-(m.cz[k] - m.cz[klast]) / max(L, eps()))
+        for j in iy, i in ix
+            boundary_val = m.A[i, j, klast]
+            m.A[i, j, k] = isfinite(boundary_val) ?
+                boundary_val * weight + background_res_log10 * (1 - weight) :
+                background_res_log10
+        end
+    end
+    return m
+end
+
 #---------- gaussian RBF interpolation (compact support) ----------
 
 struct RBFMap
@@ -178,35 +263,41 @@ struct RBFMap
 end
 
 """
-    build_rbf_map(m, ix, iy, n_ctrl, rng; sigma_scale=2.0, trunc_sigmas=3.0,
+    build_rbf_map(m, ix, iy, n_ctrl, rng; kz=1:m.nz, sigma_scale=2.0, trunc_sigmas=3.0,
                   sigma_scale_deep=sigma_scale, depth_power=0.0, exclude=nothing)
 
 Randomly pick up to `n_ctrl` control voxels in the core and precompute
-Gaussian-RBF weights for every core voxel. Kernel widths (in cells) grade from
-`sigma_scale` at the top of the core to `sigma_scale_deep` at the bottom,
-interpolated per control in log-depth over the grid's own depth range, so the
-profile adapts to any survey without absolute-depth settings; equal values give
-uniform widths. `depth_power` biases control placement shallow and `exclude`
-marks cells that may not receive controls.
+Gaussian-RBF weights for every core voxel. `kz` restricts the core in depth.
+Kernel widths (in cells) grade from `sigma_scale` at the top of the core to
+`sigma_scale_deep` at the bottom, interpolated per control in log-depth over the
+core's own depth range, so the profile adapts to any survey without
+absolute-depth settings; equal values give uniform widths. `depth_power` biases
+control placement shallow and `exclude` marks cells that may not receive
+controls.
 """
 function build_rbf_map(m::WS3DModel, ix::UnitRange{Int}, iy::UnitRange{Int}, n_ctrl::Int, rng::AbstractRNG;
+                       kz::UnitRange{Int} = 1:m.nz,
                        sigma_scale::Float64 = 2.0, trunc_sigmas::Float64 = 3.0,
                        sigma_scale_deep::Float64 = sigma_scale,
                        depth_power::Float64 = 0.0,
                        exclude::Union{Nothing,AbstractArray{Bool,3}} = nothing)
 
-    nx, ny, nz = length(ix), length(iy), m.nz
+    nx, ny, nz = length(ix), length(iy), length(kz)
     N = nx * ny * nz
     n_avail = exclude === nothing ? N : N - count(exclude)
     n_avail > 0 || error("build_rbf_map: every core cell is excluded")
     n_sel = min(n_ctrl, n_avail)
     n_sel < n_ctrl && @warn "build_rbf_map: only $n_sel of $n_ctrl controls placed (exclusion)"
 
-    # depth-weighted, mask-aware placement: sampling weight ∝ (z_center + z1)^(-depth_power),
-    # zero in excluded cells; depth_power = 0 with no mask is uniform placement
+    # depth-weighted, mask-aware placement: sampling weight ∝ (depth + z1)^(-depth_power)
+    # with depth measured from the model-top edge so it stays monotonic across the
+    # datum on air/topo grids; the weight is per cell, so a dz grading that coarsens
+    # with depth compounds with depth_power. zero weight in excluded cells;
+    # depth_power = 0 with no mask is uniform placement
     # (weighted sampling without replacement via exponential keys, Efraimidis–Spirakis)
-    zc = m.cz
-    z1 = abs(zc[1]) + eps()
+    zc = view(m.cz, kz)
+    z_top_edge = m.z[1]
+    z1 = (zc[1] - z_top_edge) + eps()
     keys = Vector{Float64}(undef, N)
     @inbounds for id in 1:N
         k = Int(ceil(id / (nx*ny)))
@@ -214,7 +305,7 @@ function build_rbf_map(m::WS3DModel, ix::UnitRange{Int}, iy::UnitRange{Int}, n_c
         j = Int(ceil(rem1 / nx))
         i = rem1 - (j-1)*nx
         w = (exclude !== nothing && exclude[i, j, k]) ? 0.0 :
-            (depth_power == 0.0 ? 1.0 : (abs(zc[k]) + z1)^(-depth_power))
+            (depth_power == 0.0 ? 1.0 : ((zc[k] - z_top_edge) + z1)^(-depth_power))
         keys[id] = w > 0 ? rand(rng)^(1.0 / w) : -Inf
     end
     idxs = collect(partialsortperm(keys, 1:n_sel; rev=true))
@@ -234,12 +325,12 @@ function build_rbf_map(m::WS3DModel, ix::UnitRange{Int}, iy::UnitRange{Int}, n_c
         ctrl_at[ci[q], cj[q], ck[q]] = q
     end
 
-    z_top = abs(zc[1])
-    z_bot = abs(zc[nz])
+    z_top = zc[1] - z_top_edge
+    z_bot = zc[nz] - z_top_edge
     denom = log(z_bot + z1) - log(z_top + z1)
     sig = Vector{Float64}(undef, n_sel)
     @inbounds for q in 1:n_sel
-        t = denom > 0 ? clamp((log(abs(zc[ck[q]]) + z1) - log(z_top + z1)) / denom, 0.0, 1.0) : 0.0
+        t = denom > 0 ? clamp((log((zc[ck[q]] - z_top_edge) + z1) - log(z_top + z1)) / denom, 0.0, 1.0) : 0.0
         sig[q] = sigma_scale + t * (sigma_scale_deep - sigma_scale)
     end
 
@@ -251,6 +342,7 @@ function build_rbf_map(m::WS3DModel, ix::UnitRange{Int}, iy::UnitRange{Int}, n_c
         for kk in max(1, ck[q]-rq):min(nz, ck[q]+rq),
             jj in max(1, cj[q]-rq):min(ny, cj[q]+rq),
             ii in max(1, ci[q]-rq):min(nx, ci[q]+rq)
+            # index-space metric: isotropic in cells, anisotropic in meters on graded dz
             r2 = ((ii - ci[q])^2 + (jj - cj[q])^2 + (kk - ck[q])^2) / sq^2
             if r2 <= trunc_sigmas^2
                 id = ii + (jj-1)*nx + (kk-1)*nx*ny
@@ -495,7 +587,11 @@ function _run_vfsa3d(start_model_path::String,
     _, _, _, _, _, _, origin, rotation = read_ws3d_model(start_model_path, true)
 
     ix, iy = core_ranges(m; tol=cfg.pad_tol)
-    Acore = extract_core_array(m, ix, iy)
+    kz = cfg.z_core_cells > 0 ? (1:min(cfg.z_core_cells, m.nz)) :
+         z_core_range(m, _z_core_max_depth(joinpath(run_root, dobs_filename), cfg))
+    last(kz) < m.nz && @info @sprintf("z-core: perturbing %d of %d layers (bottom %.0f m)",
+                                      length(kz), m.nz, m.cz[last(kz)])
+    Acore = extract_core_array(m, ix, iy, kz)
     v0_core_log10 = Array(Acore)
 
     #---------- background resistivity from the padding ring ----------
@@ -520,7 +616,7 @@ function _run_vfsa3d(start_model_path::String,
     mask = falses(size(v0_core_log10))
     if !isempty(cfg.bathymetry_file)
         bathy = read_bathymetry(cfg.bathymetry_file)
-        mask .= water_mask_from_bathymetry(m, bathy)[ix, iy, :]
+        mask .= water_mask_from_bathymetry(m, bathy)[ix, iy, kz]
     elseif !isnan(cfg.water_log10)
         mask .= v0_core_log10 .< cfg.water_log10
         # export the model-derived mask for reuse on future grids
@@ -538,13 +634,14 @@ function _run_vfsa3d(start_model_path::String,
 
     # build the RBF map
     rbfmap = build_rbf_map(m, ix, iy, cfg.n_ctrl, rng;
+                           kz=kz,
                            sigma_scale=cfg.sigma_scale, trunc_sigmas=cfg.trunc_sigmas,
                            sigma_scale_deep=cfg.sigma_scale_deep,
                            depth_power=cfg.ctrl_depth_power,
                            exclude=(n_frozen > 0 ? mask : nothing))
     M = length(rbfmap.ci)
     if n_frozen > 0 || cfg.ctrl_depth_power != 0.0
-        z_ctrl = [abs(m.cz[k]) for k in rbfmap.ck]
+        z_ctrl = [m.cz[k] for k in rbfmap.ck]
         @info @sprintf("mask: %d air + %d water cells frozen; %d controls, median depth %.0f m, %d above 6 km",
                        n_air, n_water, M, median(z_ctrl), count(<(6000.0), z_ctrl))
     end
@@ -562,7 +659,8 @@ function _run_vfsa3d(start_model_path::String,
     model0_filename = @sprintf("model_%03d_%02d.rho", 0, 0)
     dpred0_filename = @sprintf("dpred_%03d_%02d.dat", 0, 0)
 
-    embed_core!(m, v0_core_log10, ix, iy)
+    embed_core!(m, v0_core_log10, ix, iy, kz)
+    smooth_padding_decay_z!(m, ix, iy, kz, background_log10, cfg.padding_decay_length_z)
     smooth_padding_decay_xy!(m, ix, iy, background_log10, cfg.padding_decay_length)
 
     dp0, fit0 = forward_and_misfit!(m; run_dir=run_root, model_filename=model0_filename,
@@ -614,7 +712,8 @@ function _run_vfsa3d(start_model_path::String,
             # frozen water cells: undo kernel bleed-in and bound clamping
             n_frozen > 0 && (v_trial[mask] .= v0_core_log10[mask])
 
-            embed_core!(m, v_trial, ix, iy)
+            embed_core!(m, v_trial, ix, iy, kz)
+            smooth_padding_decay_z!(m, ix, iy, kz, background_log10, cfg.padding_decay_length_z)
             smooth_padding_decay_xy!(m, ix, iy, background_log10, cfg.padding_decay_length)
 
             model_filename = @sprintf("model_%03d_%02d.rho", k, t)
@@ -746,6 +845,7 @@ function VFSA3DMT(start_model_path::AbstractString;
         error("cfg.ctrl_depth_power must be >= 0, got $(cfg.ctrl_depth_power)")
     cfg.sigma_scale_deep > 0 ||
         error("cfg.sigma_scale_deep must be > 0, got $(cfg.sigma_scale_deep)")
+    _sanitize_cfg!(cfg)
     isempty(cfg.bathymetry_file) || isfile(cfg.bathymetry_file) ||
         error("cfg.bathymetry_file not found: $(cfg.bathymetry_file)")
     isempty(cfg.fwd_ctrl) || isfile(cfg.fwd_ctrl) ||

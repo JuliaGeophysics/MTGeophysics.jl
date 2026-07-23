@@ -62,6 +62,9 @@ best_model, iter_log = VFSA3DMT(
 | `seed` | 1911 | Random seed for reproducibility |
 | `pad_tol` | 0.2 | Tolerance for core/padding detection |
 | `padding_decay_length` | 10.0 | Horizontal padding blend (cell widths) |
+| `z_core_skin_depths` | 1.0 | Perturbable core depth in data skin depths (`Inf` = full column) |
+| `z_core_cells` | 0 | Explicit core depth as top N z layers (0 = derive from data) |
+| `padding_decay_length_z` | 10.0 | Below-core blend e-fold (multiples of median core dz) |
 | `keep_models` | true | Keep all trial model files |
 | `keep_dpred` | false | Keep predicted data files |
 | `sigma_scale` | 2.0 | RBF width scaling factor |
