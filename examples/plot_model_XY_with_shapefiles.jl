@@ -1187,7 +1187,7 @@ function main()
     end
 
     Makie.update_state_before_display!(fig)
-    screen = display(fig)
+    screen = GLMakie.Screen(fig.scene)
     if screen isa GLMakie.Screen && GLMakie.requires_update(screen)
         GLMakie.render_frame(screen)
     end

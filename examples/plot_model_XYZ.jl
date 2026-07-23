@@ -1032,7 +1032,7 @@ function main()
     println("  - 'Reset View': Reset camera angle")
     println("  - 'Export Figure': Save high-quality PNG")
 
-    screen = display(fig)
+    screen = GLMakie.Screen(fig.scene)
     println("\nViewer is open. Close the window to exit.")
     wait(screen)
 

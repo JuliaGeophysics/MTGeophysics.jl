@@ -1123,7 +1123,7 @@ on(exportbtn.clicks) do _
     @info status[]
 end
 
-screen = display(fig)
+screen = GLMakie.Screen(fig.scene)
 if !isinteractive()
     wait(screen)
 end

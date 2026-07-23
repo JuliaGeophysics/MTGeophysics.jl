@@ -527,7 +527,7 @@ function main()
     println("  - Click 'Apply to Zone' to replace resistivity")
     println("  - Toggle to apply to current layer or all depths")
 
-    screen = display(fig)
+    screen = GLMakie.Screen(fig.scene)
     println("\nClose the figure window to exit...")
     wait(screen)
 

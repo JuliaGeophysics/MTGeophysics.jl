@@ -741,7 +741,7 @@ function main()
     println("  Use the current view layer and current core/full view, then click 'Apply Changes'.")
     println("  Click 'Save Model' to write the modified model to disk.")
 
-    screen = display(fig)
+    screen = GLMakie.Screen(fig.scene)
     println("\nClose the figure window to exit...")
     wait(screen)
 

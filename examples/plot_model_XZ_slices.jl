@@ -631,7 +631,7 @@ function main()
     println("  - Use Previous/Next buttons for step-by-step navigation")
     println("  - Click 'Export Figure' for high-resolution PNG export")
 
-    screen = display(fig)
+    screen = GLMakie.Screen(fig.scene)
 
     println("\nClose the figure window to exit...")
     wait(screen)
