@@ -7,9 +7,7 @@ using GLMakie
 using Statistics
 using Dates
 
-include(joinpath(dirname(@__DIR__), "src", "Model.jl"))
-include(joinpath(dirname(@__DIR__), "src", "CoreUtils3D.jl"))
-include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
+using MTGeophysics
 
 # Paths must be passed on the command line:
 #   julia --project=. examples/manipulate_model_by_drawing.jl <model_file>

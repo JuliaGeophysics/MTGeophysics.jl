@@ -5,9 +5,9 @@
 # Use it for fast inspection of model structure along the X direction.
 #
 # The user chooses the visualisation coordinate system at the top of the script:
-#   coordinate_system = "EPSG:3067"   — ETRS-TM35FIN (default, metres)
+#   coordinate_system = "model"       — raw model XY (metres, no reprojection; default)
 #   coordinate_system = "EPSG:4326"   — WGS 84 lat/lon (degrees)
-#   coordinate_system = "model"       — raw model XY (metres, no reprojection)
+#   coordinate_system = "EPSG:XXXX"   — any projected CRS, e.g. EPSG:32610 for Cascadia
 #
 # When using a projected or geographic CRS the script needs a ModEM data file
 # (data_file) for georeferencing (origin lat/lon + station coordinates).
@@ -17,10 +17,7 @@ using Statistics
 using Dates
 using Proj
 
-include(joinpath(dirname(@__DIR__), "src", "Model.jl"))
-include(joinpath(dirname(@__DIR__), "src", "Data.jl"))
-include(joinpath(dirname(@__DIR__), "src", "CoreUtils3D.jl"))
-include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
+using MTGeophysics
 
 # ---------- Model & data files ----------
 # Paths must be passed on the command line:
@@ -35,7 +32,7 @@ function _looks_like_coordinate_system_arg(arg::AbstractString)
 end
 
 model_file = length(ARGS) >= 1 ? ARGS[1] : ""
-data_file  = length(ARGS) >= 2 && !_looks_like_coordinate_system_arg(ARGS[2]) ? ARGS[2] : ""   # needed for EPSG:3067 / EPSG:4326
+data_file  = length(ARGS) >= 2 && !_looks_like_coordinate_system_arg(ARGS[2]) ? ARGS[2] : ""   # needed for georeferenced CRS modes
 
 function _print_cli_usage()
     println("Usage:")
@@ -46,10 +43,10 @@ function _print_cli_usage()
 end
 
 # ---------- Coordinate system ----------
-#   "EPSG:3067"  — ETRS-TM35FIN (Easting / Northing in metres)  ← default
+#   "model"      — raw model XY (no conversion; data_file is not needed)  ← default
 #   "EPSG:4326"  — WGS 84 geographic (Longitude / Latitude in degrees)
-#   "model"      — raw model XY (no conversion; data_file is not needed)
-coordinate_system = length(ARGS) >= 3 ? ARGS[3] : (length(ARGS) >= 2 && _looks_like_coordinate_system_arg(ARGS[2]) ? ARGS[2] : "EPSG:3067")
+#   any projected "EPSG:XXXX" code, e.g. "EPSG:32610" for Cascadia
+coordinate_system = length(ARGS) >= 3 ? ARGS[3] : (length(ARGS) >= 2 && _looks_like_coordinate_system_arg(ARGS[2]) ? ARGS[2] : "model")
 
 # ---------- Visualisation controls ----------
 log10_scale       = true

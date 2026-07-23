@@ -10,10 +10,7 @@ using Shapefile
 using GeoInterface
 using Proj
 
-include(joinpath(dirname(@__DIR__), "src", "Model.jl"))
-include(joinpath(dirname(@__DIR__), "src", "Data.jl"))
-include(joinpath(dirname(@__DIR__), "src", "CoreUtils3D.jl"))
-include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
+using MTGeophysics
 
 # =========================
 # User controls (edit here)
@@ -24,8 +21,8 @@ include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
 #   julia --project=. examples/plot_model_XYZ.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat
 # If target_crs is omitted, the viewer stays in the project-local coordinates
 # implied by the ModEM data file (local transverse Mercator / survey metres).
-# To reproject into another map CRS, pass an explicit EPSG code such as
-# "EPSG:3067" or "EPSG:32610".
+# Both "PROJECT" (local, default) and "EPSG:4326" (lat/lon) always work; any
+# other projected EPSG code such as "EPSG:3067" or "EPSG:32610" works too.
 model_file = length(ARGS) >= 1 ? ARGS[1] : ""
 data_file  = length(ARGS) >= 2 ? ARGS[2] : ""   # needed to resolve or apply any georeferenced plotting CRS
 
@@ -36,10 +33,10 @@ function _print_cli_usage()
     println("  julia --project=. examples/plot_model_XYZ.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat")
 end
 
-# you can add your shapefiles here (set to nothing to skip)
+# optional shapefile overlay drawn at the surface: set to a .shp path, nothing = skip
+# the .prj sidecar is used to reproject into the plotting CRS automatically
+# e.g. shapefile_path = joinpath(@__DIR__, "gis", "coastline", "coastline.shp")
 shapefile_path = nothing
-#shapefile_path = joinpath(@__DIR__, "geoenergialoikka", "BatholithOutline", "BatholithOutline.shp")
-#shapefile_path = joinpath(@__DIR__, "geoenergialoikka", "MTSites", "MTSites.shp")
 
 log10_scale = true
 colormap = :Spectral

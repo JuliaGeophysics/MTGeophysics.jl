@@ -5,13 +5,13 @@
 # (configured in the `shapefiles` list below) on the map view.
 #
 # The user chooses the visualisation coordinate system at the top of the script:
-#   coordinate_system = "EPSG:3067"   — ETRS-TM35FIN, Finland (default, metres)
+#   coordinate_system = "EPSG:32610"  — WGS 84 / UTM zone 10N, Cascadia (default, metres)
 #   coordinate_system = "EPSG:4326"   — WGS 84 lat/lon (degrees)
 #   coordinate_system = "model"       — raw model XY (metres, no reprojection)
-#   coordinate_system = "EPSG:XXXX"   — any other projected CRS, e.g. for Cascadia:
-#       "EPSG:32610"  — WGS 84 / UTM zone 10N (Washington / Oregon coast)
+#   coordinate_system = "EPSG:XXXX"   — any other projected CRS, e.g.:
 #       "EPSG:26910"  — NAD83  / UTM zone 10N
 #       "EPSG:3005"   — NAD83  / BC Albers
+#       "EPSG:3067"   — ETRS-TM35FIN, Finland
 #
 # When using a projected or geographic CRS the script needs a ModEM data file
 # (data_file) for georeferencing (origin lat/lon + station coordinates).
@@ -26,11 +26,7 @@ using Shapefile
 using GeoInterface
 using Proj
 
-include(joinpath(dirname(@__DIR__), "src", "Model.jl"))
-include(joinpath(dirname(@__DIR__), "src", "Data.jl"))
-include(joinpath(dirname(@__DIR__), "src", "CoreUtils3D.jl"))
-include(joinpath(dirname(@__DIR__), "src", "ShapefileOverlay.jl"))
-include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
+using MTGeophysics
 
 # ---------- Shapefile overlay configuration ----------
 # Define all overlay shapefiles here.
@@ -48,13 +44,16 @@ include(joinpath(dirname(@__DIR__), "src", "PlotModel.jl"))
 # Shapefiles are automatically reprojected from their native CRS (detected
 # from the .prj sidecar file) into the chosen `coordinate_system`.
 #
-# Leave the list empty if you don't want any shapefile overlay:
-#   shapefiles = []
+# No shapefile ships with the examples — add your own entries like the
+# commented one below. An empty list still works: the viewer runs without
+# overlays and just warns.
 
 shapefiles = [
-    # (path = joinpath(@__DIR__, "gis", "2023MeasPts", "2023MeasPts.shp"), enabled = true, color = :black, alpha = 0.9, point_size = 7, line_width = 1.5),
-     (path = joinpath(@__DIR__, "geoenergialoikka", "gis", "Tnew", "Tnew.shp"), enabled = true, color = :black, alpha = 0.8, point_size = 5, line_width = 2.0),
+    # (path = joinpath(@__DIR__, "gis", "coastline", "coastline.shp"), enabled = true, color = :black, alpha = 0.9, point_size = 7, line_width = 1.5),
 ]
+
+isempty(shapefiles) &&
+    @warn "no shapefile provided; plotting without overlays (add entries to `shapefiles` at the top of this script, or use plot_model_XY_slices.jl)"
 
 # ---------- Model & data files ----------
 # Paths must be passed on the command line:
@@ -69,7 +68,7 @@ function _looks_like_coordinate_system_arg(arg::AbstractString)
 end
 
 model_file = length(ARGS) >= 1 ? ARGS[1] : ""
-data_file  = length(ARGS) >= 2 && !_looks_like_coordinate_system_arg(ARGS[2]) ? ARGS[2] : ""   # needed for EPSG:3067 / EPSG:4326
+data_file  = length(ARGS) >= 2 && !_looks_like_coordinate_system_arg(ARGS[2]) ? ARGS[2] : ""   # needed for georeferenced CRS modes
 
 function _print_cli_usage()
     println("Usage:")
@@ -80,14 +79,15 @@ function _print_cli_usage()
 end
 
 # ---------- Coordinate system ----------
-# Choose how the map axes are labelled and how model centres are converted:
-#   "EPSG:3067"  — ETRS-TM35FIN (Easting / Northing in metres)  ← default
+# Choose how the map axes are labelled and how model centres are converted.
+# Shapefiles carry a real-world CRS, so this script defaults to a projected
+# CRS matching the Cascadia example data rather than raw model coordinates:
+#   "EPSG:32610" — WGS 84 / UTM zone 10N (Cascadia)  ← default
 #   "EPSG:4326"  — WGS 84 geographic (Longitude / Latitude in degrees)
-#   "model"      — raw model XY (no conversion; data_file is not needed)
-#   any other projected "EPSG:XXXX" code, e.g. for Cascadia:
-#     "EPSG:32610" (WGS 84 / UTM 10N), "EPSG:26910" (NAD83 / UTM 10N),
-#     "EPSG:3005" (NAD83 / BC Albers)
-coordinate_system = length(ARGS) >= 3 ? ARGS[3] : (length(ARGS) >= 2 && _looks_like_coordinate_system_arg(ARGS[2]) ? ARGS[2] : "EPSG:3067")
+#   "model"      — raw model XY (no conversion; shapefiles cannot be aligned)
+#   any other projected "EPSG:XXXX" code, e.g. "EPSG:26910" (NAD83 / UTM 10N),
+#     "EPSG:3005" (NAD83 / BC Albers), "EPSG:3067" (ETRS-TM35FIN, Finland)
+coordinate_system = length(ARGS) >= 3 ? ARGS[3] : (length(ARGS) >= 2 && _looks_like_coordinate_system_arg(ARGS[2]) ? ARGS[2] : "EPSG:32610")
 
 # ---------- Visualisation controls ----------
 log10_scale       = true
