@@ -25,8 +25,8 @@ julia --project=. test/runtests.jl
 Before running the examples, generate the synthetic benchmark data:
 
 ```bash
-julia --project=. helpers/benchmarks_1d.jl
-julia --project=. helpers/benchmarks_2d.jl
+julia --project=. helpers/benchmarks_1D.jl
+julia --project=. helpers/benchmarks_2D.jl
 ```
 
 This creates:
@@ -37,9 +37,9 @@ This creates:
 ## First session
 
 ```bash
-julia --project=. helpers/benchmarks_1d.jl
-julia --project=. helpers/benchmarks_2d.jl
-julia --project=. examples/response_1d.jl
-julia --project=. examples/response_2d.jl
-julia --project=. examples/run_vfsa2dmt.jl
+julia --project=. helpers/benchmarks_1D.jl
+julia --project=. helpers/benchmarks_2D.jl
+julia --project=. examples/run_fwd1D.jl
+julia --project=. examples/run_fwd2D.jl
+julia --project=. examples/run_vfsa2D.jl
 ```

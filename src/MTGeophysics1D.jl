@@ -451,30 +451,6 @@ function load_mt1d_observed_data(path::AbstractString)
 end
 
 """
-    build_default_mt1d_mesh(; resistivities=DEFAULT_MT1D_LAYER_RESISTIVITIES)
-
-Inputs:
-- Optional layer resistivities including the basement half-space.
-
-Output:
-- `MT1DMesh`: Default benchmark mesh populated with the requested resistivities.
-
-Description:
-- Builds the standard 1D benchmark discretization used by the examples, benchmarks, and inversion workflow.
-"""
-function build_default_mt1d_mesh(;
-    resistivities::AbstractVector{<:Real} = DEFAULT_MT1D_LAYER_RESISTIVITIES,
-)
-    build_mt1d_mesh(
-        DEFAULT_MT1D_LAYER_THICKNESSES,
-        resistivities;
-        first_cell = DEFAULT_MT1D_FIRST_CELL_M,
-        growth_factor = DEFAULT_MT1D_GROWTH_FACTOR,
-        padding_cells = DEFAULT_MT1D_PADDING_CELLS,
-    )
-end
-
-"""
     MakeMesh1D(; output_dir=..., model_name="Layered1D.true", thicknesses=..., resistivities=..., first_cell=20.0, growth_factor=1.16, padding_cells=30)
 
 Inputs:

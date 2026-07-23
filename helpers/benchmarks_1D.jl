@@ -78,7 +78,7 @@ Description:
 save_benchmarks1d(; kwargs...) = SaveBenchmarks1D(; kwargs...)
 
 function main(args::AbstractVector{<:AbstractString} = ARGS)
-    isempty(args) || error("usage: julia --project=. helpers/benchmarks_1d.jl")
+    isempty(args) || error("usage: julia --project=. helpers/benchmarks_1D.jl")
     saved = SaveBenchmarks1D()
     println("SavedCases = ", length(saved))
     for s in saved

@@ -6,8 +6,8 @@
 using Test
 using MTGeophysics
 
-include(joinpath(dirname(@__DIR__), "helpers", "benchmarks_1d.jl"))
-include(joinpath(dirname(@__DIR__), "helpers", "benchmarks_2d.jl"))
+include(joinpath(dirname(@__DIR__), "helpers", "benchmarks_1D.jl"))
+include(joinpath(dirname(@__DIR__), "helpers", "benchmarks_2D.jl"))
 
 @testset "MTGeophysics.jl Tests" begin
 

@@ -14,9 +14,10 @@ using Dates
 Configuration for the 3D VFSA MT inversion. All VFSA hyper-parameters,
 file-management switches, and external-solver settings live here. Every field is
 a required keyword with no default — values are supplied by the run script (see
-`examples/run_vfsa3dmt.jl`), so the engine carries no hidden defaults. The only
+`examples/run_vfsa3D.jl`), so the engine carries no hidden defaults. The only
 exceptions are fields added after that convention was set (`z_core_skin_depths`,
-`z_core_depth`, the galvanic-distortion fields, `fwd_ctrl`), which default to
+`z_core_cells`, `padding_decay_length_z`, the galvanic-distortion fields,
+`fwd_ctrl`), which default to
 sensible behavior and keep existing run scripts working unchanged.
 
 The perturbable core is truncated in depth: deep layers exist for the forward
@@ -103,7 +104,9 @@ Base.@kwdef mutable struct VFSA3DMTConfig
     bathymetry_file::String
     # distortion_mode: :off = no distortion handling; :on = per-site 2x2 galvanic C
     distortion_mode::Symbol = :off
-    # distortion_damping: relative damping toward C=I (lambda = a*tr(N)/2); Inf = C≡I
+    # distortion_damping: pull of the per-site distortion matrix C toward identity,
+    # lambda = a*tr(N)/2; 0 = free fit, larger = weaker correction, Inf = C fixed at
+    # identity (correction off)
     distortion_damping::Float64 = 0.01
     # fwd_ctrl: ModEM forward-solver control file (F.dat); "" = omit the argument
     # and let the binary use its compiled-in defaults. Worth setting explicitly:
@@ -570,8 +573,8 @@ end
 
 _T_schedule(k::Int; T0::Float64, ak::Float64) = T0 * exp(-sqrt(ak) * (k - 1))
 
-# decay rate so T reaches cool_ratio*T0 at max_iter
-_resolve_ak(cfg::VFSA3DMTConfig) = (log(1.0 / cfg.cool_ratio) / max(cfg.max_iter - 1.0, 1.0))^2
+# decay rate so T reaches cool_ratio*T0 at max_iter (shared with the 2D driver)
+_resolve_ak(cool_ratio::Float64, max_iter::Int) = (log(1.0 / cool_ratio) / max(max_iter - 1.0, 1.0))^2
 
 #---------- vfsa loop ----------
 
@@ -669,7 +672,7 @@ function _run_vfsa3d(start_model_path::String,
     rms_current = dp0
     best_rms    = rms_current
     T0 = cfg.temp_kappa
-    ak = _resolve_ak(cfg)
+    ak = _resolve_ak(cfg.cool_ratio, cfg.max_iter)
     _write_trials_header_3d(trials_log; timestamp=timestamp, cfg=cfg, T0=T0, ak=ak)
     _write_iter_header_3d(iter_log; timestamp=timestamp, cfg=cfg, T0=T0, ak=ak)
     best_model_abs = joinpath(run_root, "best_model.rho")

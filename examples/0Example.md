@@ -44,8 +44,8 @@ The 3-D viewer scripts currently default to:
 ## 2. Generate synthetic benchmarks
 
 ```powershell
-julia --project=. helpers/benchmarks_1d.jl
-julia --project=. helpers/benchmarks_2d.jl
+julia --project=. helpers/benchmarks_1D.jl
+julia --project=. helpers/benchmarks_2D.jl
 ```
 
 Generated output directories:
@@ -60,25 +60,25 @@ Generated output directories:
 ### 1-D
 
 ```powershell
-julia --project=. .\examples\response_1d.jl
+julia --project=. .\examples\run_fwd1D.jl
 ```
 
 Custom input files:
 
 ```powershell
-julia --project=. .\examples\response_1d.jl examples/0Layered1D/Layered1D.true examples/0Layered1D/Layered1D.ref
+julia --project=. .\examples\run_fwd1D.jl examples/0Layered1D/Layered1D.true examples/0Layered1D/Layered1D.ref
 ```
 
 ### 2-D
 
 ```powershell
-julia --project=. .\examples\response_2d.jl
+julia --project=. .\examples\run_fwd2D.jl
 ```
 
 Custom input files:
 
 ```powershell
-julia --project=. .\examples\response_2d.jl examples/0COMEMI2D-I/Comemi2D1.true examples/0COMEMI2D-I/Comemi2D1.ref
+julia --project=. .\examples\run_fwd2D.jl examples/0COMEMI2D-I/Comemi2D1.true examples/0COMEMI2D-I/Comemi2D1.ref
 ```
 
 ## 4. Write standard plots from the library API
@@ -112,7 +112,7 @@ julia --project=. -e 'using MTGeophysics; PlotData2D("examples/0COMEMI2D-I/Comem
 ### Bundled example script
 
 ```powershell
-julia --project=. .\examples\run_vfsa2dmt.jl
+julia --project=. .\examples\run_vfsa2D.jl
 ```
 
 ### CLI entry point
@@ -137,19 +137,19 @@ Useful flags:
 ### Recompute ensemble statistics
 
 ```powershell
-julia --project=. helpers/run_statistics_2d.jl examples/run_VFSA2DMT_<timestamp>
+julia --project=. helpers/run_statistics_2D.jl examples/run_VFSA2DMT_<timestamp>
 ```
 
 ### Build a convergence GIF
 
 ```powershell
-julia --project=. helpers/make_gif_2d.jl examples/run_VFSA2DMT_<timestamp>
+julia --project=. helpers/make_gif_2D.jl examples/run_VFSA2DMT_<timestamp>
 ```
 
 With explicit options:
 
 ```powershell
-julia --project=. helpers/make_gif_2d.jl examples/run_VFSA2DMT_<timestamp> my_animation.gif --fps 8 --depth_km 50 --rho_range 0,4
+julia --project=. helpers/make_gif_2D.jl examples/run_VFSA2DMT_<timestamp> my_animation.gif --fps 8 --depth_km 50 --rho_range 0,4
 ```
 
 ## 7. Explore 3-D models interactively
@@ -252,11 +252,11 @@ If you are using the repository for the first time, this is the safest path:
 
 ```powershell
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
-julia --project=. helpers/benchmarks_1d.jl
-julia --project=. helpers/benchmarks_2d.jl
-julia --project=. .\examples\response_1d.jl
-julia --project=. .\examples\response_2d.jl
-julia --project=. .\examples\run_vfsa2dmt.jl
+julia --project=. helpers/benchmarks_1D.jl
+julia --project=. helpers/benchmarks_2D.jl
+julia --project=. .\examples\run_fwd1D.jl
+julia --project=. .\examples\run_fwd2D.jl
+julia --project=. .\examples\run_vfsa2D.jl
 ```
 
 Then, to try a checked-in 3-D example:

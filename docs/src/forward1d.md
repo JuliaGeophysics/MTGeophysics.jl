@@ -5,7 +5,7 @@ Compute the 1D magnetotelluric forward response for a layered earth model using 
 ## Running the example
 
 ```bash
-julia --project=. examples/response_1d.jl
+julia --project=. examples/run_fwd1D.jl
 ```
 
 This reads the default benchmark model (`examples/0Layered1D/Layered1D.true`) and data specification (`examples/0Layered1D/Layered1D.ref`), computes the predicted response, and writes a comparison plot.
@@ -13,7 +13,7 @@ This reads the default benchmark model (`examples/0Layered1D/Layered1D.true`) an
 Custom input files:
 
 ```bash
-julia --project=. examples/response_1d.jl path/to/model path/to/dataspec
+julia --project=. examples/run_fwd1D.jl path/to/model path/to/dataspec
 ```
 
 ## From Julia

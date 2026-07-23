@@ -173,7 +173,6 @@ mutable struct CoeffMat{T<:Float64}
 end
 
 const μ₀_2D = 4π * 1e-7
-const MU0_2D = μ₀_2D
 
 """
     mt2d_y_centers(mesh)
@@ -1475,21 +1474,6 @@ Description:
 - Public alias for `run_mt2d_forward`.
 """
 Forward2D(mesh::MT2DMesh, resistivity::AbstractMatrix{<:Real}) = run_mt2d_forward(mesh, resistivity)
-
-"""
-    RunForward2D(mesh, resistivity)
-
-Inputs:
-- `mesh`: 2D MT mesh.
-- `resistivity`: Cell resistivity model.
-
-Output:
-- `MT2DResponse`: TE/TM response.
-
-Description:
-- Compatibility alias for `run_mt2d_forward`.
-"""
-RunForward2D(mesh::MT2DMesh, resistivity::AbstractMatrix{<:Real}) = run_mt2d_forward(mesh, resistivity)
 
 """
     _write_vector_lines(io, values; per_line=12)

@@ -21,20 +21,20 @@ MTGeophysics.jl is part of the [JuliaGeophysics ecosystem](https://github.com/Ju
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 
 # Generate synthetic benchmark models
-julia --project=. helpers/benchmarks_1d.jl
-julia --project=. helpers/benchmarks_2d.jl
+julia --project=. helpers/benchmarks_1D.jl
+julia --project=. helpers/benchmarks_2D.jl
 
 # 1-D forward response
-julia --project=. examples/response_1d.jl
+julia --project=. examples/run_fwd1D.jl
 
 # 2-D forward response
-julia --project=. examples/response_2d.jl
+julia --project=. examples/run_fwd2D.jl
 
 # 2-D VFSA inversion
-julia --project=. examples/run_vfsa2dmt.jl
+julia --project=. examples/run_vfsa2D.jl
 
 # 3-D VFSA inversion (requires ModEM + MPI on PATH)
-julia --project=. examples/run_vfsa3dmt.jl
+julia --project=. examples/run_vfsa3D.jl
 
 # Interactive 3-D viewers (requires GLMakie)
 julia --project=. examples/plot_model_XYZ.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat

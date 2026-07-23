@@ -32,31 +32,31 @@ julia --project=. -e 'using Pkg; Pkg.instantiate()'
 **1. Generate the COMMEMI 2D benchmarks.** Writes the true model, halfspace starting model, reference data template, and noisy observed data into `examples/0COMEMI2D-I/`, `-II/`, and `-III/`.
 
 ```
-julia --project=. helpers/benchmarks_2d.jl
+julia --project=. helpers/benchmarks_2D.jl
 ```
 
 **2. (Optional) Inspect the 2D forward response** of the benchmark model.
 
 ```
-julia --project=. examples/response_2d.jl
+julia --project=. examples/run_fwd2D.jl
 ```
 
 **3. Run the 2D VFSA inversion** (multi-chain ensemble, RBF parameterization) on the COMMEMI-I benchmark. Results are written to a timestamped `examples/run_VFSA2DMT_<timestamp>/` directory containing per-chain logs, best models, and ensemble mean/median/std.
 
 ```
-julia --project=. examples/run_vfsa2dmt.jl
+julia --project=. examples/run_vfsa2D.jl
 ```
 
 **4. Compute ensemble statistics** (posterior mean/median/std and misfit summaries).
 
 ```
-julia --project=. helpers/run_statistics_2d.jl examples/run_VFSA2DMT_<timestamp>
+julia --project=. helpers/run_statistics_2D.jl examples/run_VFSA2DMT_<timestamp>
 ```
 
 **5. Create a convergence GIF** to visualize model evolution across iterations (requires `keep_models = true`).
 
 ```
-julia --project=. helpers/make_gif_2d.jl examples/run_VFSA2DMT_<timestamp>
+julia --project=. helpers/make_gif_2D.jl examples/run_VFSA2DMT_<timestamp>
 ```
 
 From Julia, the inversion can also be driven directly:
@@ -73,7 +73,7 @@ result = VFSA2DMT(
             n_chains    = 2,
             n_ctrl      = 400,
             max_iter    = 3000,
-            n_trials    = 4,
+            n_trials    = 1,
             log_bounds  = (0.0, 4.0),
             seed        = 20260308,
             keep_models = true,

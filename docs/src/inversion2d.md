@@ -13,7 +13,7 @@ Run a 2D magnetotelluric inversion using Very Fast Simulated Annealing (VFSA) wi
 ## Running the example
 
 ```bash
-julia --project=. examples/run_vfsa2dmt.jl
+julia --project=. examples/run_vfsa2D.jl
 ```
 
 This runs a two-chain VFSA inversion on the COMEMI-I benchmark and writes results into a timestamped directory under `examples/`.
@@ -32,7 +32,7 @@ result = VFSA2DMT(
             n_chains   = 2,
             n_ctrl     = 400,
             max_iter   = 3000,
-            n_trials   = 4,
+            n_trials   = 1,
             log_bounds = (0.0, 4.0),
             seed       = 20260308,
             keep_models = true,
@@ -57,8 +57,11 @@ julia --project=. -e 'using MTGeophysics; MTGeophysics.main_vfsa2dmt()' -- \
 | `n_chains` | 2 | Independent Markov chains |
 | `n_ctrl` | 400 | RBF control points |
 | `max_iter` | 3000 | Iterations per chain |
-| `n_trials` | 4 | Trial perturbations per iteration |
+| `n_trials` | 1 | Trial perturbations per iteration (1 = classic VFSA) |
 | `log_bounds` | (0, 5) | log₁₀(Ω·m) search bounds |
+| `temp_kappa` | 1.0 | Initial temperature (proposal and acceptance) |
+| `cool_ratio` | 1e-3 | Final temperature as a fraction of `temp_kappa` |
+| `target_rms` | 1.0 | Early-stop RMS |
 | `keep_models` | false | Save model snapshots for GIF |
 
 ## Output
@@ -91,11 +94,11 @@ summary = AnalyseEnsemble2D(result.chain_results;
 Recompute ensemble statistics:
 
 ```bash
-julia --project=. helpers/run_statistics_2d.jl examples/run_VFSA2DMT_<timestamp>
+julia --project=. helpers/run_statistics_2D.jl examples/run_VFSA2DMT_<timestamp>
 ```
 
 Generate a convergence GIF (requires `keep_models = true`):
 
 ```bash
-julia --project=. helpers/make_gif_2d.jl examples/run_VFSA2DMT_<timestamp>
+julia --project=. helpers/make_gif_2D.jl examples/run_VFSA2DMT_<timestamp>
 ```

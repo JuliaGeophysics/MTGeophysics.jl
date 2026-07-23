@@ -36,11 +36,9 @@ include("Bathymetry3D.jl")
 
 #----- Visualization (optional, requires GLMakie) -------------------------#
 
-has_visualization = false
 try
     using GLMakie
     include("PlotModel.jl")
-    global has_visualization = true
     export compute_colorrange, prepare_model_arrays
 catch LoadError
     @warn "GLMakie not available, interactive visualization functionality disabled"

@@ -11,31 +11,22 @@ using Random
 using Statistics
 
 const air_resistivity = 1e9
-const background_resistivity = 100.0
 
 Base.@kwdef struct VFSA2DMTConfig
     n_chains::Int = 2
     n_ctrl::Int = 400
     max_iter::Int = 3000
-    n_trials::Int = 4
+    # n_trials = 1 is classic vfsa: one proposal, one metropolis test per iteration
+    n_trials::Int = 1
     log_bounds::Tuple{Float64, Float64} = (0.0, 5.0)
     frac_update_controls::Float64 = 1.0
     step_scale::Float64 = 0.11
-    # Proposal and acceptance use SEPARATE temperatures by design — do not unify
-    # them. The proposal temperature feeds the normalized generator `_vfsa_y`, whose
-    # natural range is (0,1] (step-size units), while the acceptance temperature
-    # sits on the reduced-χ² (rms²) energy scale below. A single temperature cannot
-    # be correctly scaled for both. (Canonical Ingber VFSA/ASA likewise keeps the
-    # generating and acceptance temperatures distinct.)
-    t0_prop::Float64 = 1.0
-    tf_prop::Float64 = 1e-3
-    # Acceptance temperatures are now on the ABSOLUTE reduced-χ² (rms²) energy
-    # scale used by the corrected Metropolis test (dE = rms_trial² - rms_current²),
-    # NOT the old relative Δχ²/χ² scale. Pick t0_acc near the typical |dE| of early
-    # proposals for high early acceptance; the old 1.0→1e-2 range was tuned to the
-    # relative energy and is far too cold here. Retune per dataset if needed.
-    t0_acc::Float64 = 50.0
-    tf_acc::Float64 = 5e-2
+    # one schedule drives both proposal width and acceptance (same as the 3D driver),
+    # cooling from temp_kappa to cool_ratio*temp_kappa at max_iter; pick temp_kappa
+    # on the scale of the typical uphill dE = (rms² - rms₀²)/rms₀²
+    temp_kappa::Float64 = 1.0
+    cool_ratio::Float64 = 1e-3
+    target_rms::Float64 = 1.0
     seed::Int = 20260308
     pad_tolerance::Float64 = 0.20
     padding_decay_length::Float64 = 8.0
@@ -61,8 +52,7 @@ Base.@kwdef struct MT2DIterationRecord
     chain::Int
     iteration::Int
     accepted_trial::Int
-    tproposal::Float64
-    tacceptance::Float64
+    temperature::Float64
     proposal_chi2::Float64
     proposal_rms::Float64
     current_chi2::Float64
@@ -217,75 +207,6 @@ end
 
 function _vfsa2d_best_prediction_filename(chain_id::Integer)
     "data.c$(chain_id)best"
-end
-
-function _impedance_from_rho_phase(rho::Real, phase_deg::Real, frequency::Real)
-    ω = 2π * Float64(frequency)
-    magnitude = sqrt(Float64(rho) * MU0_2D * ω)
-    magnitude * cis(deg2rad(Float64(phase_deg)))
-end
-
-function _mt2d_response_with_noise(
-    true_response::MT2DResponse;
-    rng_seed::Integer,
-    rho_noise_fraction::Real,
-    phase_noise_deg::Real,
-)
-    rng = MersenneTwister(rng_seed)
-    sigma_log_rho = log10(1 + Float64(rho_noise_fraction))
-    sigma_phase = Float64(phase_noise_deg)
-
-    observed_rho_xy = 10 .^ (log10.(true_response.rho_xy) .+ sigma_log_rho .* randn(rng, size(true_response.rho_xy)))
-    observed_rho_yx = 10 .^ (log10.(true_response.rho_yx) .+ sigma_log_rho .* randn(rng, size(true_response.rho_yx)))
-    observed_phase_xy = true_response.phase_xy .+ sigma_phase .* randn(rng, size(true_response.phase_xy))
-    observed_phase_yx = true_response.phase_yx .+ sigma_phase .* randn(rng, size(true_response.phase_yx))
-
-    observed_z_xy = similar(true_response.z_xy)
-    observed_z_yx = similar(true_response.z_yx)
-    for receiver_index in axes(observed_z_xy, 2), frequency_index in axes(observed_z_xy, 1)
-        frequency = true_response.frequencies[frequency_index]
-        observed_z_xy[frequency_index, receiver_index] = _impedance_from_rho_phase(
-            observed_rho_xy[frequency_index, receiver_index],
-            observed_phase_xy[frequency_index, receiver_index],
-            frequency,
-        )
-        observed_z_yx[frequency_index, receiver_index] = _impedance_from_rho_phase(
-            observed_rho_yx[frequency_index, receiver_index],
-            observed_phase_yx[frequency_index, receiver_index],
-            frequency,
-        )
-    end
-
-    response = MT2DResponse(
-        frequencies = Float64.(true_response.frequencies),
-        periods = Float64.(true_response.periods),
-        receivers = Float64.(true_response.receivers),
-        rho_xy = observed_rho_xy,
-        phase_xy = observed_phase_xy,
-        z_xy = observed_z_xy,
-        rho_yx = observed_rho_yx,
-        phase_yx = observed_phase_yx,
-        z_yx = observed_z_yx,
-    )
-    response, (sigma_log_rho = sigma_log_rho, sigma_phase = sigma_phase)
-end
-
-function _mt2d_noise_stats(true_response::MT2DResponse, observed_response::MT2DResponse)
-    (
-        log_rho_xy_rms = sqrt(mean((log10.(observed_response.rho_xy) .- log10.(true_response.rho_xy)) .^ 2)),
-        log_rho_yx_rms = sqrt(mean((log10.(observed_response.rho_yx) .- log10.(true_response.rho_yx)) .^ 2)),
-        phase_xy_rms = sqrt(mean((observed_response.phase_xy .- true_response.phase_xy) .^ 2)),
-        phase_yx_rms = sqrt(mean((_phase_fold_to_0_90(observed_response.phase_yx) .- _phase_fold_to_0_90(true_response.phase_yx)) .^ 2)),
-    )
-end
-
-function _mt2d_response_fit_stats(reference_response::MT2DResponse, candidate_response::MT2DResponse)
-    (
-        log_rho_xy_rms = sqrt(mean((log10.(candidate_response.rho_xy) .- log10.(reference_response.rho_xy)) .^ 2)),
-        log_rho_yx_rms = sqrt(mean((log10.(candidate_response.rho_yx) .- log10.(reference_response.rho_yx)) .^ 2)),
-        phase_xy_rms = sqrt(mean((candidate_response.phase_xy .- reference_response.phase_xy) .^ 2)),
-        phase_yx_rms = sqrt(mean((_phase_fold_to_0_90(candidate_response.phase_yx) .- _phase_fold_to_0_90(reference_response.phase_yx)) .^ 2)),
-    )
 end
 
 function _padding_background_log10(log10_resistivity::AbstractMatrix{<:Real}, mesh::MT2DMesh, core_y::UnitRange{Int})
@@ -495,9 +416,6 @@ function _propose_controls!(
     chosen
 end
 
-temperature_schedule(iteration::Int; start_temperature::Float64, end_temperature::Float64, total_iterations::Int) =
-    start_temperature * (end_temperature / start_temperature) ^ ((iteration - 1) / max(total_iterations - 1, 1))
-
 function _print_vfsa_progress_bar(chain_id::Int, iteration::Int, total_iterations::Int, current_rms::Real, best_rms::Real)
     total_iterations > 0 || return nothing
     bar_width = 32
@@ -571,23 +489,21 @@ function _write_trials_header(path::AbstractString, config::VFSA2DMTConfig, time
             "# chains=", config.n_chains,
             "  n_ctrl=", config.n_ctrl,
             "  frac_update_controls=", config.frac_update_controls,
-            "  Tproposal=", config.t0_prop, "→", config.tf_prop,
-            "  Tacceptance=", config.t0_acc, "→", config.tf_acc,
+            "  temp_kappa=", config.temp_kappa,
+            "  cool_ratio=", config.cool_ratio,
+            "  target_rms=", config.target_rms,
             "  n_trials=", config.n_trials,
         )
-        println(io, repeat("-", 280))
-        # CORRECTED: replaced the relative-energy column (dRel = Δχ²/χ²) with the
-        # acceptance audit trail actually used now — dE_rms2 (Δ reduced-χ² = Δrms²),
-        # Pacc (Metropolis probability), Uacc (random draw) and Acc (1/0 = this
-        # individual trial accepted/rejected, no longer a best-of-N flag).
+        println(io, repeat("-", 270))
+        # one row per trial; only the winning trial carries a metropolis draw,
+        # the rest print an em dash (same scheme as the 3D driver)
         @printf(
             io,
-            "%6s %8s %8s %12s %12s %14s %11s %14s %12s %12s %10s %10s %10s %10s %12s %11s %5s %7s %s %s\n",
+            "%6s %8s %8s %12s %14s %11s %14s %12s %12s %10s %10s %10s %10s %12s %11s %5s %7s %s %s\n",
             "Chain",
             "Iter",
             "Trial",
-            "Tprop",
-            "Tacc",
+            "Temp",
             "Chi2Before",
             "RMSBefore",
             "Chi2Prop",
@@ -604,7 +520,7 @@ function _write_trials_header(path::AbstractString, config::VFSA2DMTConfig, time
             "Model",
             "Data",
         )
-        println(io, repeat("-", 280))
+        println(io, repeat("-", 270))
     end
 end
 
@@ -613,8 +529,7 @@ function _append_trial_row(
     chain::Int,
     iteration::Int,
     trial::Int,
-    tprop::Float64,
-    tacc::Float64,
+    T::Float64,
     chi2_before::Float64,
     rms_before::Float64,
     chi2_prop::Float64,
@@ -631,15 +546,16 @@ function _append_trial_row(
     model_rel::String,
     data_rel::String,
 )
+    pacc_str = isnan(p_acc) ? lpad("—", 10) : @sprintf("%10.5f", p_acc)
+    uacc_str = isnan(u_acc) ? lpad("—", 10) : @sprintf("%10.5f", u_acc)
     open(path, "a") do io
         @printf(
             io,
-            "%6d %8d %8d %12.4g %12.4g %14.4f %11.5f %14.4f %12.4f %12.5f %10.5f %10.5f %10.5f %10.5f %12.4f %11.5f %5d %7d %s %s\n",
+            "%6d %8d %8d %12.4g %14.4f %11.5f %14.4f %12.4f %12.5f %10.5f %10.5f %s %s %12.4f %11.5f %5d %7d %s %s\n",
             chain,
             iteration,
             trial,
-            tprop,
-            tacc,
+            T,
             chi2_before,
             rms_before,
             chi2_prop,
@@ -647,8 +563,8 @@ function _append_trial_row(
             rms_prop,
             drms,
             dE,
-            p_acc,
-            u_acc,
+            pacc_str,
+            uacc_str,
             chi2_best,
             rms_best,
             acc,
@@ -667,21 +583,20 @@ function _write_iteration_header(path::AbstractString, config::VFSA2DMTConfig, t
             "# chains=", config.n_chains,
             "  n_ctrl=", config.n_ctrl,
             "  frac_update_controls=", config.frac_update_controls,
-            "  Tproposal=", config.t0_prop, "→", config.tf_prop,
-            "  Tacceptance=", config.t0_acc, "→", config.tf_acc,
+            "  temp_kappa=", config.temp_kappa,
+            "  cool_ratio=", config.cool_ratio,
+            "  target_rms=", config.target_rms,
             "  n_trials=", config.n_trials,
         )
-        println(io, repeat("-", 210))
-        # CORRECTED: Chi2Curr/dChi2 now describe the CURRENT accepted state after the
-        # iteration, and Nacc = number of accepted trials (0..n_trials) instead of the
-        # old single-flag "AccIdx" that only described the best-of-N candidate.
+        println(io, repeat("-", 200))
+        # current accepted state after the iteration; Nacc = 1 when the winning
+        # trial passed its metropolis test, 0 otherwise
         @printf(
             io,
-            "%6s %8s %12s %12s %14s %12s %12s %11s %12s %11s %6s %s\n",
+            "%6s %8s %12s %14s %12s %12s %11s %12s %11s %6s %s\n",
             "Chain",
             "Iter",
-            "Tprop",
-            "Tacc",
+            "Temp",
             "Chi2Curr",
             "dChi2",
             "RMSCurr",
@@ -691,7 +606,7 @@ function _write_iteration_header(path::AbstractString, config::VFSA2DMTConfig, t
             "Nacc",
             "Model",
         )
-        println(io, repeat("-", 210))
+        println(io, repeat("-", 200))
     end
 end
 
@@ -699,8 +614,7 @@ function _append_iteration_row(
     path::AbstractString;
     chain::Int,
     iteration::Int,
-    tprop::Float64,
-    tacc::Float64,
+    T::Float64,
     chi2_curr::Float64,
     dchi2::Float64,
     rms_curr::Float64,
@@ -713,11 +627,10 @@ function _append_iteration_row(
     open(path, "a") do io
         @printf(
             io,
-            "%6d %8d %12.4g %12.4g %14.4f %12.4f %12.5f %11.5f %12.4f %11.5f %6d %s\n",
+            "%6d %8d %12.4g %14.4f %12.4f %12.5f %11.5f %12.4f %11.5f %6d %s\n",
             chain,
             iteration,
-            tprop,
-            tacc,
+            T,
             chi2_curr,
             dchi2,
             rms_curr,
@@ -728,62 +641,6 @@ function _append_iteration_row(
             isempty(model_rel) ? "-" : model_rel,
         )
     end
-end
-
-function _core_model_error_metrics(mesh::MT2DMesh, recovered::AbstractMatrix{<:Real}, truth::AbstractMatrix{<:Real}; tol::Real)
-    row_range = (mesh.n_air_cells + 1):size(recovered, 1)
-    core_y = core_cell_indices(mesh.y_cell_sizes; tol = tol)
-    full_difference = log10.(Float64.(recovered[row_range, :])) .- log10.(Float64.(truth[row_range, :]))
-    core_difference = log10.(Float64.(recovered[row_range, core_y])) .- log10.(Float64.(truth[row_range, core_y]))
-    abs_core = abs.(core_difference)
-    (
-        ground_rms = sqrt(mean(abs2, full_difference)),
-        core_rms = sqrt(mean(abs2, core_difference)),
-        core_median_abs = median(vec(abs_core)),
-        core_p90_abs = quantile(vec(abs_core), 0.90),
-        changed_fraction_0p1 = mean(vec(abs_core) .> 0.10),
-        changed_fraction_0p2 = mean(vec(abs_core) .> 0.20),
-    )
-end
-
-function _conductive_anomaly_metrics(
-    mesh::MT2DMesh,
-    recovered::AbstractMatrix{<:Real},
-    truth::AbstractMatrix{<:Real};
-    threshold::Real,
-    tol::Real,
-)
-    row_range = (mesh.n_air_cells + 1):size(recovered, 1)
-    core_y = core_cell_indices(mesh.y_cell_sizes; tol = tol)
-    y_centers = mt2d_y_centers(mesh)[core_y]
-    z_centers = mt2d_z_centers(mesh)[row_range]
-    true_mask = Float64.(truth[row_range, core_y]) .<= Float64(threshold)
-    recovered_mask = Float64.(recovered[row_range, core_y]) .<= Float64(threshold)
-    intersection = count(true_mask .& recovered_mask)
-    union_count = count(true_mask .| recovered_mask)
-
-    function centroid(mask)
-        ys = Float64[]
-        zs = Float64[]
-        for iz in eachindex(z_centers), iy in eachindex(y_centers)
-            if mask[iz, iy]
-                push!(ys, y_centers[iy])
-                push!(zs, z_centers[iz])
-            end
-        end
-        isempty(ys) ? (NaN, NaN) : (mean(ys), mean(zs))
-    end
-
-    true_centroid = centroid(true_mask)
-    recovered_centroid = centroid(recovered_mask)
-    (
-        threshold = Float64(threshold),
-        true_count = count(true_mask),
-        recovered_count = count(recovered_mask),
-        jaccard = union_count == 0 ? 1.0 : intersection / union_count,
-        centroid_y_error_m = abs(recovered_centroid[1] - true_centroid[1]),
-        centroid_z_error_m = abs(recovered_centroid[2] - true_centroid[2]),
-    )
 end
 
 function _summarize_mt2d_resistivity_ensemble(
@@ -972,16 +829,14 @@ function _plot_mt2d_vfsa_convergence(path::AbstractString, chains::AbstractVecto
         x = offset .+ getfield.(chain.iterations, :iteration)
         best_chi2 = getfield.(chain.iterations, :best_chi2)
         current_rms = getfield.(chain.iterations, :current_rms)
-        tproposal = getfield.(chain.iterations, :tproposal)
-        tacceptance = getfield.(chain.iterations, :tacceptance)
+        temperature = getfield.(chain.iterations, :temperature)
         accepted = Float64.(getfield.(chain.iterations, :accepted))
         rolling = [mean(accepted[max(1, index - 14):index]) for index in eachindex(accepted)]
         label = "Chain $(chain.chain_id)"
 
         lines!(ax1, x, best_chi2, linewidth = 3, label = label)
         lines!(ax2, x, current_rms, linewidth = 3, label = label)
-        lines!(ax3, x, tproposal, linewidth = 3, label = "$(label) proposal")
-        lines!(ax3, x, tacceptance, linewidth = 2, linestyle = :dash, label = "$(label) accept")
+        lines!(ax3, x, temperature, linewidth = 3, label = label)
         lines!(ax4, x, rolling, linewidth = 3, label = label)
         offset += length(chain.iterations)
         plotted = true
@@ -992,103 +847,6 @@ function _plot_mt2d_vfsa_convergence(path::AbstractString, chains::AbstractVecto
     else
         text!(ax1, 0.5, 0.5, text = "No VFSA iterations", space = :relative, align = (:center, :center))
     end
-    save(path, figure)
-    path
-end
-
-function _plot_mt2d_model_comparison(
-    path::AbstractString,
-    mesh::MT2DMesh,
-    initial_resistivity::AbstractMatrix{<:Real},
-    true_resistivity::AbstractMatrix{<:Real},
-    mean_resistivity::AbstractMatrix{<:Real},
-    median_resistivity::AbstractMatrix{<:Real},
-    std_log10_resistivity::AbstractMatrix{<:Real},
-)
-    CairoMakie.activate!()
-    mkpath(dirname(path))
-
-    row_range = (mesh.n_air_cells + 1):size(true_resistivity, 1)
-    y_edges = mesh.y_nodes ./ 1000
-    z_edges = mesh.z_nodes[(mesh.n_air_cells + 1):end] ./ 1000
-
-    initial_log = log10.(Float64.(initial_resistivity[row_range, :]))
-    true_log = log10.(Float64.(true_resistivity[row_range, :]))
-    mean_log = log10.(Float64.(mean_resistivity[row_range, :]))
-    median_log = log10.(Float64.(median_resistivity[row_range, :]))
-    difference = mean_log .- true_log
-    std_log = Float64.(std_log10_resistivity[row_range, :])
-    color_limits = extrema(vcat(vec(initial_log), vec(true_log), vec(mean_log), vec(median_log)))
-    diff_limit = max(maximum(abs.(difference)), 1e-6)
-    std_limit = max(maximum(std_log), 1e-6)
-
-    figure = Figure(size = (2200, 1100))
-    ax1 = Axis(figure[1, 1], xlabel = "Offset (km)", ylabel = "Depth (km)", yreversed = true, title = "Initial model")
-    hm1 = heatmap!(ax1, y_edges, z_edges, initial_log', colormap = :Spectral, colorrange = color_limits)
-    Colorbar(figure[1, 2], hm1, label = "log10(ρ)")
-
-    ax2 = Axis(figure[1, 3], xlabel = "Offset (km)", ylabel = "Depth (km)", yreversed = true, title = "True model")
-    hm2 = heatmap!(ax2, y_edges, z_edges, true_log', colormap = :Spectral, colorrange = color_limits)
-    Colorbar(figure[1, 4], hm2, label = "log10(ρ)")
-
-    ax3 = Axis(figure[1, 5], xlabel = "Offset (km)", ylabel = "Depth (km)", yreversed = true, title = "Final-chain mean")
-    hm3 = heatmap!(ax3, y_edges, z_edges, mean_log', colormap = :Spectral, colorrange = color_limits)
-    Colorbar(figure[1, 6], hm3, label = "log10(ρ)")
-
-    ax4 = Axis(figure[2, 1], xlabel = "Offset (km)", ylabel = "Depth (km)", yreversed = true, title = "Final-chain median")
-    hm4 = heatmap!(ax4, y_edges, z_edges, median_log', colormap = :Spectral, colorrange = color_limits)
-    Colorbar(figure[2, 2], hm4, label = "log10(ρ)")
-
-    ax5 = Axis(figure[2, 3], xlabel = "Offset (km)", ylabel = "Depth (km)", yreversed = true, title = "Mean - true")
-    hm5 = heatmap!(ax5, y_edges, z_edges, difference', colormap = :balance, colorrange = (-diff_limit, diff_limit))
-    Colorbar(figure[2, 4], hm5, label = "Δ log10(ρ)")
-
-    ax6 = Axis(figure[2, 5], xlabel = "Offset (km)", ylabel = "Depth (km)", yreversed = true, title = "Final-chain uncertainty")
-    hm6 = heatmap!(ax6, y_edges, z_edges, std_log', colormap = :viridis, colorrange = (0.0, std_limit))
-    Colorbar(figure[2, 6], hm6, label = "σ log10(ρ)")
-
-    save(path, figure)
-    path
-end
-
-function _plot_mt2d_site_fit(
-    path::AbstractString,
-    true_response::MT2DResponse,
-    observed_response::MT2DResponse,
-    recovered_response::MT2DResponse;
-    station_index::Integer,
-)
-    CairoMakie.activate!()
-    mkpath(dirname(path))
-
-    periods = true_response.periods
-    tm_true = _phase_fold_to_0_90(true_response.phase_yx[:, station_index])
-    tm_obs = _phase_fold_to_0_90(observed_response.phase_yx[:, station_index])
-    tm_rec = _phase_fold_to_0_90(recovered_response.phase_yx[:, station_index])
-
-    figure = Figure(size = (1200, 800))
-    ax1 = Axis(figure[1, 1], xlabel = "Period (s)", ylabel = "TE apparent resistivity (Ω·m)", xscale = log10, yscale = log10, title = "TE fit")
-    ax2 = Axis(figure[1, 2], xlabel = "Period (s)", ylabel = "TM apparent resistivity (Ω·m)", xscale = log10, yscale = log10, title = "TM fit")
-    ax3 = Axis(figure[2, 1], xlabel = "Period (s)", ylabel = "TE phase (deg)", xscale = log10, title = "TE phase fit")
-    ax4 = Axis(figure[2, 2], xlabel = "Period (s)", ylabel = "TM phase (deg)", xscale = log10, title = "TM phase fit")
-
-    scatter!(ax1, periods, observed_response.rho_xy[:, station_index], color = :gray35, markersize = 9, label = "Observed")
-    lines!(ax1, periods, true_response.rho_xy[:, station_index], color = :black, linewidth = 3, label = "True")
-    lines!(ax1, periods, recovered_response.rho_xy[:, station_index], color = :crimson, linewidth = 3, linestyle = :dash, label = "Recovered")
-
-    scatter!(ax2, periods, observed_response.rho_yx[:, station_index], color = :gray35, markersize = 9, label = "Observed")
-    lines!(ax2, periods, true_response.rho_yx[:, station_index], color = :black, linewidth = 3, label = "True")
-    lines!(ax2, periods, recovered_response.rho_yx[:, station_index], color = :crimson, linewidth = 3, linestyle = :dash, label = "Recovered")
-
-    scatter!(ax3, periods, observed_response.phase_xy[:, station_index], color = :gray35, markersize = 9, label = "Observed")
-    lines!(ax3, periods, true_response.phase_xy[:, station_index], color = :black, linewidth = 3, label = "True")
-    lines!(ax3, periods, recovered_response.phase_xy[:, station_index], color = :crimson, linewidth = 3, linestyle = :dash, label = "Recovered")
-
-    scatter!(ax4, periods, tm_obs, color = :gray35, markersize = 9, label = "Observed")
-    lines!(ax4, periods, tm_true, color = :black, linewidth = 3, label = "True")
-    lines!(ax4, periods, tm_rec, color = :crimson, linewidth = 3, linestyle = :dash, label = "Recovered")
-
-    axislegend(ax1, position = :rb)
     save(path, figure)
     path
 end
@@ -1171,43 +929,33 @@ function _run_mt2d_chain(
     write_data2d(best_data_path, best_data)
 
     iteration_records = MT2DIterationRecord[]
+    T0 = config.temp_kappa
+    ak = _resolve_ak(config.cool_ratio, config.max_iter)
 
     for iteration in 1:config.max_iter
         chi2_before_iter = current_fit.chi2
         rms_before_iter = current_fit.rms
-        tproposal = temperature_schedule(
-            iteration;
-            start_temperature = config.t0_prop,
-            end_temperature = config.tf_prop,
-            total_iterations = config.max_iter,
-        )
-        tacceptance = temperature_schedule(
-            iteration;
-            start_temperature = config.t0_acc,
-            end_temperature = config.tf_acc,
-            total_iterations = config.max_iter,
-        )
+        # one schedule drives both proposal width and acceptance
+        T = _T_schedule(iteration; T0 = T0, ak = ak)
 
-        # ------------------------------------------------------------------ #
-        # CORRECTED VFSA ACCEPTANCE (standard per-trial Metropolis).
-        #
-        # Was: keep the best-of-n_trials proposal (minimum χ²) and run one
-        # acceptance test on that minimum using a relative energy Δχ²/χ². That
-        # greedy best-of-N test made rejection almost impossible. Now each trial
-        # is tested INDEPENDENTLY against the current accepted state, the chain
-        # advances within the iteration, the global best is only RECORDED, and
-        # the energy is an ABSOLUTE change in reduced χ² (rms²) so it matches the
-        # Tacc scale. Mirrors the reference MATLAB VFSA and the 3D driver.
-        # ------------------------------------------------------------------ #
+        #---------- generate and test the trials ----------
+        # all trials branch from the iteration-start state, the lowest-rms trial
+        # gets one deferred metropolis test (same scheme as the 3D driver)
         n_accepted_iter = 0
         last_accepted_trial = 0
         trial_cache = NamedTuple[]
+        best_trial_rms = Inf
+        best_trial_idx = 0
+        best_trial_delta = similar(current_delta)
+        best_trial_resistivity = current_resistivity
+        best_trial_response = current_response
+        best_trial_data = current_data
+        best_trial_fit = current_fit
         for trial in 1:config.n_trials
-            # Propose from the CURRENT accepted state (advances within the iteration).
             trial_delta = copy(current_delta)
             updated = _propose_controls!(
                 trial_delta,
-                tproposal,
+                T,
                 config.log_bounds[1],
                 config.log_bounds[2],
                 base_control_values,
@@ -1237,37 +985,9 @@ function _run_mt2d_chain(
                 write_model2d(joinpath(chain_dir, _vfsa2d_trial_model_filename(iteration, trial)), mesh, trial_model.resistivity; title = "VFSA $(chain_slug) trial model")
             end
 
-            # Absolute reduced-χ² (rms²) energy against the current accepted state.
-            # Downhill accepted unconditionally; uphill via exp(-dE/Tacc). A failed
-            # forward gives dE = Inf and is never accepted (guarded by isfinite).
-            dE = trial_fit.rms^2 - current_fit.rms^2
-            u_acc = rand(rng)
-            # p_acc is a true probability: 1.0 for downhill (dE<=0, auto-accept),
-            # exp(-dE/Tacc) in (0,1) for uphill. This is exactly the MATLAB test
-            # `(delE <= 0) || (u2 < exp(-delE/tt))`, where the leading `delE<=0`
-            # clause short-circuits and the (>1) exp value is never used; we just
-            # make it explicit so the logged Pacc column stays a finite [0,1] value.
-            p_acc = dE <= 0 ? 1.0 : exp(-dE / max(tacceptance, 1e-12))
-            accept_trial = isfinite(trial_fit.chi2) && (u_acc < p_acc)
-
-            if accept_trial
-                current_delta .= trial_delta
-                current_resistivity = trial_model.resistivity
-                current_response = trial_response
-                current_data = trial_data
-                current_fit = trial_fit
-                n_accepted_iter += 1
-                last_accepted_trial = trial
-                if current_fit.chi2 < best_fit.chi2
-                    best_resistivity = copy(current_resistivity)
-                    best_response = current_response
-                    best_data = current_data
-                    best_fit = current_fit
-                    write_model2d(best_model_path, mesh, best_resistivity; title = "Best $(chain_slug) model")
-                    write_data2d(best_data_path, best_data)
-                end
-            end
-
+            # relative reduced-χ² (rms²) energy against the iteration-start state;
+            # a failed forward gives non-finite rms and can never win the iteration
+            dE = (trial_fit.rms^2 - rms_before_iter^2) / max(rms_before_iter^2, eps())
             push!(
                 trial_cache,
                 (
@@ -1275,14 +995,52 @@ function _run_mt2d_chain(
                     updated_controls = length(updated),
                     fit = trial_fit,
                     dE = dE,
-                    p_acc = p_acc,
-                    u_acc = u_acc,
-                    accepted = accept_trial,
+                    p_acc = NaN,
+                    u_acc = NaN,
+                    accepted = false,
                     chi2_best = best_fit.chi2,
                     rms_best = best_fit.rms,
                     model_rel = model_rel,
                 ),
             )
+            if trial_fit.rms < best_trial_rms
+                best_trial_rms = trial_fit.rms
+                best_trial_idx = trial
+                best_trial_delta .= trial_delta
+                best_trial_resistivity = trial_model.resistivity
+                best_trial_response = trial_response
+                best_trial_data = trial_data
+                best_trial_fit = trial_fit
+            end
+        end
+
+        #---------- single metropolis test on the best trial ----------
+        dE_best = (best_trial_rms^2 - rms_before_iter^2) / max(rms_before_iter^2, eps())
+        u_acc_best = rand(rng)
+        p_acc_best = dE_best <= 0 ? 1.0 : exp(-dE_best / max(T, 1e-12))
+        accept_best = isfinite(best_trial_rms) && (u_acc_best < p_acc_best)
+        if accept_best
+            current_delta .= best_trial_delta
+            current_resistivity = best_trial_resistivity
+            current_response = best_trial_response
+            current_data = best_trial_data
+            current_fit = best_trial_fit
+            n_accepted_iter = 1
+            last_accepted_trial = best_trial_idx
+            # record the global best on improvement, never feed it back
+            if current_fit.chi2 < best_fit.chi2
+                best_resistivity = copy(current_resistivity)
+                best_response = current_response
+                best_data = current_data
+                best_fit = current_fit
+                write_model2d(best_model_path, mesh, best_resistivity; title = "Best $(chain_slug) model")
+                write_data2d(best_data_path, best_data)
+            end
+        end
+        # backfill the winning trial's metropolis draw into its log row
+        if best_trial_idx > 0
+            tr = trial_cache[best_trial_idx]
+            trial_cache[best_trial_idx] = merge(tr, (p_acc = p_acc_best, u_acc = u_acc_best, accepted = accept_best))
         end
 
         # Save best-so-far snapshot at configured intervals (for convergence GIF).
@@ -1297,8 +1055,7 @@ function _run_mt2d_chain(
                 chain = chain_id,
                 iteration = iteration,
                 trial = trial.trial,
-                tprop = tproposal,
-                tacc = tacceptance,
+                T = T,
                 chi2_before = chi2_before_iter,
                 rms_before = rms_before_iter,
                 chi2_prop = trial.fit.chi2,
@@ -1317,16 +1074,15 @@ function _run_mt2d_chain(
             )
         end
 
-        # accepted_trial now holds the last accepted trial index (0 if none) and
-        # `accepted` is true when the iteration accepted at least one proposal.
+        # accepted_trial holds the winning trial index when its metropolis test
+        # passed (0 otherwise)
         push!(
             iteration_records,
             MT2DIterationRecord(
                 chain = chain_id,
                 iteration = iteration,
                 accepted_trial = last_accepted_trial,
-                tproposal = tproposal,
-                tacceptance = tacceptance,
+                temperature = T,
                 proposal_chi2 = current_fit.chi2,
                 proposal_rms = current_fit.rms,
                 current_chi2 = current_fit.chi2,
@@ -1342,8 +1098,7 @@ function _run_mt2d_chain(
             iteration_log;
             chain = chain_id,
             iteration = iteration,
-            tprop = tproposal,
-            tacc = tacceptance,
+            T = T,
             chi2_curr = current_fit.chi2,
             dchi2 = current_fit.chi2 - chi2_before_iter,
             rms_curr = current_fit.rms,
@@ -1355,6 +1110,14 @@ function _run_mt2d_chain(
                 joinpath(chain_slug, _vfsa2d_trial_model_filename(iteration, last_accepted_trial)) : "",
         )
         _print_vfsa_progress_bar(chain_id, iteration, config.max_iter, current_fit.rms, best_fit.rms)
+
+        # stop once best rms hits the target
+        if best_fit.rms <= config.target_rms
+            println()
+            @info @sprintf("chain %d: target RMS %.3f reached at iter %d (best RMS %.5f); stopping.",
+                           chain_id, config.target_rms, iteration, best_fit.rms)
+            break
+        end
     end
 
     MT2DChainResult(

@@ -45,14 +45,14 @@ cfg = VFSA3DMTConfig(
     keep_models           = false,      # discard trial models (limited storage on CSC)
     keep_dpred            = false,      # discard predicted-data files
     model_save_every      = 100,        # keep the winning trial model every 100 iters
-    sigma_scale           = 2.0,        # RBF width in cells (1σ) at the top of the core
-    sigma_scale_deep      = 2.0,        # RBF width at the bottom; equal = uniform widths
-    trunc_sigmas          = 3.0,        # RBF support cutoff in σ
+    sigma_scale           = 2.0,        # RBF kernel 1σ in cells at the core top; physical footprint = σ × cell size per axis (2 cells ≈ 48 km laterally here)
+    sigma_scale_deep      = 2.0,        # kernel 1σ at the core bottom, log-depth interpolated between the two; equal = uniform widths, raise to 3-4 to widen deep kernels laterally
+    trunc_sigmas          = 3.0,        # kernel zeroed beyond this many σ; keeps the control-to-cell weight map sparse, 3σ drops only ~1% tail
     ctrl_depth_power      = 0.0,       # shallow bias in control placement
     water_log10           = 0.3,        # no water mask (land survey)
     bathymetry_file       = "cascad_bathymetry.dat",         # bathymetry file
     distortion_mode       = :off,        # per-site 2x2 galvanic C each misfit eval; :off = plain
-    distortion_damping    = 1.0,        # relative damping toward C=I; Inf = C≡I
+    distortion_damping    = 1.0,        # pull of per-site C toward identity: 0 = free fit, larger = weaker correction, Inf = correction off
 )
 
 best_model, iter_log = VFSA3DMT(start_model; dobs_path=observed_data, cfg=cfg)

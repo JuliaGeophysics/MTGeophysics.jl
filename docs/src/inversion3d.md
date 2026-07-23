@@ -16,7 +16,7 @@ output directories.
 ## Running the example
 
 ```bash
-julia --project=. examples/run_vfsa3dmt.jl
+julia --project=. examples/run_vfsa3D.jl
 ```
 
 The script checks for the ModEM executable before starting. If it is not found

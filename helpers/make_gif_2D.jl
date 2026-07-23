@@ -1,5 +1,5 @@
 #=
-make_gif_2d.jl — Generate a convergence GIF from VFSA2DMT snapshot models.
+make_gif_2D.jl — Generate a convergence GIF from VFSA2DMT snapshot models.
 
 Reads the averaged iteration snapshots (`avg_iter_NNNNN.rho`) written by
 `run_mt2d_vfsa` in the `snapshots/` subdirectory of a run, renders each
@@ -7,7 +7,7 @@ frame as a 2-D resistivity heatmap, and assembles them into an animated GIF.
 
 Usage (from the MTGeophysics.jl project root):
 
-    julia --project=. helpers/make_gif_2d.jl <run_dir> [output.gif] [--fps N] [--depth_km D] [--rho_range lo,hi]
+    julia --project=. helpers/make_gif_2D.jl <run_dir> [output.gif] [--fps N] [--depth_km D] [--rho_range lo,hi]
 
 Arguments:
     run_dir       Path to the VFSA run directory (must contain snapshots/).
@@ -104,7 +104,7 @@ end
 # --- CLI entry-point ---
 if abspath(PROGRAM_FILE) == @__FILE__
     let args = copy(ARGS)
-        isempty(args) && error("Usage: julia make_gif_2d.jl <run_dir> [output.gif] [--fps N] [--depth_km D] [--rho_range lo,hi]")
+        isempty(args) && error("Usage: julia make_gif_2D.jl <run_dir> [output.gif] [--fps N] [--depth_km D] [--rho_range lo,hi]")
 
         run_dir = popfirst!(args)
         output = nothing

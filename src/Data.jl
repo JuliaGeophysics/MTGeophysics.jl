@@ -50,7 +50,6 @@ strip_gt(s::AbstractString) = begin
 end
 
 safeparsefloat(s) = something(tryparse(Float64, s), 0.0)
-safeparseint(s)   = something(tryparse(Int, s), 0)
 
 is_dataline(line::AbstractString) = begin
     t = strip(line)

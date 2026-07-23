@@ -7,7 +7,7 @@ Compute the 2D magnetotelluric forward response (TE and TM modes) on a tensor me
 ## Running the example
 
 ```bash
-julia --project=. examples/response_2d.jl
+julia --project=. examples/run_fwd2D.jl
 ```
 
 This reads the default COMEMI benchmark model and data, computes the predicted response, and writes data maps and site curve plots.
@@ -15,7 +15,7 @@ This reads the default COMEMI benchmark model and data, computes the predicted r
 Custom input files:
 
 ```bash
-julia --project=. examples/response_2d.jl path/to/model path/to/dataspec
+julia --project=. examples/run_fwd2D.jl path/to/model path/to/dataspec
 ```
 
 ## From Julia
@@ -70,5 +70,5 @@ Three standard COMEMI 2D benchmark models are included:
 Generate all three with:
 
 ```bash
-julia --project=. helpers/benchmarks_2d.jl
+julia --project=. helpers/benchmarks_2D.jl
 ```
