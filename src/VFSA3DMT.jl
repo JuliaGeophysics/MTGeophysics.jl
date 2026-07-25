@@ -16,7 +16,7 @@ file-management switches, and external-solver settings live here. Every field is
 a required keyword with no default — values are supplied by the run script (see
 `examples/run_vfsa3D.jl`), so the engine carries no hidden defaults. The only
 exceptions are fields added after that convention was set (`z_core_skin_depths`,
-`z_core_cells`, `padding_decay_length_z`, the galvanic-distortion fields,
+`z_core_cells`, `core_expand_cells`, the galvanic-distortion fields,
 `fwd_ctrl`), which default to
 sensible behavior and keep existing run scripts working unchanged.
 
@@ -45,8 +45,8 @@ chain; run several jobs with different seeds and out_roots for an ensemble.
 Each iteration proposes `n_trials` models branching from the iteration-start
 state, selects the lowest-RMS trial, and runs a single Metropolis test on that
 winner (`n_trials = 1` is classic VFSA). One temperature schedule drives both
-proposal width and acceptance, cooling from `temp_kappa` to
-`cool_ratio*temp_kappa` at `max_iter`. Pick `temp_kappa` on the scale of the
+proposal width and acceptance, cooling from `T0` to
+`cool_ratio*T0` at `max_iter`. Pick `T0` on the scale of the
 typical uphill `dE_rms2` so the Metropolis test is selective from the start.
 
 Control-point density can decrease with depth: sampling weight per cell is
@@ -76,18 +76,19 @@ Base.@kwdef mutable struct VFSA3DMTConfig
     step_scale::Float64
     max_iter::Int
     n_trials::Int
-    temp_kappa::Float64
+    T0::Float64
     cool_ratio::Float64
     target_rms::Float64
     seed::Int
     pad_tol::Float64
+    # core_expand_cells: grow the perturbable lateral core by N cells per side
+    # beyond the uniform-cell block, for sites that sit over the transition ring
+    core_expand_cells::Int = 0
     padding_decay_length::Float64
     # z_core_skin_depths: perturbable core depth in data skin depths; Inf = full column
     z_core_skin_depths::Float64 = 1.0
     # z_core_cells: explicit core depth as the top N z layers; 0 = derive from data
     z_core_cells::Int = 0
-    # padding_decay_length_z: below-core blend e-fold, in multiples of the median core dz
-    padding_decay_length_z::Float64 = 10.0
     keep_models::Bool
     keep_dpred::Bool
     # model_save_every: 0 = behave per keep_models; >0 = retain trial models only
@@ -138,10 +139,16 @@ end
 
 #---------- core region helpers ----------
 
-function core_ranges(m::WS3DModel; tol::Real=0.2)
+# expand grows the detected core by whole cells per side, clamped to the grid, so
+# sites sitting over the transition ring just outside the uniform block still get
+# perturbable cells under them
+function core_ranges(m::WS3DModel; tol::Real=0.2, expand::Integer=0)
     ix = core_indices(m.cx; tol=tol)
     iy = core_indices(m.cy; tol=tol)
-    return ix, iy
+    e = max(0, Int(expand))
+    e == 0 && return ix, iy
+    return (max(1, first(ix) - e):min(m.nx, last(ix) + e),
+            max(1, first(iy) - e):min(m.ny, last(iy) + e))
 end
 
 # bad z-core / decay settings fall back to defaults instead of aborting a queued job
@@ -154,9 +161,9 @@ function _sanitize_cfg!(cfg::VFSA3DMTConfig)
         @warn "z_core_cells invalid ($(cfg.z_core_cells)); using 0 (derive from data)"
         cfg.z_core_cells = 0
     end
-    if !(isfinite(cfg.padding_decay_length_z) && cfg.padding_decay_length_z > 0)
-        @warn "padding_decay_length_z invalid ($(cfg.padding_decay_length_z)); using 10.0"
-        cfg.padding_decay_length_z = 10.0
+    if cfg.core_expand_cells < 0
+        @warn "core_expand_cells invalid ($(cfg.core_expand_cells)); using 0"
+        cfg.core_expand_cells = 0
     end
     if !(isfinite(cfg.padding_decay_length) && cfg.padding_decay_length > 0)
         @warn "padding_decay_length invalid ($(cfg.padding_decay_length)); using 10.0"
@@ -202,7 +209,8 @@ end
 #---------- horizontal padding decay (x,y only, z untouched) ----------
 
 function smooth_padding_decay_xy!(m::WS3DModel, ix::UnitRange{Int}, iy::UnitRange{Int},
-                                  background_res_log10::Float64, decay_length::Float64)
+                                  background_res_log10::Float64, decay_length::Float64,
+                                  protected::Union{Nothing,AbstractArray{Bool,3}}=nothing)
     nx, ny, nz = size(m.A)
     xi1, xi2 = first(ix), last(ix)
     yi1, yi2 = first(iy), last(iy)
@@ -217,12 +225,19 @@ function smooth_padding_decay_xy!(m::WS3DModel, ix::UnitRange{Int}, iy::UnitRang
         if inside_x && inside_y
             continue
         end
+        protected !== nothing && protected[i, j, k] && continue
         ic = clamp(i, xi1, xi2)
         jc = clamp(j, yi1, yi2)
         dist = hypot((i - ic) * dx_median, (j - jc) * dy_median)
         weight = exp(-dist / max(L, eps()))
         boundary_val = m.A[ic, jc, k]
-        m.A[i, j, k] = boundary_val * weight + background_res_log10 * (1 - weight)
+        # a frozen source must not bleed outward: seawater is finite, so without
+        # this the ocean edge paints a conductive halo across dry padding
+        usable = isfinite(boundary_val) &&
+            !(protected !== nothing && protected[ic, jc, k])
+        m.A[i, j, k] = usable ?
+            boundary_val * weight + background_res_log10 * (1 - weight) :
+            background_res_log10
     end
     return m
 end
@@ -231,18 +246,24 @@ end
 
 # each core column continues its last perturbed value downward, blending toward
 # background; runs before the xy decay so deep pad corners see the filled columns
+#
+# the carry-down halves every layer (50%, 25%, 12.5%, ...) all the way to the
+# bottom of the model, counted in layers rather than metres: dz below the core
+# grades so steeply that a physical e-fold collapses the whole blend into the
+# first layer and leaves the rest of the column structureless
 function smooth_padding_decay_z!(m::WS3DModel, ix::UnitRange{Int}, iy::UnitRange{Int},
                                  kz::UnitRange{Int}, background_res_log10::Float64,
-                                 decay_length::Float64)
+                                 protected::Union{Nothing,AbstractArray{Bool,3}}=nothing)
     klast = last(kz)
     klast == m.nz && return m
-    # physical distance: dz is strongly graded, index distance misrepresents it
-    L = decay_length * median(view(m.dz, kz))
     @inbounds for k in (klast+1):m.nz
-        weight = exp(-(m.cz[k] - m.cz[klast]) / max(L, eps()))
+        weight = 0.5 ^ (k - klast)
         for j in iy, i in ix
+            protected !== nothing && protected[i, j, k] && continue
             boundary_val = m.A[i, j, klast]
-            m.A[i, j, k] = isfinite(boundary_val) ?
+            usable = isfinite(boundary_val) &&
+                !(protected !== nothing && protected[i, j, klast])
+            m.A[i, j, k] = usable ?
                 boundary_val * weight + background_res_log10 * (1 - weight) :
                 background_res_log10
         end
@@ -493,23 +514,24 @@ end
 
 #---------- logging ----------
 
-function _write_trials_header_3d(path::AbstractString; timestamp::String, cfg::VFSA3DMTConfig, T0::Float64, ak::Float64)
+function _write_cfg_header_3d(io::IO; cfg::VFSA3DMTConfig, ak::Float64,
+                              start_model::String, dobs_filename::String)
+    names = fieldnames(VFSA3DMTConfig)
+    w = maximum(length(String(f)) for f in names)
+    println(io, "# ", rpad("start_model", w), " = ", start_model)
+    println(io, "# ", rpad("dobs", w), " = ", dobs_filename)
+    println(io, "# ", rpad("ak", w), " = ", ak, "   (derived: cool_ratio, max_iter)")
+    for f in names
+        println(io, "# ", rpad(String(f), w), " = ", getfield(cfg, f))
+    end
+end
+
+function _write_trials_header_3d(path::AbstractString; timestamp::String, cfg::VFSA3DMTConfig,
+                                 ak::Float64, start_model::String, dobs_filename::String)
     open(path, "w") do io
         println(io, "# VFSA 3D MT detailed trials — ", timestamp)
-        println(io, "# seed=", cfg.seed,
-                    "  n_ctrl=", cfg.n_ctrl,
-                    "  frac_update_controls=", cfg.frac_update_controls,
-                    "  temp_kappa=", cfg.temp_kappa,
-                    "  T0=", T0,
-                    "  cool_ratio=", cfg.cool_ratio,
-                    "  ak=", ak,
-                    "  max_iter=", cfg.max_iter,
-                    "  target_rms=", cfg.target_rms,
-                    "  n_trials=", cfg.n_trials,
-                    "  depth_power=", cfg.ctrl_depth_power,
-                    "  water_log10=", cfg.water_log10,
-                    "  distortion=", cfg.distortion_mode,
-                    "  distortion_damping=", cfg.distortion_damping)
+        _write_cfg_header_3d(io; cfg=cfg, ak=ak,
+                             start_model=start_model, dobs_filename=dobs_filename)
         println(io, repeat("-", 102))
         @printf(io, "%8s %8s %12s %11s %12s %10s %10s %5s %11s %s\n",
                 "Iter","Trial","Temp",
@@ -535,23 +557,12 @@ function _append_trial_row_3d(path::AbstractString; iter::Int, trial::Int,
     end
 end
 
-function _write_iter_header_3d(path::AbstractString; timestamp::String, cfg::VFSA3DMTConfig, T0::Float64, ak::Float64)
+function _write_iter_header_3d(path::AbstractString; timestamp::String, cfg::VFSA3DMTConfig,
+                               ak::Float64, start_model::String, dobs_filename::String)
     open(path, "w") do io
         println(io, "# VFSA 3D MT iteration best — ", timestamp)
-        println(io, "# seed=", cfg.seed,
-                    "  n_ctrl=", cfg.n_ctrl,
-                    "  frac_update_controls=", cfg.frac_update_controls,
-                    "  temp_kappa=", cfg.temp_kappa,
-                    "  T0=", T0,
-                    "  cool_ratio=", cfg.cool_ratio,
-                    "  ak=", ak,
-                    "  max_iter=", cfg.max_iter,
-                    "  target_rms=", cfg.target_rms,
-                    "  n_trials=", cfg.n_trials,
-                    "  depth_power=", cfg.ctrl_depth_power,
-                    "  water_log10=", cfg.water_log10,
-                    "  distortion=", cfg.distortion_mode,
-                    "  distortion_damping=", cfg.distortion_damping)
+        _write_cfg_header_3d(io; cfg=cfg, ak=ak,
+                             start_model=start_model, dobs_filename=dobs_filename)
         println(io, repeat("-", 88))
         # current accepted state after the iteration, Nacc = accepted trials this iter
         @printf(io, "%8s %12s %11s %11s %6s %s\n",
@@ -589,7 +600,7 @@ function _run_vfsa3d(start_model_path::String,
     m = load_ws3d_model(start_model_path)
     _, _, _, _, _, _, origin, rotation = read_ws3d_model(start_model_path, true)
 
-    ix, iy = core_ranges(m; tol=cfg.pad_tol)
+    ix, iy = core_ranges(m; tol=cfg.pad_tol, expand=cfg.core_expand_cells)
     kz = cfg.z_core_cells > 0 ? (1:min(cfg.z_core_cells, m.nz)) :
          z_core_range(m, _z_core_max_depth(joinpath(run_root, dobs_filename), cfg))
     last(kz) < m.nz && @info @sprintf("z-core: perturbing %d of %d layers (bottom %.0f m)",
@@ -614,25 +625,32 @@ function _run_vfsa3d(start_model_path::String,
     background_log10 = median(finite_bg)
 
     #---------- frozen cells: no controls, no perturbation, no clamp ----------
-    # water is optional (bathymetry_file / water_log10); topographic air is
-    # always frozen — the loader tags it as NaN in v0_core_log10
-    mask = falses(size(v0_core_log10))
+    # topography and bathymetry are tracked as separate full-grid masks so the
+    # padding ring is protected too, and both are exported for reuse/plotting
+    air_full = air_mask_from_model(m)
+    water_full = falses(size(m.A))
+    bathy = nothing
     if !isempty(cfg.bathymetry_file)
         bathy = read_bathymetry(cfg.bathymetry_file)
-        mask .= water_mask_from_bathymetry(m, bathy)[ix, iy, kz]
+        water_full .= water_mask_from_bathymetry(m, bathy)
     elseif !isnan(cfg.water_log10)
-        mask .= v0_core_log10 .< cfg.water_log10
-        # export the model-derived mask for reuse on future grids
-        if count(mask) > 0
-            bathy = extract_bathymetry(m; water_log10=cfg.water_log10)
-            write_bathymetry(joinpath(run_root, "bathymetry.dat"), bathy;
-                             water_log10=cfg.water_log10)
-        end
+        water_full .= water_mask_from_model(m; water_log10=cfg.water_log10)
+        any(water_full) && (bathy = extract_bathymetry(m; water_log10=cfg.water_log10))
     end
-    n_water = count(mask)
-    air = isnan.(v0_core_log10)          # topographic air above the ground surface
-    mask .|= air
-    n_air = count(air)
+    protected_full = air_full .| water_full
+
+    if any(air_full)
+        write_topography(joinpath(run_root, "topography.dat"), extract_topography(m);
+                         origin=m.origin)
+    end
+    if bathy !== nothing && !isempty(bathy.depth)
+        write_bathymetry(joinpath(run_root, "bathymetry.dat"), bathy;
+                         water_log10=cfg.water_log10, origin=m.origin)
+    end
+
+    mask = BitArray(protected_full[ix, iy, kz])
+    n_air = count(air_full[ix, iy, kz])
+    n_water = count(water_full[ix, iy, kz])
     n_frozen = count(mask)
 
     # build the RBF map
@@ -663,18 +681,21 @@ function _run_vfsa3d(start_model_path::String,
     dpred0_filename = @sprintf("dpred_%03d_%02d.dat", 0, 0)
 
     embed_core!(m, v0_core_log10, ix, iy, kz)
-    smooth_padding_decay_z!(m, ix, iy, kz, background_log10, cfg.padding_decay_length_z)
-    smooth_padding_decay_xy!(m, ix, iy, background_log10, cfg.padding_decay_length)
+    smooth_padding_decay_z!(m, ix, iy, kz, background_log10, protected_full)
+    smooth_padding_decay_xy!(m, ix, iy, background_log10, cfg.padding_decay_length,
+                             protected_full)
 
     dp0, fit0 = forward_and_misfit!(m; run_dir=run_root, model_filename=model0_filename,
                                     dobs_filename=dobs_filename, dpred_filename=dpred0_filename,
                                     origin=origin, rotation=rotation, cfg=cfg)
     rms_current = dp0
     best_rms    = rms_current
-    T0 = cfg.temp_kappa
+    T0 = cfg.T0
     ak = _resolve_ak(cfg.cool_ratio, cfg.max_iter)
-    _write_trials_header_3d(trials_log; timestamp=timestamp, cfg=cfg, T0=T0, ak=ak)
-    _write_iter_header_3d(iter_log; timestamp=timestamp, cfg=cfg, T0=T0, ak=ak)
+    _write_trials_header_3d(trials_log; timestamp=timestamp, cfg=cfg, ak=ak,
+                            start_model=start_model_path, dobs_filename=dobs_filename)
+    _write_iter_header_3d(iter_log; timestamp=timestamp, cfg=cfg, ak=ak,
+                          start_model=start_model_path, dobs_filename=dobs_filename)
     best_model_abs = joinpath(run_root, "best_model.rho")
     cp(joinpath(run_root, model0_filename), best_model_abs; force=true)
     # per-site distortion of the current best model, refreshed on every new best
@@ -716,8 +737,9 @@ function _run_vfsa3d(start_model_path::String,
             n_frozen > 0 && (v_trial[mask] .= v0_core_log10[mask])
 
             embed_core!(m, v_trial, ix, iy, kz)
-            smooth_padding_decay_z!(m, ix, iy, kz, background_log10, cfg.padding_decay_length_z)
-            smooth_padding_decay_xy!(m, ix, iy, background_log10, cfg.padding_decay_length)
+            smooth_padding_decay_z!(m, ix, iy, kz, background_log10, protected_full)
+            smooth_padding_decay_xy!(m, ix, iy, background_log10, cfg.padding_decay_length,
+                                     protected_full)
 
             model_filename = @sprintf("model_%03d_%02d.rho", k, t)
             dpred_filename = @sprintf("dpred_%03d_%02d.dat", k, t)
@@ -868,6 +890,9 @@ function VFSA3DMT(start_model_path::AbstractString;
     dobs_filename = basename(dobs_path)
     dobs_abs_target = abspath(joinpath(run_root, dobs_filename))
     cp(abspath(dobs_path), dobs_abs_target; force=true)
+
+    isfile(PROGRAM_FILE) &&
+        cp(abspath(PROGRAM_FILE), joinpath(run_root, basename(PROGRAM_FILE)); force=true)
 
     timestamp = Dates.format(t_now, "yyyy-mm-dd HH:MM:SS")
 

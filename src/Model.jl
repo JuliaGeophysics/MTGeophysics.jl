@@ -1,7 +1,7 @@
 # ModEM model reader/writer and model grid preparation.
 # Author: @pankajkmishra
 # This file loads WS3d/ModEM models, builds mesh coordinates, and computes helper arrays for plotting/editing.
-# It also writes models back to LOGE format with ModEM-compatible layout.
+# It also writes models back to LOGE format with ModEM-compatible layout
 
 using Printf
 

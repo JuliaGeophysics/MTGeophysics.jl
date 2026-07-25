@@ -34,14 +34,13 @@ cfg = VFSA3DMTConfig(
     step_scale            = 0.05,       # proposal step = step_scale × bound width
     max_iter              = 12000,       # iteration cap; also sets the cooling timescale
     n_trials              = 1,          # classic vfsa: one proposal, one metropolis test
-    temp_kappa            = 0.03,       # hot start: T0 = 2x prior, broad uphill acceptance early
-    cool_ratio            = 1.0e-4,     # fast cool: steep exp, effectively cold (~T0/100) by iter ~1250
+    T0                    = 0.03,       # start temperature, on the scale of the typical uphill dE_rms2
+    cool_ratio            = 1.0e-4,     # geometric cool to T0/10000 at max_iter: one decade per 3000 iters, T0/100 by iter ~6000
     target_rms            = 1.0,        # early-stop; NOTE reachable at alpha=1 (ceiling ~3.4)
     seed                  = seed,
     pad_tol               = 0.2,        # core/padding detection tolerance
     padding_decay_length  = 10.0,       # padding blend (cells)
     z_core_cells          = 27,         # perturb top 27 z layers (~100 km); deeper layers are forward-solver padding
-    padding_decay_length_z = 10.0,      # below-core blend e-fold (multiples of median core dz)
     keep_models           = false,      # discard trial models (limited storage on CSC)
     keep_dpred            = false,      # discard predicted-data files
     model_save_every      = 100,        # keep the winning trial model every 100 iters

@@ -85,3 +85,32 @@
         @test size(Rv) == (30, 40, 2)
     end
 end
+
+# core_expand_cells: grow the detected core by whole cells per side, clamped to
+# the grid, for sites sitting over the transition ring outside the uniform block
+@testset "Core expansion" begin
+    dx = vcat([95184.0, 71567.0, 53810.0, 40459.0, 30420.0, 23400.0],
+              fill(18000.0, 3), fill(24000.0, 30), fill(18000.0, 3),
+              [23400.0, 30420.0, 40459.0, 53810.0, 71567.0, 95184.0])
+    dy = fill(24000.0, 20)
+    dz = fill(100.0, 3)
+    A = fill(2.0, length(dx), length(dy), length(dz))
+    path = joinpath(mktempdir(), "expand.ws")
+    write_ws3d_model(path, dx, dy, dz, A)
+    m = load_ws3d_model(path)
+
+    ix0, iy0 = MTGeophysics.core_ranges(m)
+    @test (ix0, iy0) == MTGeophysics.core_ranges(m; expand=0)
+
+    for e in 1:3
+        ix, iy = MTGeophysics.core_ranges(m; expand=e)
+        @test first(ix) == max(1, first(ix0) - e)
+        @test last(ix)  == min(m.nx, last(ix0) + e)
+        @test length(iy) == length(iy0)          # already the full axis, clamped
+    end
+
+    # clamps at the grid rather than running off it, and negatives are a no-op
+    ixb, iyb = MTGeophysics.core_ranges(m; expand=1000)
+    @test ixb == 1:m.nx && iyb == 1:m.ny
+    @test MTGeophysics.core_ranges(m; expand=-3) == (ix0, iy0)
+end

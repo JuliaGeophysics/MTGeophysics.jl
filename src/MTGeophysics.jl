@@ -30,9 +30,9 @@ include("ShapefileOverlay.jl")
 
 include("WS3DModel.jl")
 
-#----- Bathymetry extraction and water masks ------------------------------#
+#----- Topography / bathymetry extraction and air / water masks -----------#
 
-include("Bathymetry3D.jl")
+include("Mask3D.jl")
 
 #----- Visualization (optional, requires GLMakie) -------------------------#
 
@@ -81,6 +81,8 @@ export load_ws3d_model, read_ws3d_model, write_ws3d_model
 
 export extract_bathymetry, write_bathymetry, read_bathymetry
 export water_mask_from_bathymetry, water_mask_from_model
+export extract_topography, write_topography, read_topography
+export air_mask_from_topography, air_mask_from_model
 
 #----- Exports: 3-D VFSA inversion ---------------------------------------#
 
