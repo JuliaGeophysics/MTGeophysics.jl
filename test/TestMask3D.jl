@@ -129,7 +129,7 @@ end
     @test m1.A == m2.A
 end
 
-@testset "Padding blends: frozen sources and below-core halving" begin
+@testset "Padding blends: frozen sources and below-core thirding" begin
 
     nx, ny, nz = 6, 5, 6
     dx = fill(1000.0, nx); dy = fill(1000.0, ny)
@@ -160,13 +160,13 @@ end
     MTGeophysics.smooth_padding_decay_xy!(m3, ix, iy, bg, 10.0)
     @test m3.A[1, 1, 1] < bg
 
-    #---------- below-core carry-down halves per layer, down to the model base ----------
+    #---------- below-core carry-down keeps a third per layer, to the model base ----------
     # the schedule is in layers, not metres: dz grades 400 -> 27000 m here, so a
     # physical e-fold would spend itself entirely on the first layer
     m4 = load_ws3d_model(path)
     m4.A[:, :, 3] .= 0.0
     MTGeophysics.smooth_padding_decay_z!(m4, ix, iy, kz, bg)
-    for (k, w) in zip(4:6, (0.5, 0.25, 0.125))
+    for (k, w) in zip(4:6, (1/3, 1/9, 1/27))
         @test m4.A[3, 2, k] ≈ bg * (1 - w)
     end
 
@@ -177,7 +177,28 @@ end
     p5[3, 2, 3] = true
     MTGeophysics.smooth_padding_decay_z!(m5, ix, iy, kz, bg, p5)
     @test all(k -> m5.A[3, 2, k] ≈ bg, 4:6)
-    @test m5.A[4, 2, 4] ≈ bg * 0.5
+    @test m5.A[4, 2, 4] ≈ bg * (1 - 1/3)
+
+    #---------- one wild core-edge cell must not paint a whole padding row ----------
+    m6 = load_ws3d_model(path)
+    m6.A[:, :, 3] .= 0.0
+    m6.A[4, 3, 3] = 9.0                      # a lone spike on the core edge
+    MTGeophysics.smooth_padding_decay_xy!(m6, ix, iy, bg, 10.0)
+    @test m6.A[4, 3, 3] ≈ 9.0                # the core itself is untouched
+    @test all(i -> m6.A[i, 3, 3] < bg, 5:nx) # median source ignores the spike
+
+    #---------- distance is physical, not index steps times a median width ----------
+    dxg = [1000.0, 1000.0, 1000.0, 1000.0, 40000.0, 40000.0]   # padding grades hard
+    Ag = fill(0.0, nx, ny, nz)
+    gpath = joinpath(mktempdir(), "graded.ws")
+    write_ws3d_model(gpath, dxg, dy, dz, Ag)
+    mg = load_ws3d_model(gpath)
+    MTGeophysics.smooth_padding_decay_xy!(mg, 2:4, iy, bg, 1.0)
+    # L = 1 core cell = 1000 m, but i=5 is 20.5 km from the core edge, so it must
+    # already be at background. index steps x median width would call it 1 cell
+    # out, weight exp(-1), and leave it at 1.26 -- a third of the way to the source
+    @test mg.A[5, 3, 3] ≈ bg atol=1e-6
+    @test mg.A[6, 3, 3] ≈ bg atol=1e-6
 end
 
 @testset "Depth-scaled RBF widths" begin

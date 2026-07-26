@@ -210,34 +210,50 @@ end
 
 function smooth_padding_decay_xy!(m::WS3DModel, ix::UnitRange{Int}, iy::UnitRange{Int},
                                   background_res_log10::Float64, decay_length::Float64,
-                                  protected::Union{Nothing,AbstractArray{Bool,3}}=nothing)
+                                  protected::Union{Nothing,AbstractArray{Bool,3}}=nothing;
+                                  edge_window::Int=2)
     nx, ny, nz = size(m.A)
     xi1, xi2 = first(ix), last(ix)
     yi1, yi2 = first(iy), last(iy)
 
-    dx_median = median(m.dx)
-    dy_median = median(m.dy)
-    L = decay_length * min(dx_median, dy_median)
+    # decay length is referenced to the core cell size, not the whole-axis median,
+    # which the graded padding would otherwise drag upward
+    L = decay_length * min(median(view(m.dx, ix)), median(view(m.dy, iy)))
 
-    @inbounds for k in 1:nz, j in 1:ny, i in 1:nx
-        inside_x = (xi1 <= i <= xi2)
-        inside_y = (yi1 <= j <= yi2)
-        if inside_x && inside_y
-            continue
+    src = fill(NaN, nx, ny)          # per-layer core-edge source, reused
+    buf = Float64[]
+    @inbounds for k in 1:nz
+        # the source is a median along the core edge, not the single nearest cell:
+        # the deepest core layer is the least data-constrained, and one wild edge
+        # cell there would otherwise be broadcast across a whole padding row.
+        # frozen and non-finite cells are left out, so a fully frozen edge yields
+        # NaN and the destination falls back to background
+        for j in yi1:yi2, i in xi1:xi2
+            (i == xi1 || i == xi2 || j == yi1 || j == yi2) || continue
+            empty!(buf)
+            for jj in max(yi1, j - edge_window):min(yi2, j + edge_window),
+                ii in max(xi1, i - edge_window):min(xi2, i + edge_window)
+                v = m.A[ii, jj, k]
+                (isfinite(v) && !(protected !== nothing && protected[ii, jj, k])) || continue
+                push!(buf, v)
+            end
+            src[i, j] = isempty(buf) ? NaN : median!(buf)
         end
-        protected !== nothing && protected[i, j, k] && continue
-        ic = clamp(i, xi1, xi2)
-        jc = clamp(j, yi1, yi2)
-        dist = hypot((i - ic) * dx_median, (j - jc) * dy_median)
-        weight = exp(-dist / max(L, eps()))
-        boundary_val = m.A[ic, jc, k]
-        # a frozen source must not bleed outward: seawater is finite, so without
-        # this the ocean edge paints a conductive halo across dry padding
-        usable = isfinite(boundary_val) &&
-            !(protected !== nothing && protected[ic, jc, k])
-        m.A[i, j, k] = usable ?
-            boundary_val * weight + background_res_log10 * (1 - weight) :
-            background_res_log10
+
+        for j in 1:ny, i in 1:nx
+            (xi1 <= i <= xi2) && (yi1 <= j <= yi2) && continue
+            protected !== nothing && protected[i, j, k] && continue
+            ic = clamp(i, xi1, xi2)
+            jc = clamp(j, yi1, yi2)
+            # true separation from the model's own cell centers; index steps times
+            # a median width badly understate it wherever the padding grades out
+            dist = hypot(m.cx[i] - m.cx[ic], m.cy[j] - m.cy[jc])
+            weight = exp(-dist / max(L, eps()))
+            boundary_val = src[ic, jc]
+            m.A[i, j, k] = isfinite(boundary_val) ?
+                boundary_val * weight + background_res_log10 * (1 - weight) :
+                background_res_log10
+        end
     end
     return m
 end
@@ -247,17 +263,20 @@ end
 # each core column continues its last perturbed value downward, blending toward
 # background; runs before the xy decay so deep pad corners see the filled columns
 #
-# the carry-down halves every layer (50%, 25%, 12.5%, ...) all the way to the
-# bottom of the model, counted in layers rather than metres: dz below the core
-# grades so steeply that a physical e-fold collapses the whole blend into the
-# first layer and leaves the rest of the column structureless
+# the carry-down keeps a third every layer (33%, 11%, 3.7%, ...) all the way to
+# the bottom of the model, counted in layers rather than metres: dz below the
+# core grades so steeply that a physical e-fold collapses the whole blend into
+# the first layer and leaves the rest of the column structureless.
+# a third is the compromise between the two meshes: cascadia has only 6 layers
+# below the core so quartering flattened it within 2, while MT3DINV4 has 12 and
+# halving bled visible structure past the eighth
 function smooth_padding_decay_z!(m::WS3DModel, ix::UnitRange{Int}, iy::UnitRange{Int},
                                  kz::UnitRange{Int}, background_res_log10::Float64,
                                  protected::Union{Nothing,AbstractArray{Bool,3}}=nothing)
     klast = last(kz)
     klast == m.nz && return m
     @inbounds for k in (klast+1):m.nz
-        weight = 0.5 ^ (k - klast)
+        weight = (1 / 3) ^ (k - klast)
         for j in iy, i in ix
             protected !== nothing && protected[i, j, k] && continue
             boundary_val = m.A[i, j, klast]

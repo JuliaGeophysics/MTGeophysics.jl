@@ -28,28 +28,29 @@ cfg = VFSA3DMTConfig(
     # ModEM tree defaults to BICG), and QMR is slower here
     fwd_ctrl              = joinpath(BASE_DIR, "F.dat"),
     out_root              = joinpath(BASE_DIR, "run"),
-    n_ctrl                = 1600,        # RBF control points
+    n_ctrl                = 900,        # RBF control points
     frac_update_controls  = 1.0,        # all controls perturbed per trial
-    log_bounds            = (1.0, 5.0), # log10(Ω·m) model bounds
-    step_scale            = 0.05,       # proposal step = step_scale × bound width
+    log_bounds            = (0.0, 4.0), # log10(Ω·m) model bounds, symmetric about the 2.0 prior; ocean is frozen and exempt from the clamp
+    step_scale            = 0.15,       # caps a single control jump at step_scale × bound width (0.6 log10); the typical step is √T smaller
     max_iter              = 12000,       # iteration cap; also sets the cooling timescale
     n_trials              = 1,          # classic vfsa: one proposal, one metropolis test
     T0                    = 0.03,       # start temperature, on the scale of the typical uphill dE_rms2
-    cool_ratio            = 1.0e-4,     # geometric cool to T0/10000 at max_iter: one decade per 3000 iters, T0/100 by iter ~6000
-    target_rms            = 1.0,        # early-stop; NOTE reachable at alpha=1 (ceiling ~3.4)
+    cool_ratio            = 1.0e-3,     # geometric cool to T0/10000 at max_iter: one decade per 3000 iters, T0/100 by iter ~6000
+    target_rms            = 1.0,        # early-stop threshold; unreachable here, so the chain runs to max_iter
     seed                  = seed,
     pad_tol               = 0.2,        # core/padding detection tolerance
-    padding_decay_length  = 10.0,       # padding blend (cells)
-    z_core_cells          = 27,         # perturb top 27 z layers (~100 km); deeper layers are forward-solver padding
+    core_expand_cells     = 2,          # grow the perturbable core by N cells per side; 2 brings all 109 sites inside (0 leaves 8 over padding)
+    padding_decay_length  = 5.0,        # lateral padding blend e-fold, in core cells of true distance
+    z_core_cells          = 30,         # perturb top 28 z layers (144 km); deeper layers are forward-solver padding
     keep_models           = false,      # discard trial models (limited storage on CSC)
     keep_dpred            = false,      # discard predicted-data files
     model_save_every      = 100,        # keep the winning trial model every 100 iters
     sigma_scale           = 2.0,        # RBF kernel 1σ in cells at the core top; physical footprint = σ × cell size per axis (2 cells ≈ 48 km laterally here)
-    sigma_scale_deep      = 2.0,        # kernel 1σ at the core bottom, log-depth interpolated between the two; equal = uniform widths, raise to 3-4 to widen deep kernels laterally
+    sigma_scale_deep      = 3.0,        # kernel 1σ at the core bottom, log-depth interpolated between the two; equal = uniform widths, raise to 3-4 to widen deep kernels laterally
     trunc_sigmas          = 3.0,        # kernel zeroed beyond this many σ; keeps the control-to-cell weight map sparse, 3σ drops only ~1% tail
-    ctrl_depth_power      = 0.0,       # shallow bias in control placement
-    water_log10           = 0.3,        # no water mask (land survey)
-    bathymetry_file       = "cascad_bathymetry.dat",         # bathymetry file
+    ctrl_depth_power      = 0.5,       # shallow bias in control placement
+    water_log10           = 0.3,        # only used for the written file header when a bathymetry file is given
+    bathymetry_file       = "cascad_bathymetry.dat",         # frozen ocean columns; relative path, so submit from this directory
     distortion_mode       = :off,        # per-site 2x2 galvanic C each misfit eval; :off = plain
     distortion_damping    = 1.0,        # pull of per-site C toward identity: 0 = free fit, larger = weaker correction, Inf = correction off
 )
