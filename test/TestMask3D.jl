@@ -170,6 +170,16 @@ end
         @test m4.A[3, 2, k] ≈ bg * (1 - w)
     end
 
+    # target: the deepest layers relax to the prior, not to the flat background
+    m7 = load_ws3d_model(path)
+    m7.A[:, :, 3] .= 0.0
+    tgt = fill(1.0, nx, ny, nz)
+    MTGeophysics.smooth_padding_decay_z!(m7, ix, iy, kz, bg; target=tgt)
+    for (k, w) in zip(4:6, (1/3, 1/9, 1/27))
+        @test m7.A[3, 2, k] ≈ 1.0 * (1 - w)
+    end
+    @test m7.A[3, 2, 6] ≈ 1.0 atol=0.04
+
     # a frozen column is left to the background rather than carried down
     m5 = load_ws3d_model(path)
     m5.A[:, :, 3] .= 0.0
@@ -178,6 +188,14 @@ end
     MTGeophysics.smooth_padding_decay_z!(m5, ix, iy, kz, bg, p5)
     @test all(k -> m5.A[3, 2, k] ≈ bg, 4:6)
     @test m5.A[4, 2, 4] ≈ bg * (1 - 1/3)
+
+    # xy target: padding relaxes to the prior, and frozen cells are still untouched
+    m8 = load_ws3d_model(path)
+    frozen_before = m8.A[1, 1, 1]
+    tgt8 = fill(1.0, nx, ny, nz)
+    MTGeophysics.smooth_padding_decay_xy!(m8, ix, iy, bg, 0.01, protected; target=tgt8)
+    @test m8.A[1, 1, 3] ≈ 1.0 atol=1e-6
+    @test m8.A[1, 1, 1] == frozen_before             # frozen sheet cell untouched
 
     #---------- one wild core-edge cell must not paint a whole padding row ----------
     m6 = load_ws3d_model(path)

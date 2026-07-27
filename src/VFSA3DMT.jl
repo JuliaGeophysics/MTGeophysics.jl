@@ -211,7 +211,8 @@ end
 function smooth_padding_decay_xy!(m::WS3DModel, ix::UnitRange{Int}, iy::UnitRange{Int},
                                   background_res_log10::Float64, decay_length::Float64,
                                   protected::Union{Nothing,AbstractArray{Bool,3}}=nothing;
-                                  edge_window::Int=2)
+                                  edge_window::Int=2,
+                                  target::Union{Nothing,AbstractArray{<:Real,3}}=nothing)
     nx, ny, nz = size(m.A)
     xi1, xi2 = first(ix), last(ix)
     yi1, yi2 = first(iy), last(iy)
@@ -226,8 +227,7 @@ function smooth_padding_decay_xy!(m::WS3DModel, ix::UnitRange{Int}, iy::UnitRang
         # the source is a median along the core edge, not the single nearest cell:
         # the deepest core layer is the least data-constrained, and one wild edge
         # cell there would otherwise be broadcast across a whole padding row.
-        # frozen and non-finite cells are left out, so a fully frozen edge yields
-        # NaN and the destination falls back to background
+        # frozen and non-finite cells are left out, so a fully frozen edge falls back
         for j in yi1:yi2, i in xi1:xi2
             (i == xi1 || i == xi2 || j == yi1 || j == yi2) || continue
             empty!(buf)
@@ -250,9 +250,10 @@ function smooth_padding_decay_xy!(m::WS3DModel, ix::UnitRange{Int}, iy::UnitRang
             dist = hypot(m.cx[i] - m.cx[ic], m.cy[j] - m.cy[jc])
             weight = exp(-dist / max(L, eps()))
             boundary_val = src[ic, jc]
+            base = target === nothing ? background_res_log10 : target[i, j, k]
+            isfinite(base) || (base = background_res_log10)          # prior air/NaN
             m.A[i, j, k] = isfinite(boundary_val) ?
-                boundary_val * weight + background_res_log10 * (1 - weight) :
-                background_res_log10
+                boundary_val * weight + base * (1 - weight) : base
         end
     end
     return m
@@ -270,21 +271,24 @@ end
 # a third is the compromise between the two meshes: cascadia has only 6 layers
 # below the core so quartering flattened it within 2, while MT3DINV4 has 12 and
 # halving bled visible structure past the eighth
+#
+# with `target` the deepest layers relax back to the starting model, not to a flat fill
 function smooth_padding_decay_z!(m::WS3DModel, ix::UnitRange{Int}, iy::UnitRange{Int},
                                  kz::UnitRange{Int}, background_res_log10::Float64,
-                                 protected::Union{Nothing,AbstractArray{Bool,3}}=nothing)
+                                 protected::Union{Nothing,AbstractArray{Bool,3}}=nothing;
+                                 target::Union{Nothing,AbstractArray{<:Real,3}}=nothing)
     klast = last(kz)
     klast == m.nz && return m
     @inbounds for k in (klast+1):m.nz
         weight = (1 / 3) ^ (k - klast)
         for j in iy, i in ix
             protected !== nothing && protected[i, j, k] && continue
+            base = target === nothing ? background_res_log10 : target[i, j, k]
+            isfinite(base) || (base = background_res_log10)      # prior air/NaN
             boundary_val = m.A[i, j, klast]
             usable = isfinite(boundary_val) &&
                 !(protected !== nothing && protected[i, j, klast])
-            m.A[i, j, k] = usable ?
-                boundary_val * weight + background_res_log10 * (1 - weight) :
-                background_res_log10
+            m.A[i, j, k] = usable ? boundary_val * weight + base * (1 - weight) : base
         end
     end
     return m
@@ -643,6 +647,8 @@ function _run_vfsa3d(start_model_path::String,
     finite_bg = filter(isfinite, background_resistivities)
     background_log10 = median(finite_bg)
 
+    A_start = copy(m.A)                     # below-core blend target: the prior, cell by cell
+
     #---------- frozen cells: no controls, no perturbation, no clamp ----------
     # topography and bathymetry are tracked as separate full-grid masks so the
     # padding ring is protected too, and both are exported for reuse/plotting
@@ -700,9 +706,9 @@ function _run_vfsa3d(start_model_path::String,
     dpred0_filename = @sprintf("dpred_%03d_%02d.dat", 0, 0)
 
     embed_core!(m, v0_core_log10, ix, iy, kz)
-    smooth_padding_decay_z!(m, ix, iy, kz, background_log10, protected_full)
+    smooth_padding_decay_z!(m, ix, iy, kz, background_log10, protected_full; target=A_start)
     smooth_padding_decay_xy!(m, ix, iy, background_log10, cfg.padding_decay_length,
-                             protected_full)
+                             protected_full; target=A_start)
 
     dp0, fit0 = forward_and_misfit!(m; run_dir=run_root, model_filename=model0_filename,
                                     dobs_filename=dobs_filename, dpred_filename=dpred0_filename,
@@ -756,9 +762,9 @@ function _run_vfsa3d(start_model_path::String,
             n_frozen > 0 && (v_trial[mask] .= v0_core_log10[mask])
 
             embed_core!(m, v_trial, ix, iy, kz)
-            smooth_padding_decay_z!(m, ix, iy, kz, background_log10, protected_full)
+            smooth_padding_decay_z!(m, ix, iy, kz, background_log10, protected_full; target=A_start)
             smooth_padding_decay_xy!(m, ix, iy, background_log10, cfg.padding_decay_length,
-                                     protected_full)
+                                     protected_full; target=A_start)
 
             model_filename = @sprintf("model_%03d_%02d.rho", k, t)
             dpred_filename = @sprintf("dpred_%03d_%02d.dat", k, t)
