@@ -125,7 +125,10 @@ function write_covariance(path::AbstractString,
         println(io)
         for k in 1:nz
             @printf(io, " %d %d\n", k, k)
-            for i in 1:nx
+            # rows run north to south: ModEM's read_iscalar takes the first row of
+            # a block as x = Nx (sg_scalar.f90, `do j = Nx,1,-1`). Writing them
+            # ascending mirrors the mask about x and frees half the topography.
+            for i in nx:-1:1
                 println(io, " " * join((air[i, j, k] ? "0" :
                                         water[i, j, k] ? "9" : "1" for j in 1:ny), " "))
             end
