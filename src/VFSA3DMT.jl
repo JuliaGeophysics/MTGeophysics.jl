@@ -55,8 +55,10 @@ uniform per cell). The weight is per cell, not per volume, so on meshes whose
 dz grows with depth the mesh's own coarsening compounds with the exponent —
 tune `ctrl_depth_power` for the grid at hand. Kernel widths grade from
 `sigma_scale` (cells) at the top of the core to `sigma_scale_deep` at the
-bottom, interpolated in log-depth over the core's own depth range; equal
-values give uniform widths.
+bottom, interpolated linearly in depth over the core's own depth range; equal
+values give uniform widths. On a stretched mesh that keeps widths near
+`sigma_scale` through the fine shallow layers, since those occupy little of the
+depth range, and widens only in the deep ones.
 
 Frozen cells never receive control points, are never perturbed, and are never
 bound-clamped. Topographic air (tagged as NaN in the loaded model) is always
@@ -316,8 +318,8 @@ end
 Randomly pick up to `n_ctrl` control voxels in the core and precompute
 Gaussian-RBF weights for every core voxel. `kz` restricts the core in depth.
 Kernel widths (in cells) grade from `sigma_scale` at the top of the core to
-`sigma_scale_deep` at the bottom, interpolated per control in log-depth over the
-core's own depth range, so the profile adapts to any survey without
+`sigma_scale_deep` at the bottom, interpolated per control linearly in depth
+over the core's own depth range, so the profile adapts to any survey without
 absolute-depth settings; equal values give uniform widths. `depth_power` biases
 control placement shallow and `exclude` marks cells that may not receive
 controls.
@@ -372,12 +374,19 @@ function build_rbf_map(m::WS3DModel, ix::UnitRange{Int}, iy::UnitRange{Int}, n_c
         ctrl_at[ci[q], cj[q], ck[q]] = q
     end
 
+    # widths interpolate linearly in true depth, not in log depth or layer index.
+    # sigma counts cells, and on a stretched mesh the cells themselves grow, so a
+    # constant sigma already widens the kernel in metres with depth; grading on
+    # layer index (which log-depth is, to within a few percent on a geometric dz)
+    # would compound the two and smear the mid column. Linear in depth holds
+    # sigma near sigma_scale through the fine layers and spends the extra width
+    # on the deep ones, where the cells -- and the loss of MT resolution -- are.
     z_top = zc[1] - z_top_edge
     z_bot = zc[nz] - z_top_edge
-    denom = log(z_bot + z1) - log(z_top + z1)
+    denom = z_bot - z_top
     sig = Vector{Float64}(undef, n_sel)
     @inbounds for q in 1:n_sel
-        t = denom > 0 ? clamp((log((zc[ck[q]] - z_top_edge) + z1) - log(z_top + z1)) / denom, 0.0, 1.0) : 0.0
+        t = denom > 0 ? clamp(((zc[ck[q]] - z_top_edge) - z_top) / denom, 0.0, 1.0) : 0.0
         sig[q] = sigma_scale + t * (sigma_scale_deep - sigma_scale)
     end
 

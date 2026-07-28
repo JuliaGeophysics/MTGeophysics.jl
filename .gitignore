@@ -22,7 +22,6 @@ Manifest.toml
 examples/Cascadia/
 examples/MT3DINV4/
 examples/geoenergialoikka/
-examples/make_mesh_modem_jugad.jl
 
 # Editor swap files
 *.swp
@@ -37,6 +36,7 @@ docs/build/
 docs/site/
 
 # Coverage
+research/
 coverage/
 *.jl.cov
 *.jl.mem
@@ -45,6 +45,5 @@ coverage/
 tmp/
 logs/
 
-# Local example scripts
-examples/create_mesh3D.jl
+
 
