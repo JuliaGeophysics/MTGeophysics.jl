@@ -21,7 +21,13 @@
 
 ## Installation
 
+Clone the repository using a git client and navigate to the root directory:
+```bash
+git clone https://github.com/JuliaGeophysics/MTGeophysics.jl.git
+cd MTGeophysics.jl/
 ```
+Launch [julia](https://julialang.org) and instantiate the project:
+```bash
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
 
