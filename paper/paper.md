@@ -129,13 +129,10 @@ The package also supports exporting depth slices and cross-sections as
 georeferenced shapefiles suitable for integration into GIS platforms,
 closing the loop between geophysical modelling and geological mapping.
 The visualization layer is conditionally loaded, ensuring the core
-package functions without OpenGL dependencies.
-
-![Interactive 3D model viewer showing combined XY, XZ, and YZ resistivity slices with slider controls, coordinate reprojection (EPSG:3067), north arrow, and scale bar. Depth, X, and Y sliders allow real-time browsing; the view can be toggled between core-only and full-padding extents.](plot_model_3d.png){#fig:slicer}
-
-![Interactive XY depth-slice viewer with WGS 84 geographic coordinates (EPSG:4326), depth-layer slider, core/full model toggle, and GIS shapefile overlay support. Slices can be exported as high-resolution PNGs or georeferenced shapefiles for direct import into GIS platforms.](plot_xy_slices.png){#fig:xyslices}
-
-![Polygon-based interactive model editor. The user draws a closed polygon on a depth slice, sets a target resistivity and vertical extent (layers above, below, and transition), and applies the edit. Undo, reset, and save controls allow iterative refinement of the 3D model before re-running the forward solver.](draw_and_replace.png){#fig:editor}
+package functions without OpenGL dependencies. Screenshots and usage of
+the interactive 3D slice viewers, the XY depth-slice viewer, and the
+polygon-based model editor are provided in the package documentation
+[@MTGeophysicsDocs].
 
 Publication-quality static plots use CairoMakie for data maps, response
 curves, model cross-sections, and convergence diagnostics. All file
@@ -161,16 +158,16 @@ The 3D VFSA inversion has been benchmarked at regional scale using
 USArray MT data from the Cascadia subduction zone [@Patro2008], a
 dataset extensively studied with the deterministic ModEM NLCG
 inversion. This benchmark will be presented at EGU General Assembly
-2026 [@Mishra2026]. \autoref{fig:cascadia} compares depth slices from the
-published ModEM NLCG result (top row) with the VFSA ensemble mean
-computed from nine independent Markov chains (middle row), each
+2026 [@Mishra2026]. The benchmark compares depth slices from the
+published ModEM NLCG result with the VFSA ensemble mean
+computed from nine independent Markov chains, each
 running 3000 iterations with four trial proposals per iteration
 (approximately 60 seconds per forward solve). The VFSA ensemble mean
 recovers the major conductive structures identified by deterministic
 inversion at both shallow (24--30 km) and deeper (59--74 km) depth
 ranges, and in several areas produces sharper geological boundaries
-than the smoothness-regularised NLCG result. The bottom row
-shows the ensemble standard deviation, a per-voxel uncertainty
+than the smoothness-regularised NLCG result. The ensemble standard
+deviation provides a per-voxel uncertainty
 estimate that no single deterministic inversion can provide. Regions
 of high standard deviation correspond to areas where the data poorly
 constrain the model, giving interpreters direct information about
@@ -178,8 +175,6 @@ which features are robust and which remain ambiguous. Because the
 stochastic workflow produces a distribution of plausible models rather
 than one "best" solution, it quantifies the non-uniqueness inherent
 in MT inversion.
-
-![3D VFSA benchmark on Cascadia field data. Top: ModEM NLCG deterministic inversion. Middle: VFSA ensemble mean from 9 independent chains. Bottom: ensemble standard deviation (uncertainty). Left column: 24--30 km depth. Right column: 59--74 km depth. The VFSA mean recovers the same major conductive features as the deterministic result while additionally providing spatially resolved uncertainty estimates.](VFSA3DBenchmark.png){#fig:cascadia}
 
 # Research impact statement
 
@@ -190,17 +185,17 @@ inversion reproduce the community-standard COMMEMI benchmark models
 [@Zhdanov1997], and the 3D VFSA inversion recovers established
 resistivity structures from the published Cascadia USArray dataset
 [@Patro2008] while additionally providing ensemble uncertainty
-estimates not available from deterministic methods
-(\autoref{fig:cascadia}). The package integrates directly with ModEM
+estimates not available from deterministic methods.
+The package integrates directly with ModEM
 [@Kelbert2014], the most widely used 3D MT forward solver, by reading
 and writing its native file formats and wrapping it as the external
 forward engine for 3D VFSA inversion, ensuring interoperability with
 existing research workflows worldwide. The interactive 3D visualization
-tools (\autoref{fig:slicer}, \autoref{fig:xyslices}) support
+tools (see the documentation [@MTGeophysicsDocs]) support
 coordinate reprojection to standard CRS (EPSG:4326, EPSG:3067) and
 shapefile overlays, enabling direct integration of geophysical results
 with geological maps in GIS platforms. The interactive model editor
-(\autoref{fig:editor}) allows polygon-based resistivity modification
+[@MTGeophysicsDocs] allows polygon-based resistivity modification
 with depth control, supporting iterative hypothesis testing. The
 package's ModEM I/O and 3D visualization capabilities are actively
 used for interpreting crustal-scale MT surveys in Finland. The
