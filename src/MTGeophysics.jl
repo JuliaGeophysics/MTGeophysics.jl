@@ -7,6 +7,7 @@ module MTGeophysics
 
 using LinearAlgebra
 using Statistics
+using Dates
 using Shapefile
 using GeoInterface
 using Proj
@@ -25,6 +26,7 @@ include("CoreUtils3D.jl")
 #----- Headless shapefile overlay utilities --------------------------------#
 
 include("ShapefileOverlay.jl")
+include("GeoRef3D.jl")
 
 #----- WS3D format model I/O (log10 internal) -----------------------------#
 
@@ -33,13 +35,20 @@ include("WS3DModel.jl")
 #----- Topography / bathymetry extraction and air / water masks -----------#
 
 include("Mask3D.jl")
+include("MeshToMesh.jl")
+include("MakeMesh3D.jl")
 
 #----- Visualization (optional, requires GLMakie) -------------------------#
 
 try
     using GLMakie
     include("PlotModel.jl")
+    include("PlotModel3D.jl")
+    include("EditModel3D.jl")
+    include("MakeMesh3DGUI.jl")
     export compute_colorrange, prepare_model_arrays
+    export PlotModelXY, PlotModelXZ, PlotModelYZ, PlotModelXYZ
+    export EditModelByLayers, EditModelByDrawing
 catch LoadError
     @warn "GLMakie not available, interactive visualization functionality disabled"
 end
@@ -71,6 +80,11 @@ export lateral_core_ranges, core_view
 
 export detect_shapefile_crs, shapefile_coord_transform
 export load_shapefile_geometries, prepare_shapefiles
+
+#----- Exports: mesh design and mesh-to-mesh projection -------------------#
+
+export MakeMesh3D
+export MeshToMesh
 
 #----- Exports: WS3D model I/O -------------------------------------------#
 

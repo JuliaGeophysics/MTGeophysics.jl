@@ -19,9 +19,25 @@ Manifest.toml
 *.std
 
 
-examples/Cascadia/
+# Cascadia example data: models, data files, and GIS overlays (not distributed)
+examples/cascadia/
 examples/MT3DINV4/
 examples/geoenergialoikka/
+
+# GIS / shapefile sidecars, anywhere in the tree
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.qix
+*.sbn
+*.sbx
+*.shp.xml
+*.gpkg
+*.geojson
+*.tif
+*.tiff
 
 # Editor swap files
 *.swp

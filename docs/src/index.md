@@ -16,6 +16,10 @@ MTGeophysics.jl is part of the [JuliaGeophysics ecosystem](https://github.com/Ju
 
 ## Quick start
 
+Requires Julia 1.10 or newer. To use the package from your own project, `pkg> add MTGeophysics`;
+the commands below assume a clone of the repository, which also provides the examples and helper
+scripts — see [Getting Started](getting_started.md) for both routes.
+
 ```bash
 # One-time setup
 julia --project=. -e 'using Pkg; Pkg.instantiate()'

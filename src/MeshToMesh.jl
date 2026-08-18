@@ -1,26 +1,3 @@
-# Project a ModEM model/data pair from one mesh onto another (coarse -> fine or
-# fine -> coarse) and emit everything the new mesh needs to run. Names come from
-# the inputs, so a run is self-describing on disk:
-#
-#   NLCGonVFSA/<yyyymmdd_HHMMSS>/
-#     modelC_to_modelF.rho   resistivity resampled onto the target grid
-#     dataC-W.dat            the same data with every site elevation snapped to
-#                            the target grid's surface (-W = rewritten)
-#     modelC_to_modelF.cov   covariance with mask 0 on air and 9 on ocean, so
-#                            ModEM actually freezes topography and bathymetry
-#
-# The two meshes need not share extent or origin: everything is resolved in
-# absolute coordinates and target cells that fall outside the source are filled
-# from the nearest source cell.
-#
-# Standalone: include this file, it only uses the public MTGeophysics API.
-#
-#   include("examples/ProjectMesh3D.jl")
-#   r = project_model_data("MT3DINV4/best_model.rho", "MT3DINV4/dataC.dat",
-#                          "MT3DINV4/modelF.rho"; method=:linear)
-#   report(r)
-
-using MTGeophysics
 using Printf
 using Statistics
 using Dates
@@ -125,7 +102,10 @@ function write_covariance(path::AbstractString,
         println(io)
         for k in 1:nz
             @printf(io, " %d %d\n", k, k)
-            for i in 1:nx
+            # rows run north to south: ModEM's read_iscalar takes the first row of
+            # a block as x = Nx (sg_scalar.f90, `do j = Nx,1,-1`). Writing them
+            # ascending mirrors the mask about x and frees half the topography.
+            for i in nx:-1:1
                 println(io, " " * join((air[i, j, k] ? "0" :
                                         water[i, j, k] ? "9" : "1" for j in 1:ny), " "))
             end
@@ -305,4 +285,37 @@ function report(r::NamedTuple)
     println("        ", r.data)
     println("        ", r.cov)
     return nothing
+end
+
+function MeshToMesh(src_model::AbstractString, src_data::AbstractString,
+                    dst_mesh::AbstractString;
+                    outdir::AbstractString = "",
+                    stem::AbstractString = "",
+                    method::Symbol = :nearest,
+                    water_log10::Real = NaN,
+                    snap_sites::Bool = true,
+                    smooth_xy::Real = 0.3, smooth_z::Real = 0.3,
+                    napply::Integer = 1)
+
+    isempty(src_model) && error("source model path is required")
+    isfile(src_model) || error("Source model not found: $src_model")
+    isempty(src_data) && error("source data path is required")
+    isfile(src_data) || error("Source data not found: $src_data")
+    isempty(dst_mesh) && error("target mesh path is required")
+    isfile(dst_mesh) || error("Target mesh not found: $dst_mesh")
+
+    kwargs = Dict{Symbol, Any}(
+        :method => method,
+        :water_log10 => water_log10,
+        :snap_sites => snap_sites,
+        :smooth_xy => smooth_xy,
+        :smooth_z => smooth_z,
+        :napply => napply,
+    )
+    isempty(outdir) || (kwargs[:outdir] = outdir)
+    isempty(stem) || (kwargs[:stem] = stem)
+
+    r = project_model_data(src_model, src_data, dst_mesh; kwargs...)
+    report(r)
+    return r
 end

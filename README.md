@@ -19,53 +19,48 @@
 - Interactive 3D slice viewers (GLMakie) with GIS overlays and coordinate reprojection
 - Shapefile export for GIS integration
 
+## Requirements
+
+- [Julia](https://julialang.org) 1.10 or newer
+- OpenGL, for the interactive 3D viewers (GLMakie)
+
 ## Installation
 
-Clone the repository using a git client and navigate to the root directory:
+**As a package** — to use MTGeophysics.jl from your own project or scripts. It is registered in the Julia General registry:
+
+```julia
+julia> ]  # press ] to enter the Pkg REPL
+pkg> add MTGeophysics
+```
+
+or equivalently:
+
+```bash
+julia -e 'using Pkg; Pkg.add("MTGeophysics")'
+```
+
+**From a clone** — to run the bundled examples, helper scripts, and benchmarks, or to develop the package:
+
 ```bash
 git clone https://github.com/JuliaGeophysics/MTGeophysics.jl.git
 cd MTGeophysics.jl/
-```
-Launch [julia](https://julialang.org) and instantiate the project:
-```bash
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
 
-## Quick start: 2D benchmark + VFSA inversion
+The `julia --project=.` prefix used throughout the examples below activates that cloned environment.
 
-> Note: This is a quick demonstration workflow. For production-quality inversion, tune key settings such as the number of VFSA iterations, number of chains, cooling schedule, regularization choices, and uncertainty/ensemble controls for your survey and model size.
+## Getting started
 
-**1. Generate the COMMEMI 2D benchmarks.** Writes the true model, halfspace starting model, reference data template, and noisy observed data into `examples/0COMEMI2D-I/`, `-II/`, and `-III/`.
+Generate the COMMEMI 2D benchmarks (true model, halfspace starting model, and noisy observed data), then run a short multi-chain VFSA inversion on COMMEMI-I:
 
-```
+```bash
 julia --project=. helpers/benchmarks_2D.jl
-```
-
-**2. (Optional) Inspect the 2D forward response** of the benchmark model.
-
-```
-julia --project=. examples/run_fwd2D.jl
-```
-
-**3. Run the 2D VFSA inversion** (multi-chain ensemble, RBF parameterization) on the COMMEMI-I benchmark. Results are written to a timestamped `examples/run_VFSA2DMT_<timestamp>/` directory containing per-chain logs, best models, and ensemble mean/median/std.
-
-```
 julia --project=. examples/run_vfsa2D.jl
 ```
 
-**4. Compute ensemble statistics** (posterior mean/median/std and misfit summaries).
+Results land in a timestamped `examples/run_VFSA2DMT_<timestamp>/` directory with per-chain logs, best models, and ensemble mean/median/std.
 
-```
-julia --project=. helpers/run_statistics_2D.jl examples/run_VFSA2DMT_<timestamp>
-```
-
-**5. Create a convergence GIF** to visualize model evolution across iterations (requires `keep_models = true`).
-
-```
-julia --project=. helpers/make_gif_2D.jl examples/run_VFSA2DMT_<timestamp>
-```
-
-From Julia, the inversion can also be driven directly:
+The same inversion driven directly from Julia:
 
 ```julia
 using MTGeophysics
@@ -88,7 +83,9 @@ result = VFSA2DMT(
 )
 ```
 
-See the [documentation](https://juliageophysics.github.io/MTGeophysics.jl/dev/) for the full 2D/3D workflow, configuration options, and visualization examples.
+> Note: this is a quick demonstration workflow. For production-quality inversion, tune the number of VFSA iterations, number of chains, cooling schedule, regularization, and uncertainty/ensemble controls for your survey and model size.
+
+See the [documentation](https://juliageophysics.github.io/MTGeophysics.jl/dev/) for the full 1D/2D/3D workflows, ensemble statistics and convergence animations, ModEM I/O, configuration options, and the interactive 3D viewers.
 
 # Research using this code 
 

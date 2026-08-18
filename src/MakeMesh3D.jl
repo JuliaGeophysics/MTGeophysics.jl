@@ -1,68 +1,10 @@
-# Interactive ModEM mesh builder with DEM-derived station elevations.
-# Inputs (optional CLI args):
-#   [1] data_file (ModEM .dat)
-#   [2] out_model (.rho)
-#   [3] topo_geotiff (optional EPSG:26918 topography)
-#   [4] out_covariance (optional, defaults to C3.dat beside the model)
-#   [5] covariance value (optional, defaults to 0.3)
-#   [6] mode (optional: gui|nogui)
-# This variant also writes a new `*_topo.dat` copy whose station elevations are
-# derived from the GeoTIFF/topography workflow instead of the input site Z values.
-# Set ENV["MTGEO_MESH_MODE"] = "nogui" to build+write the mesh headlessly.
-
-using MTGeophysics
-using GLMakie
 using ArchGDAL
-using Proj
-using Statistics
 using Printf
-using Dates
 
-GLMakie.activate!()
-
-#----- user controls (edit here) -----
-const MODE            = length(ARGS) >= 6 ? lowercase(ARGS[6]) : lowercase(get(ENV, "MTGEO_MESH_MODE", "gui"))
-const DATA_PATH       = length(ARGS) >= 1 ? ARGS[1] : normpath(@__DIR__, "MT3DINV4", "data7O10Dg.dat")
-const OUT_PATH        = length(ARGS) >= 2 ? ARGS[2] : joinpath(dirname(DATA_PATH), "mesh_start_model.rho")
-const DEFAULT_TOPO_PATH = normpath(@__DIR__, "MT3DINV4", "ArcticDEM_30m_EPSG26918.tif")
-const TOPO_PATH       = length(ARGS) >= 3 ? ARGS[3] : (isfile(DEFAULT_TOPO_PATH) ? DEFAULT_TOPO_PATH : "")
-const OUT_COV_PATH    = length(ARGS) >= 4 ? ARGS[4] : joinpath(dirname(OUT_PATH), "C3.dat")
-const OUT_DATA_PATH   = let base = basename(DATA_PATH)
-    outbase = if occursin(r"(?i)_topo\.dat$", base)
-        base
-    elseif occursin(r"(?i)\.dat$", base)
-        replace(base, r"(?i)\.dat$" => "_topo.dat")
-    else
-        base * "_topo.dat"
-    end
-    joinpath(dirname(DATA_PATH), outbase)
-end
-const COV_VALUE0      = length(ARGS) >= 5 ? something(tryparse(Float64, ARGS[5]), 0.3) : 0.3
-const CELL_WIDTH_FRAC = 0.5
-const N_PAD           = 12
-const PAD_FACTOR      = 1.5
-const FIRST_LAYER_DIV = 4.0
-const VERTICAL_FACTOR = 1.2
-const DEPTH_MULT      = 3.0
-const TOPO_CRS        = "EPSG:26918"
-const AIR_LAYERS      = 6
-const AIR_FACTOR      = 1.35
-const AIR_FIRST_DIV   = 2.0
-const COV_APPLY       = 2
-const CMAP            = :Spectral
-const CRANGE          = (0.0, 4.0)
-const SITE_COLOR      = :black
-const SITE_SIZE_FULL  = 6
-const SITE_SIZE_CORE  = 5
-const GRID_COLOR      = (:grey, 0.7)
-const GRID_WIDTH      = 1.0
-const FIG_SIZE        = (1500, 1000)
-const USE_TOPO        = !isempty(strip(TOPO_PATH))
-
-const TOPO_CACHE = Ref{Any}(nothing)
+const _TOPO_CACHE = Dict{String, Any}()
 
 # modem's covariance reader skips exactly 16 header lines - keep this 16 lines long
-const COV_HEADER = """
+const _MESH_COV_HEADER = """
 +-----------------------------------------------------------------------------+
 | This file defines model covariance for a recursive autoregression scheme.   |
 | The model space may be divided into distinct areas using integer masks.     |
@@ -82,7 +24,9 @@ const COV_HEADER = """
 """
 
 #----- EM skin depth from resistivity and period -----
-skin_depth(ρ, T) = 503.0 * sqrt(ρ * T)
+_skin_depth(ρ, T) = 503.0 * sqrt(ρ * T)
+
+_snap(v, r) = collect(r)[argmin(abs.(collect(r) .- v))]
 
 #----- find the typical station spacing -----
 function nearest_neighbour_spacing(sx, sy)
@@ -227,12 +171,9 @@ function _load_topography_geotiff(path::AbstractString)
 end
 
 function _ensure_topography(path::AbstractString, bbox)
-    topo = TOPO_CACHE[]
-    if topo === nothing
-        isfile(path) || error("Topography file not found: $path")
-        TOPO_CACHE[] = _load_topography_geotiff(path)
-    end
-    return TOPO_CACHE[]
+    haskey(_TOPO_CACHE, path) && return _TOPO_CACHE[path]
+    isfile(path) || error("Topography file not found: $path")
+    return _TOPO_CACHE[path] = _load_topography_geotiff(path)
 end
 
 function _sample_topography(topo, xq::Real, yq::Real)
@@ -294,9 +235,9 @@ function _sample_topography(topo, xq::Real, yq::Real)
     return NaN
 end
 
-function _sample_surface_local(m, d, ctx)
+function _sample_surface_local(m, d, ctx, topo_path::AbstractString)
     bbox = _mesh_target_bbox(m, ctx)
-    topo = _ensure_topography(TOPO_PATH, bbox)
+    topo = _ensure_topography(topo_path, bbox)
 
     datum_candidates = Float64[]
     finite_station_elev = Float64[]
@@ -328,9 +269,9 @@ function _sample_surface_local(m, d, ctx)
     return surface_local, datum_elev
 end
 
-function _derive_topography_data(d, ctx)
+function _derive_topography_data(d, ctx, topo_path::AbstractString)
     bbox = _data_target_bbox(d, ctx)
-    topo = _ensure_topography(TOPO_PATH, bbox)
+    topo = _ensure_topography(topo_path, bbox)
 
     station_elev_abs = Vector{Float64}(undef, d.ns)
     for i in 1:d.ns
@@ -366,7 +307,8 @@ function design_mesh(sx, sy, T; ρ_bg, dx_core, dy_core, nx_pad, ny_pad,
                      pad_factor, z_first, z_factor, depth_mult,
                      nx_core = nothing, ny_core = nothing,
                      surface_local_range = nothing, n_air = 0,
-                     air_factor = AIR_FACTOR, air_first = nothing)
+                     air_factor = 1.35, air_first = nothing,
+                     air_first_div = 2.0)
     dxc = max(1.0, dx_core)
     dyc = max(1.0, dy_core)
     nx_pad = max(0, nx_pad)
@@ -388,8 +330,8 @@ function design_mesh(sx, sy, T; ρ_bg, dx_core, dy_core, nx_pad, ny_pad,
     origin_y = y0 - sum(pady)
 
     Tmin, Tmax = minimum(T), maximum(T)
-    δmin = skin_depth(ρ_bg, Tmin)
-    δmax = skin_depth(ρ_bg, Tmax)
+    δmin = _skin_depth(ρ_bg, Tmin)
+    δmax = _skin_depth(ρ_bg, Tmax)
     z_target = depth_mult * δmax
 
     ground_dz = Float64[]
@@ -405,7 +347,7 @@ function design_mesh(sx, sy, T; ρ_bg, dx_core, dy_core, nx_pad, ny_pad,
     origin_z = 0.0
     if surface_local_range !== nothing && Int(n_air) > 0
         surface_min = Float64(surface_local_range[1])
-        air_seed = air_first === nothing ? max(5.0, z_first / AIR_FIRST_DIV) : max(1.0, Float64(air_first))
+        air_seed = air_first === nothing ? max(5.0, z_first / air_first_div) : max(1.0, Float64(air_first))
         air_dz = reverse([air_seed * air_factor^(i - 1) for i in 1:Int(n_air)])
         origin_z = surface_min - sum(air_dz)
     end
@@ -489,7 +431,7 @@ function _write_start_model_ws(path::AbstractString, m; rotation::Real = 0.0)
     origin_z = m.origin[3] + sum(m.dz[1:nz_air])
 
     open(path, "w") do io
-        println(io, "# Written by MTGeophysics.jl make_mesh_modem WS-compatible earth-only model")
+        println(io, "# Written by MTGeophysics.jl MakeMesh3D WS-compatible earth-only model")
         println(io, "$(m.nx) $(m.ny) $(nz_earth) 0 LOGE")
 
         for v in m.dx; print(io, "$v "); end; println(io)
@@ -523,11 +465,11 @@ end
 
 function write_covariance_file(path::AbstractString, mask::Array{<:Integer, 3};
                                cov_x::Real, cov_y::Real, cov_z::Real,
-                               n_apply::Integer = COV_APPLY,
+                               n_apply::Integer = 2,
                                exceptions::Vector{Tuple{Int, Int, Float64}} = Tuple{Int, Int, Float64}[])
     nx, ny, nz = size(mask)
     open(path, "w") do io
-        print(io, COV_HEADER)
+        print(io, _MESH_COV_HEADER)
         println(io)
         @printf(io, " %d %12d %12d \n\n", nx, ny, nz)
         _print_real_line(io, fill(Float64(cov_x), nz))
@@ -730,7 +672,11 @@ end
 function build_mesh_bundle(d, sx, sy, Tobs;
                            ρ_bg, dx_core, dy_core, nx_core, ny_core,
                            nx_pad, ny_pad, pad_factor, z_first, z_factor, depth_mult,
-                           cov_value, topo_ctx = nothing)
+                           cov_value, topo_ctx = nothing,
+                           topo_path::AbstractString = "",
+                           n_air::Int = 6, air_factor::Real = 1.35,
+                           air_first_div::Real = 2.0)
+    use_topo = !isempty(strip(topo_path))
     base = design_mesh(sx, sy, Tobs;
         ρ_bg = Float64(ρ_bg),
         dx_core = Float64(dx_core),
@@ -746,9 +692,9 @@ function build_mesh_bundle(d, sx, sy, Tobs;
 
     surface_local = nothing
     datum_elev = NaN
-    if USE_TOPO
+    if use_topo
         topo_ctx === nothing && error("Topography mode was requested without a valid projection context.")
-        surface_local, datum_elev = _sample_surface_local(base, d, topo_ctx)
+        surface_local, datum_elev = _sample_surface_local(base, d, topo_ctx, topo_path)
         base = design_mesh(sx, sy, Tobs;
             ρ_bg = Float64(ρ_bg),
             dx_core = Float64(dx_core),
@@ -762,9 +708,9 @@ function build_mesh_bundle(d, sx, sy, Tobs;
             z_factor = Float64(z_factor),
             depth_mult = Float64(depth_mult),
             surface_local_range = (minimum(surface_local), maximum(surface_local)),
-            n_air = AIR_LAYERS,
-            air_factor = AIR_FACTOR,
-            air_first = max(5.0, Float64(z_first) / AIR_FIRST_DIV))
+            n_air = n_air,
+            air_factor = Float64(air_factor),
+            air_first = max(5.0, Float64(z_first) / air_first_div))
     end
 
     site_surface = (
@@ -782,348 +728,138 @@ function build_mesh_bundle(d, sx, sy, Tobs;
     site_air = _site_air_report((; base..., A = A, cov_mask = cov_mask), d)
     return (; base..., A = A, cov_mask = cov_mask, cov_value = Float64(cov_value),
               topo_active = surface_local !== nothing,
-              topo_name = surface_local === nothing ? "flat" : basename(TOPO_PATH),
+              topo_name = surface_local === nothing ? "flat" : basename(topo_path),
               datum_elev = datum_elev,
               site_surface = site_surface,
               site_air = site_air)
 end
 
-function save_outputs(m, d_out, d_topo_diag)
-    _write_start_model_ws(OUT_PATH, m; rotation = 0.0)
-    write_covariance_file(OUT_COV_PATH, m.cov_mask; cov_x = m.cov_value, cov_y = m.cov_value, cov_z = m.cov_value)
+function _save_mesh_outputs(m, out_model::AbstractString, out_cov::AbstractString;
+                            cov_apply::Integer = 2)
+    mkpath(dirname(abspath(out_model)))
+    mkpath(dirname(abspath(out_cov)))
+    _write_start_model_ws(out_model, m; rotation = 0.0)
+    write_covariance_file(out_cov, m.cov_mask;
+        cov_x = m.cov_value, cov_y = m.cov_value, cov_z = m.cov_value,
+        n_apply = cov_apply)
     _print_site_surface_report(m)
     _print_site_air_report(m)
     return nothing
 end
 
-#----- snap a value to the nearest in a range -----
-snap(v, r) = collect(r)[argmin(abs.(collect(r) .- v))]
+function MakeMesh3D(data_file::AbstractString;
+    out_model::AbstractString = joinpath(dirname(abspath(data_file)), "mesh_start_model.rho"),
+    out_covariance::AbstractString = joinpath(dirname(out_model), "C3.dat"),
+    topo_file::AbstractString = "",
+    topo_crs::AbstractString = "EPSG:26918",
+    cov_value::Real = 0.3,
+    cov_apply::Int = 2,
+    mode::Symbol = :gui,
+    cell_width_frac::Real = 0.5,
+    n_pad::Int = 12,
+    pad_factor::Real = 1.5,
+    first_layer_div::Real = 4.0,
+    vertical_factor::Real = 1.2,
+    depth_mult::Real = 3.0,
+    air_layers::Int = 6,
+    air_factor::Real = 1.35,
+    air_first_div::Real = 2.0,
+    colormap = :Spectral,
+    resistivity_range = (0.0, 4.0),
+    site_color = :black,
+    site_size_full = 6,
+    site_size_core = 5,
+    grid_color = (:grey, 0.7),
+    grid_linewidth = 1.0,
+    fig_size = (1500, 1000),
+    interactive::Bool = true)
 
-d_raw = load_data_modem(DATA_PATH)
-d_raw.name = DATA_PATH
-d_raw.origin = collect(Float64.(d_raw.origin))
-d_raw.loc = Float64.(d_raw.loc)
-topo_ctx = _local_tm_to_target_context(d_raw, TOPO_CRS)
-d, d_topo_diag = _derive_topography_data(d_raw, topo_ctx)
-sx = collect(Float64.(d.x))
-sy = collect(Float64.(d.y))
-Tobs = collect(Float64.(d.T))
+    mode in (:gui, :nogui) || error("mode must be :gui or :nogui, got $mode")
+    isempty(data_file) && error("data_file is required")
+    isfile(data_file) || error("Data file not found: $data_file")
 
-spacing = nearest_neighbour_spacing(sx, sy)
-ρ_off = filter(x -> isfinite(x) && x > 0, vec(d.ρ[:, [2, 3], :]))
-ρ_bg_data = isempty(ρ_off) ? 100.0 : median(ρ_off)
-ρ_bg0 = snap(ρ_bg_data, 10:10:20000)
-dx_core0 = snap(spacing.median * CELL_WIDTH_FRAC, 50:25:10000)
-dy_core0 = dx_core0
-span_x0 = max(maximum(sx) - minimum(sx), 1.0)
-span_y0 = max(maximum(sy) - minimum(sy), 1.0)
-nx_core0 = max(1, ceil(Int, span_x0 / dx_core0))
-ny_core0 = max(1, ceil(Int, span_y0 / dy_core0))
-z_first0 = snap(skin_depth(Float64(ρ_bg0), minimum(Tobs)) / FIRST_LAYER_DIV, 5:5:2000)
+    use_topo = !isempty(strip(topo_file))
+    use_topo && (isfile(topo_file) || error("Topography file not found: $topo_file"))
 
-@info @sprintf("Loaded %d sites, %d periods (%.3g–%.3g s); median spacing %.0f m; suggested background ρ = %.0f Ω·m; topography %s; topo-data output %s",
-               length(sx), length(Tobs), minimum(Tobs), maximum(Tobs), spacing.median, ρ_bg_data,
-               basename(TOPO_PATH), basename(OUT_DATA_PATH))
+    d_raw = load_data_modem(data_file)
+    d_raw.name = data_file
+    d_raw.origin = collect(Float64.(d_raw.origin))
+    d_raw.loc = Float64.(d_raw.loc)
+    topo_ctx = _local_tm_to_target_context(d_raw, topo_crs)
 
-if MODE == "nogui"
-    m = build_mesh_bundle(d, sx, sy, Tobs;
-        ρ_bg = Float64(ρ_bg0), dx_core = Float64(dx_core0), dy_core = Float64(dy_core0),
-        nx_core = nx_core0, ny_core = ny_core0,
-        nx_pad = N_PAD, ny_pad = N_PAD,
-        pad_factor = PAD_FACTOR, z_first = Float64(z_first0), z_factor = VERTICAL_FACTOR,
-        depth_mult = DEPTH_MULT, cov_value = COV_VALUE0, topo_ctx = topo_ctx)
-    @printf("grid %d×%d×%d (%d cells); core %d×%d @ %.0f×%.0f m; air %d; max sites/cell %d; occupied %.0f%%; pad %.0f km/side; depth %.0f km; cov %.2f (topography + sites)\n",
-        m.nx, m.ny, m.nz, m.nx * m.ny * m.nz, m.nx_core, m.ny_core, m.dx_core, m.dy_core,
-        m.nz_air, m.maxper, 100 * m.occupied, m.pad_extent_km, m.depth_km, m.cov_value)
-    save_outputs(m, d, d_topo_diag)
-    @printf("wrote %s\n", OUT_PATH)
-    @printf("wrote %s\n", OUT_COV_PATH)
-    @printf("wrote %s\n", OUT_DATA_PATH)
-    exit(0)
-end
-
-#----- rectangle outline for the core box -----
-corner_points(yl, yh, xl, xh) = [Point2f(yl, xl), Point2f(yh, xl), Point2f(yh, xh),
-                                 Point2f(yl, xh), Point2f(yl, xl)]
-
-#----- check the mesh and advise what to fix -----
-function suggestions(m)
-    msgs = String[]
-    m.maxper > 1 && push!(msgs,
-        "• More than one site falls in some cells — decrease 'Core cell N–S (m)' / 'Core cell E–W (m)'.")
-    m.pad_ok || push!(msgs,
-        "• Lateral padding is too small — increase 'Pad cells N–S' / 'Pad cells E–W' or 'Pad factor'; " *
-        "the boundary should sit at least one skin depth at the longest period (δ(Tmax)) from the core.")
-    m.depth_km < m.δmax_km && push!(msgs,
-        "• Model is too shallow — increase 'Depth × δ(Tmax)' so the mesh spans the depth of investigation.")
-    !isempty(m.site_surface.impossible) && push!(msgs,
-        "• Some sites still sit above the shallowest available earth cell — reduce the top air thickness or revise the topography/datum so the earth model starts above those site elevations.")
-    m.site_air.ok || push!(msgs, m.site_air.text * " " * m.site_air.fix)
-    ok = isempty(msgs)
-    text = ok ? "✓ Mesh looks well-sized for ModEM inversion." : join(msgs, "    ")
-    return (text = text, ok = ok)
-end
-
-const PARAM_HELP = Dict(
-    "Core cell N–S (m)" =>
-        "Core cell width in the N–S (X) direction, in metres. Use about half the " *
-        "station spacing so no cell holds more than one site and structure between " *
-        "stations is resolved. Smaller = finer resolution but more cells and slower.",
-    "Core cell E–W (m)" =>
-        "Core cell width in the E–W (Y) direction, in metres. Use about half the " *
-        "station spacing so no cell holds more than one site and structure between " *
-        "stations is resolved. Smaller = finer resolution but more cells and slower.",
-    "Core cells N–S" =>
-        "Number of core cells in the N–S (X) direction. Independent of 'Core cell N–S (m)': " *
-        "the core spans count × cell width, centred on the stations.",
-    "Core cells E–W" =>
-        "Number of core cells in the E–W (Y) direction. Independent of 'Core cell E–W (m)': " *
-        "the core spans count × cell width, centred on the stations.",
-    "ρ background (Ω·m)" =>
-        "Half-space resistivity that fills the starting model. It also sets the skin " *
-        "depths that size the vertical mesh and padding. The default is suggested from " *
-        "the median off-diagonal apparent resistivity of the data.",
-    "Pad factor" =>
-        "Geometric growth ratio of the padding cells (~1.4–1.6). A larger ratio expands " *
-        "the grid quickly with few cells so the boundaries sit far from the sites.",
-    "Pad cells N–S" =>
-        "Number of padding cells added on each side in N–S (X). More cells push the " *
-        "boundary farther out; it should reach ≥ one skin depth at the longest period " *
-        "δ(Tmax) so boundary conditions do not affect the core.",
-    "Pad cells E–W" =>
-        "Number of padding cells added on each side in E–W (Y). More cells push the " *
-        "boundary farther out; it should reach ≥ one skin depth at the longest period " *
-        "δ(Tmax) so boundary conditions do not affect the core.",
-    "First layer (m)" =>
-        "Thickness of the top vertical cell. Set from the shortest-period skin depth " *
-        "(≈ δ(Tmin) / 4) so the shallowest structure the data sees is resolved.",
-    "Vertical factor" =>
-        "Geometric growth of layer thickness with depth (~1.1–1.3). Larger = fewer " *
-        "layers but coarser resolution at depth.",
-    "Depth × δ(Tmax)" =>
-        "Model bottom depth as a multiple of the longest-period skin depth δ(Tmax). " *
-        "Use ≥ 1 so the model spans the depth of investigation; ~1.5 is typical.",
-    "Covariance" =>
-        "Recursive autoregression smoothing value written into the ModEM covariance file. " *
-        "Use 0 to turn smoothing off, ~0.1 for weak smoothing, and ~0.3 for moderate smoothing.",
-)
-
-#----- draw the map view of the mesh -----
-function draw2d!(ax, m)
-    heatmap!(ax, m.y_edges_km, m.x_edges_km, fill(log10(m.ρ_bg), m.ny, m.nx);
-             colormap = CMAP, colorrange = CRANGE)
-    vlines!(ax, m.y_edges_km; color = GRID_COLOR, linewidth = GRID_WIDTH)
-    hlines!(ax, m.x_edges_km; color = GRID_COLOR, linewidth = GRID_WIDTH)
-    lines!(ax, corner_points(m.core_y0_km, m.core_y1_km, m.core_x0_km, m.core_x1_km);
-           color = :black, linewidth = 2.5)
-    scatter!(ax, sy ./ 1000, sx ./ 1000; color = SITE_COLOR, marker = :circle,
-             markersize = site_size)
-    return ax
-end
-
-fig = Figure(size = FIG_SIZE, figure_padding = (40, 14, 14, 14))
-
-status = Observable("Outputs → $(basename(OUT_PATH)), $(basename(OUT_COV_PATH)), $(basename(OUT_DATA_PATH))")
-help_obs = Observable("Click  ?  next to a parameter for an explanation.")
-sug_obs = Observable("")
-sug_color = Observable(RGBf(0.15, 0.5, 0.25))
-show_full = Observable(true)
-site_size = Observable(SITE_SIZE_FULL)
-
-Colorbar(fig[1, 3]; colormap = CMAP, colorrange = CRANGE,
-    label = "log₁₀ ρ (Ω·m)", width = 16)
-
-left = GridLayout(fig[1, 1]; valign = :top)
-
-infotext = join([
-    @sprintf("datafile  >  %s", basename(DATA_PATH)),
-    @sprintf("sites     >  %d", length(sx)),
-    @sprintf("periods   >  %d   (%.3g – %.3g s)", length(Tobs), minimum(Tobs), maximum(Tobs)),
-    @sprintf("spacing   >  %.1f km", spacing.median / 1000),
-    @sprintf("rho(data) >  %.0f ohm-m", ρ_bg_data),
-    @sprintf("topo      >  %s", USE_TOPO ? basename(TOPO_PATH) : "off"),
-    @sprintf("cov(mode) >  topography + site elevations"),
-    @sprintf("cov(out)  >  %s", basename(OUT_COV_PATH)),
-], "\n")
-Label(left[1, 1:3], infotext; font = "Consolas", fontsize = 13, halign = :left,
-    justification = :left, color = :gray25, tellwidth = false)
-
-next_row = Ref(1)
-
-function add_param!(name, default; isint = false)
-    r = (next_row[] += 1)
-    Label(left[r, 1], name; halign = :right, fontsize = 13)
-    s = isint ? string(Int(round(default))) : string(default)
-    tb = Textbox(left[r, 2]; stored_string = s, validator = Float64, width = 84)
-    ib = Button(left[r, 3]; label = "?", fontsize = 13, width = 26)
-    on(ib.clicks) do _
-        help_obs[] = get(PARAM_HELP, name, "")
-    end
-    return tb
-end
-
-tb_dx   = add_param!("Core cell N–S (m)", dx_core0; isint = true)
-tb_dy   = add_param!("Core cell E–W (m)", dy_core0; isint = true)
-tb_nxc  = add_param!("Core cells N–S", nx_core0; isint = true)
-tb_nyc  = add_param!("Core cells E–W", ny_core0; isint = true)
-tb_rho  = add_param!("ρ background (Ω·m)", ρ_bg0; isint = true)
-tb_npx  = add_param!("Pad cells N–S", N_PAD; isint = true)
-tb_npy  = add_param!("Pad cells E–W", N_PAD; isint = true)
-tb_pf   = add_param!("Pad factor", PAD_FACTOR)
-tb_zf   = add_param!("First layer (m)", z_first0; isint = true)
-tb_zfac = add_param!("Vertical factor", VERTICAL_FACTOR)
-tb_dm   = add_param!("Depth × δ(Tmax)", DEPTH_MULT)
-tb_cov  = add_param!("Covariance", COV_VALUE0)
-
-updatebtn = Button(left[(next_row[] += 1), 1:3]; label = "Update mesh", fontsize = 14)
-
-viewgrid = GridLayout(left[(next_row[] += 1), 1:3])
-corefullbtn = Button(viewgrid[1, 1]; label = "Show core", fontsize = 14, tellwidth = false)
-resetbtn    = Button(viewgrid[1, 2]; label = "Reset zoom", fontsize = 14, tellwidth = false)
-colsize!(viewgrid, 1, Relative(0.5)); colsize!(viewgrid, 2, Relative(0.5))
-colgap!(viewgrid, 8)
-
-actiongrid = GridLayout(left[(next_row[] += 1), 1:3])
-savebtn   = Button(actiongrid[1, 1]; label = "Save model + cov + data", fontsize = 14, tellwidth = false)
-exportbtn = Button(actiongrid[1, 2]; label = "Export figure", fontsize = 14, tellwidth = false)
-colsize!(actiongrid, 1, Relative(0.5)); colsize!(actiongrid, 2, Relative(0.5))
-colgap!(actiongrid, 8)
-
-rowgap!(left, 7)
-colgap!(left, 8)
-colsize!(left, 2, Fixed(86))
-colsize!(left, 3, Fixed(26))
-
-Label(fig[2, 1:3], sug_obs; fontsize = 13, halign = :left, justification = :left,
-    color = sug_color, word_wrap = true, tellwidth = false)
-Label(fig[3, 1:3], help_obs; fontsize = 12.5, halign = :left, justification = :left,
-    color = :gray30, word_wrap = true, tellwidth = false)
-Label(fig[4, 1:3], status; fontsize = 11, halign = :left, color = :gray45,
-    word_wrap = true, tellwidth = false)
-
-colsize!(fig.layout, 1, Fixed(290))
-colsize!(fig.layout, 3, Fixed(70))
-rowsize!(fig.layout, 1, Relative(0.82))
-for r in 2:4
-    rowsize!(fig.layout, r, Auto())
-end
-rowgap!(fig.layout, 6)
-
-tbget(tb, dflt) = begin
-    s = tb.displayed_string[]
-    (s === nothing || isempty(strip(s))) && return dflt
-    v = tryparse(Float64, s)
-    v === nothing ? dflt : v
-end
-
-function build_mesh()
-    build_mesh_bundle(d, sx, sy, Tobs;
-        ρ_bg = tbget(tb_rho, Float64(ρ_bg0)),
-        dx_core = tbget(tb_dx, Float64(dx_core0)),
-        dy_core = tbget(tb_dy, Float64(dy_core0)),
-        nx_core = Int(round(tbget(tb_nxc, Float64(nx_core0)))),
-        ny_core = Int(round(tbget(tb_nyc, Float64(ny_core0)))),
-        nx_pad = Int(round(tbget(tb_npx, Float64(N_PAD)))),
-        ny_pad = Int(round(tbget(tb_npy, Float64(N_PAD)))),
-        pad_factor = tbget(tb_pf, PAD_FACTOR),
-        z_first = tbget(tb_zf, Float64(z_first0)),
-        z_factor = tbget(tb_zfac, VERTICAL_FACTOR),
-        depth_mult = tbget(tb_dm, DEPTH_MULT),
-        cov_value = tbget(tb_cov, COV_VALUE0),
-        topo_ctx = topo_ctx)
-end
-
-mesh = Observable(build_mesh())
-current_ax = Ref{Any}(nothing)
-
-function apply_limits!(ax, m)
-    if show_full[]
-        xlims!(ax, m.full_y0_km, m.full_y1_km)
-        ylims!(ax, m.full_x0_km, m.full_x1_km)
+    if use_topo
+        d, d_topo_diag = _derive_topography_data(d_raw, topo_ctx, topo_file)
     else
-        padx = 0.05 * (m.core_y1_km - m.core_y0_km)
-        pady = 0.05 * (m.core_x1_km - m.core_x0_km)
-        xlims!(ax, m.core_y0_km - padx, m.core_y1_km + padx)
-        ylims!(ax, m.core_x0_km - pady, m.core_x1_km + pady)
+        d = d_raw
+        d_topo_diag = nothing
     end
-    return nothing
-end
+    sx = collect(Float64.(d.x))
+    sy = collect(Float64.(d.y))
+    Tobs = collect(Float64.(d.T))
 
-function refresh!(m)
-    current_ax[] === nothing || delete!(current_ax[])
-    ax = Axis(fig[1, 2]; xlabel = "Y East (km)", ylabel = "X North (km)",
-        aspect = DataAspect(), halign = :right,
-        xgridvisible = false, ygridvisible = false,
-        xlabelfont = :bold, ylabelfont = :bold,
-        xticklabelcolor = :gray55, yticklabelcolor = :gray55)
-    draw2d!(ax, m)
-    current_ax[] = ax
-    apply_limits!(ax, m)
-    s = suggestions(m)
-    topo_info = m.topo_active ? @sprintf("topo %s · datum %.1f m · air %d", m.topo_name, m.datum_elev, m.nz_air) : "topo flat"
-    site_info = m.site_air.ok ?
-        (m.site_surface.nadjusted == 0 ? "all sites below surface" : @sprintf("all sites below surface (%d auto-adjusted column(s))", m.site_surface.nadjusted)) :
-        @sprintf("%d site(s) in air", m.site_air.nbad)
-    gridinfo = @sprintf("%d × %d × %d cells · core %d × %d (%.0f × %.0f m) · max sites/cell %d · depth %.0f km · cov %.2f (topography + sites) · %s · %s",
-        m.nx, m.ny, m.nz, m.nx_core, m.ny_core, m.dx_core, m.dy_core, m.maxper, m.depth_km, m.cov_value, topo_info, site_info)
-    sug_obs[] = gridinfo * "\n" * s.text
-    sug_color[] = s.ok ? RGBf(0.15, 0.5, 0.25) : RGBf(0.75, 0.2, 0.15)
-    return nothing
-end
+    spacing = nearest_neighbour_spacing(sx, sy)
+    ρ_off = filter(x -> isfinite(x) && x > 0, vec(d.ρ[:, [2, 3], :]))
+    ρ_bg_data = isempty(ρ_off) ? 100.0 : median(ρ_off)
+    ρ_bg0 = _snap(ρ_bg_data, 10:10:20000)
+    dx_core0 = _snap(spacing.median * cell_width_frac, 50:25:10000)
+    dy_core0 = dx_core0
+    span_x0 = max(maximum(sx) - minimum(sx), 1.0)
+    span_y0 = max(maximum(sy) - minimum(sy), 1.0)
+    nx_core0 = max(1, ceil(Int, span_x0 / dx_core0))
+    ny_core0 = max(1, ceil(Int, span_y0 / dy_core0))
+    z_first0 = _snap(_skin_depth(Float64(ρ_bg0), minimum(Tobs)) / first_layer_div, 5:5:2000)
 
-on(mesh) do m
-    refresh!(m)
-end
-refresh!(mesh[])
+    @info @sprintf("Loaded %d sites, %d periods (%.3g–%.3g s); median spacing %.0f m; suggested background ρ = %.0f Ω·m; topography %s",
+                   length(sx), length(Tobs), minimum(Tobs), maximum(Tobs), spacing.median, ρ_bg_data,
+                   use_topo ? basename(topo_file) : "off")
 
-on(updatebtn.clicks) do _
-    mesh[] = build_mesh()
-end
-
-for tb in (tb_dx, tb_dy, tb_nxc, tb_nyc, tb_rho, tb_npx, tb_npy, tb_pf, tb_zf, tb_zfac, tb_dm, tb_cov)
-    on(tb.stored_string) do _
-        mesh[] = build_mesh()
+    if mode === :nogui
+        m = build_mesh_bundle(d, sx, sy, Tobs;
+            ρ_bg = Float64(ρ_bg0), dx_core = Float64(dx_core0), dy_core = Float64(dy_core0),
+            nx_core = nx_core0, ny_core = ny_core0,
+            nx_pad = n_pad, ny_pad = n_pad,
+            pad_factor = pad_factor, z_first = Float64(z_first0), z_factor = vertical_factor,
+            depth_mult = depth_mult, cov_value = cov_value, topo_ctx = topo_ctx,
+            topo_path = topo_file, n_air = air_layers, air_factor = air_factor,
+            air_first_div = air_first_div)
+        @printf("grid %d×%d×%d (%d cells); core %d×%d @ %.0f×%.0f m; air %d; max sites/cell %d; occupied %.0f%%; pad %.0f km/side; depth %.0f km; cov %.2f\n",
+            m.nx, m.ny, m.nz, m.nx * m.ny * m.nz, m.nx_core, m.ny_core, m.dx_core, m.dy_core,
+            m.nz_air, m.maxper, 100 * m.occupied, m.pad_extent_km, m.depth_km, m.cov_value)
+        _save_mesh_outputs(m, out_model, out_covariance; cov_apply = cov_apply)
+        @printf("wrote %s\n", out_model)
+        @printf("wrote %s\n", out_covariance)
+        return m
     end
-end
 
-on(corefullbtn.clicks) do _
-    show_full[] = !show_full[]
-    corefullbtn.label[] = show_full[] ? "Show core" : "Show full"
-    site_size[] = show_full[] ? SITE_SIZE_FULL : SITE_SIZE_CORE
-    current_ax[] === nothing || apply_limits!(current_ax[], mesh[])
-end
+    isdefined(MTGeophysics, :_make_mesh3D_gui) ||
+        error("GLMakie is not available; use mode = :nogui on headless systems")
 
-on(resetbtn.clicks) do _
-    current_ax[] === nothing || apply_limits!(current_ax[], mesh[])
-end
-
-on(savebtn.clicks) do _
-    m = mesh[]
-    save_outputs(m)
-    air_status = m.site_air.ok ?
-        (m.site_surface.nadjusted == 0 ? "all sites below surface" : @sprintf("all sites below surface after %d auto-adjusted column(s)", m.site_surface.nadjusted)) :
-        @sprintf("WARNING: %d site(s) in air; see guidance above", m.site_air.nbad)
-    status[] = @sprintf("Saved %d×%d×%d model → %s | covariance %.2f (topography + sites) → %s | %s", m.nx, m.ny, m.nz, OUT_PATH, m.cov_value, OUT_COV_PATH, air_status)
-    @info status[]
-end
-
-on(exportbtn.clicks) do _
-    m = mesh[]
-    ts = Dates.format(Dates.now(), "yyyymmdd_HHMMSS")
-    efig = Figure(size = (1200, 1000))
-    eax = Axis(efig[1, 1]; xlabel = "Y East (km)", ylabel = "X North (km)",
-        aspect = DataAspect(), halign = :right, xgridvisible = false, ygridvisible = false)
-    draw2d!(eax, m)
-    apply_limits!(eax, m)
-    Colorbar(efig[1, 2]; colormap = CMAP, colorrange = CRANGE,
-        label = "log₁₀ ρ (Ω·m)", width = 16)
-    fn = joinpath(dirname(OUT_PATH), "mesh_map_$ts.png")
-    save(fn, efig; px_per_unit = 3)
-    status[] = "Saved figure → $fn"
-    @info status[]
-end
-
-screen = GLMakie.Screen(fig.scene)
-if !isinteractive()
-    wait(screen)
+    return _make_mesh3D_gui(;
+        data_file = data_file,
+        out_model = out_model,
+        out_covariance = out_covariance,
+        topo_file = topo_file,
+        cov_value = cov_value,
+        cov_apply = cov_apply,
+        n_pad = n_pad,
+        pad_factor = pad_factor,
+        vertical_factor = vertical_factor,
+        depth_mult = depth_mult,
+        air_layers = air_layers,
+        air_factor = air_factor,
+        air_first_div = air_first_div,
+        colormap = colormap,
+        resistivity_range = resistivity_range,
+        site_color = site_color,
+        site_size_full = site_size_full,
+        site_size_core = site_size_core,
+        grid_color = grid_color,
+        grid_linewidth = grid_linewidth,
+        fig_size = fig_size,
+        interactive = interactive,
+        d = d, sx = sx, sy = sy, Tobs = Tobs,
+        spacing = spacing, ρ_bg_data = ρ_bg_data,
+        ρ_bg0 = ρ_bg0, dx_core0 = dx_core0, dy_core0 = dy_core0,
+        nx_core0 = nx_core0, ny_core0 = ny_core0, z_first0 = z_first0,
+        topo_ctx = topo_ctx)
 end
