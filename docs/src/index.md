@@ -41,9 +41,16 @@ julia --project=. examples/run_vfsa2D.jl
 julia --project=. examples/run_vfsa3D.jl
 
 # Interactive 3-D viewers (requires GLMakie)
-julia --project=. examples/plot_model_XYZ.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat
-julia --project=. examples/plot_model_XY_slices.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat EPSG:32610
-julia --project=. examples/plot_model_XY_with_shapefiles.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat EPSG:32610
-julia --project=. examples/plot_model_XZ_slices.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat
-julia --project=. examples/plot_model_YZ_slices.jl examples/cascadia/cascad_half_inverse.ws examples/cascadia/cascad_errfl5.dat
+julia --project=. examples/plot_model_XYZ.jl <model.ws> <data.dat>
+julia --project=. examples/plot_model_XY_slices.jl <model.ws> <data.dat> EPSG:32610
+julia --project=. examples/plot_model_XY_with_shapefiles.jl <model.ws> <data.dat> EPSG:32610
+julia --project=. examples/plot_model_XZ_slices.jl <model.ws> <data.dat>
+julia --project=. examples/plot_model_YZ_slices.jl <model.ws> <data.dat>
 ```
+
+The 3-D viewers and model editors are exported by the package, so they can also
+be called directly — `PlotModelXYZ(model, data)`, `EditModelByLayers(model)` —
+without a repository checkout. The Cascadia model used in the
+[3D Visualization](visualization3d.md) examples is not distributed with the
+package; see [Example data](visualization3d.md#Example-data) for the download
+link.

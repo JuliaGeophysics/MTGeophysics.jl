@@ -5,14 +5,34 @@ Interactive tools for modifying 3D resistivity models with visual feedback.
 !!! note
     Requires GLMakie and a working OpenGL environment.
 
+Both editors are exported by the package, so they work from any Julia session
+after `using MTGeophysics`. The scripts under `examples/` are thin command-line
+wrappers around the same functions.
+
+The model used below is the **Cascadia** example from the ModEM example
+collection, which is not distributed with this package — see
+[Example data](visualization3d.md#Example-data) for where to download it.
+
+```julia
+using MTGeophysics
+
+model_file = "examples/Cascadia/cascad_half_inverse.ws"
+```
+
 ## Replace slice resistivity
 
 Replace resistivity below a chosen depth layer, with control over whether the
 edit applies to the core model only or to the full model including lateral
 padding.
 
+```julia
+EditModelByLayers(model_file; target_resistivity = 1000.0)
+```
+
+From a repository checkout:
+
 ```bash
-julia --project=. examples/manipulate_model_by_layers.jl examples/cascadia/cascad_half_inverse.ws
+julia --project=. examples/manipulate_model_by_layers.jl <model.ws>
 ```
 
 ![Replace Slice Resistivity Viewer](assets/replace_slice_resistivity_scope.png)
@@ -30,20 +50,23 @@ julia --project=. examples/manipulate_model_by_layers.jl examples/cascadia/casca
 
 ### Configuration
 
-Pass the model path on the command line. Edit the remaining controls at the top
-of the script:
+Pass the controls as keyword arguments (the scripts expose the same names as
+variables at the top of the file):
 
 ```julia
-target_resistivity      = 1000.0     # replacement value (Ω·m)
-blend_previous_percent  = 0          # 0-100, blend the layer above cutoff
-replace_scope           = :core_only # or :full_model
-
-log10_scale       = true
-colormap          = Reverse(:turbo)
-with_padding      = true
-max_depth         = nothing          # nothing = show all layers
-resistivity_range = (0.0, 4.0)       # log₁₀ scale colour limits
+EditModelByLayers(model_file;
+    target_resistivity     = 1000.0,          # replacement value (Ω·m)
+    blend_previous_percent = 0,               # 0-100, blend the layer above cutoff
+    log10_scale            = true,
+    colormap               = Reverse(:turbo),
+    with_padding           = true,
+    max_depth              = nothing,         # nothing = show all layers
+    resistivity_range      = (0.0, 4.0),      # log₁₀ scale colour limits
+)
 ```
+
+The core-only / full-model scope is chosen interactively with the
+*Show Core Model / Show Full Model* button.
 
 ### Output
 
@@ -58,8 +81,14 @@ Saved models include metadata in the header:
 Draw polygon zones on depth slices and replace resistivity within selected
 depth intervals. Supports undo, transition layers, and optional all-depths mode.
 
+```julia
+EditModelByDrawing(model_file; replacement_resistivity = 10000.0)
+```
+
+From a repository checkout:
+
 ```bash
-julia --project=. examples/manipulate_model_by_drawing.jl examples/cascadia/cascad_half_inverse.ws
+julia --project=. examples/manipulate_model_by_drawing.jl <model.ws>
 ```
 
 ![Draw and Replace Zone Editor](assets/draw_and_replace.png)
@@ -77,15 +106,15 @@ julia --project=. examples/manipulate_model_by_drawing.jl examples/cascadia/casc
 
 ### Configuration
 
-Pass the model path on the command line. Edit the remaining controls at the top
-of the script:
-
 ```julia
-replacement_resistivity = 10000.0
-layers_above            = 2
-layers_below            = 2
-transition_layers       = 1
-apply_to_all_depths     = false
+EditModelByDrawing(model_file;
+    replacement_resistivity = 10000.0,
+    layers_above            = 2,
+    layers_below            = 2,
+    transition_layers       = 1,
+    apply_to_all_depths     = false,
+    depth_range             = (0.0, 50000.0),
+)
 ```
 
 

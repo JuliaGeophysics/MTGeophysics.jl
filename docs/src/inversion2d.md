@@ -8,8 +8,6 @@ Run a 2D magnetotelluric inversion using Very Fast Simulated Annealing (VFSA) wi
 
 ![VFSA observed data maps](assets/vfsa2d_plot_data_obs_maps.png)
 
-![VFSA convergence animation](assets/vfsa2d_convergence.gif)
-
 ## Running the example
 
 ```bash
