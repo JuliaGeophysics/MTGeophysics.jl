@@ -1,11 +1,25 @@
 <h1 align="center">MTGeophysics.jl</h1>
 
-<p align="center"><em>Magnetotelluric modelling, inversion, and visualization workflows in Julia.</em></p>
+<p align="center"><em>A software repository for magnetotelluric research and applications.</em></p>
 
 <p align="center">
-	<a href="https://juliageophysics.github.io/MTGeophysics.jl/dev/">Documentation</a> |
-	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/issues">Issues</a> |
-	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/releases">Releases</a>
+	<a href="https://juliageophysics.github.io/MTGeophysics.jl/stable/"><img src="https://img.shields.io/badge/docs-stable-blue.svg" alt="Documentation (stable)"></a>
+	<a href="https://juliageophysics.github.io/MTGeophysics.jl/dev/"><img src="https://img.shields.io/badge/docs-dev-blue.svg" alt="Documentation (dev)"></a>
+	<a href="https://joss.theoj.org/papers/e45b75b003b013751a4a2e1a51314103"><img src="https://joss.theoj.org/papers/e45b75b003b013751a4a2e1a51314103/status.svg" alt="JOSS status"></a>
+	<a href="https://juliahub.com/ui/Packages/General/MTGeophysics"><img src="https://juliahub.com/docs/General/MTGeophysics/stable/version.svg" alt="Registry version"></a>
+	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/releases"><img src="https://img.shields.io/github/v/release/JuliaGeophysics/MTGeophysics.jl?label=release&color=blue" alt="Latest release"></a>
+	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/blob/main/LICENSE.md"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT license"></a>
+</p>
+
+<p align="center">
+	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/actions/workflows/CI.yml"><img src="https://github.com/JuliaGeophysics/MTGeophysics.jl/actions/workflows/CI.yml/badge.svg" alt="CI"></a>
+	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/actions/workflows/Documenter.yml"><img src="https://github.com/JuliaGeophysics/MTGeophysics.jl/actions/workflows/Documenter.yml/badge.svg" alt="Documentation build"></a>
+	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/stargazers"><img src="https://img.shields.io/github/stars/JuliaGeophysics/MTGeophysics.jl?label=stars&color=dfb317" alt="GitHub stars"></a>
+	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/forks"><img src="https://img.shields.io/github/forks/JuliaGeophysics/MTGeophysics.jl?label=forks&color=97ca00" alt="GitHub forks"></a>
+	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/discussions"><img src="https://img.shields.io/github/discussions/JuliaGeophysics/MTGeophysics.jl?label=discussions" alt="Discussions"></a>
+	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/issues"><img src="https://img.shields.io/github/issues/JuliaGeophysics/MTGeophysics.jl?label=open%20issues" alt="Open issues"></a>
+	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/issues?q=is%3Aissue+is%3Aclosed"><img src="https://img.shields.io/github/issues-closed/JuliaGeophysics/MTGeophysics.jl?label=closed%20issues&color=8250df" alt="Closed issues"></a>
+	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/blob/main/CONTRIBUTING.md"><img src="https://img.shields.io/badge/contributing-guide-blueviolet" alt="Contributing guide"></a>
 </p>
 
 ---
@@ -86,6 +100,22 @@ result = VFSA2DMT(
 > Note: this is a quick demonstration workflow. For production-quality inversion, tune the number of VFSA iterations, number of chains, cooling schedule, regularization, and uncertainty/ensemble controls for your survey and model size.
 
 See the [documentation](https://juliageophysics.github.io/MTGeophysics.jl/dev/) for the full 1D/2D/3D workflows, ensemble statistics and convergence animations, ModEM I/O, configuration options, and the interactive 3D viewers.
+
+## Contributing
+
+Bug reports, feature requests, and pull requests are welcome — see
+[CONTRIBUTING.md](CONTRIBUTING.md). Questions and usage discussion belong in
+[Discussions](https://github.com/JuliaGeophysics/MTGeophysics.jl/discussions);
+reproducible problems belong in [Issues](https://github.com/JuliaGeophysics/MTGeophysics.jl/issues).
+
+## Citing
+
+If MTGeophysics.jl contributes to your work, please cite the software paper
+(currently under review at the [Journal of Open Source Software](https://joss.theoj.org/papers/e45b75b003b013751a4a2e1a51314103)).
+
+## License
+
+MIT — see [LICENSE.md](LICENSE.md).
 
 # Research using this code 
 
