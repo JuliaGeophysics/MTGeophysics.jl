@@ -61,7 +61,7 @@ principle. It provides a stochastic inversion workflow based on Very Fast
 Simulated Annealing (VFSA) [@SenStoffa2013] that produces an *ensemble* of
 plausible 3D models, from which ensemble statistics (mean, median, standard
 deviation) give a per-voxel picture of what the data do and do not constrain.
-Crucially, the workflow reuses the community-standard ModEM forward
+The workflow reuses the community-standard ModEM forward
 solver [@Egbert2012; @Kelbert2014] by reading and writing its native file
 formats, so it slots into established MT practice without asking users to
 change their models, data, or solver.
@@ -194,6 +194,16 @@ constrained and where it is not, information no single deterministic
 inversion provides. Its reduced-parameterisation design is a deliberate step
 toward fully probabilistic MT inversion, and its reusable Julia components are
 meant to serve as a foundation for the broader JuliaGeophysics ecosystem.
+
+The package and the research built on it have been presented to the
+geophysics and scientific-computing communities by Pankaj K. Mishra and
+Cédric Patzer, including at the EGU General Assembly 2026, the 27th
+Electromagnetic Induction Workshop (EMIW 2026), and JuliaCon 2026.
+MTGeophysics.jl was also used to participate in the
+[MT3DINV-4 workshop](https://mt3dinv4.mtnet.info/Real_data.html)
+(Memorial University of Newfoundland, 2025), a community 3D MT inversion
+benchmarking exercise in which many groups inverted a common real field
+dataset acquired over the Raglan mining district in northern Quebec, Canada.
 
 # AI usage disclosure
 
