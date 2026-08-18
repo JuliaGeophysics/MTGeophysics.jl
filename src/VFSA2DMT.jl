@@ -812,6 +812,16 @@ function AnalyseEnsemble2D(
     )
 end
 
+# log axes need a non-degenerate positive range; a single-iteration run gives one
+# value and makie then lays out tick labels as NaN and errors on save
+function _bracket_log_axis!(axis, values::AbstractVector{<:Real})
+    finite = filter(v -> isfinite(v) && v > 0, values)
+    isempty(finite) && return
+    low, high = extrema(finite)
+    low == high && ylims!(axis, low / 10, high * 10)
+    return
+end
+
 function _plot_mt2d_vfsa_convergence(path::AbstractString, chains::AbstractVector{MT2DChainResult})
     CairoMakie.activate!()
     mkpath(dirname(path))
@@ -824,6 +834,8 @@ function _plot_mt2d_vfsa_convergence(path::AbstractString, chains::AbstractVecto
 
     offset = 0
     plotted = false
+    all_best_chi2 = Float64[]
+    all_temperature = Float64[]
     for chain in chains
         isempty(chain.iterations) && continue
         x = offset .+ getfield.(chain.iterations, :iteration)
@@ -838,9 +850,14 @@ function _plot_mt2d_vfsa_convergence(path::AbstractString, chains::AbstractVecto
         lines!(ax2, x, current_rms, linewidth = 3, label = label)
         lines!(ax3, x, temperature, linewidth = 3, label = label)
         lines!(ax4, x, rolling, linewidth = 3, label = label)
+        append!(all_best_chi2, best_chi2)
+        append!(all_temperature, temperature)
         offset += length(chain.iterations)
         plotted = true
     end
+
+    _bracket_log_axis!(ax1, all_best_chi2)
+    _bracket_log_axis!(ax3, all_temperature)
 
     if plotted
         axislegend(ax1, position = :rt)

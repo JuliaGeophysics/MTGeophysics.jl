@@ -23,8 +23,8 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - '1.10'
-          - '1'
+          - '1.10'    # declared minimum in Project.toml [compat]
+          - '1.12.5'  # pinned development version
         os:
           - ubuntu-latest
         arch:
@@ -36,5 +36,13 @@ jobs:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v2
+      # GLMakie is a hard dependency and cannot precompile without a display,
+      # which otherwise aborts the test-environment precompile pass
+      - name: Install virtual display for GLMakie
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1 libglu1-mesa mesa-utils xauth
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
+        with:
+          prefix: xvfb-run -s '-screen 0 1024x768x24'

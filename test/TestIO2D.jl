@@ -126,7 +126,8 @@ mktempdir() do temp_dir
     )
     zero_iter_ground = zero_iter_run.chains[1].final_resistivity[(zero_iter_mesh.n_air_cells + 1):end, :]
     perturbable_z = MTGeophysics._perturbable_ground_indices(zero_iter_mesh, 600.0)
-    @test all(isapprox.(zero_iter_ground, 100.0; atol = 1e-10, rtol = 0.0))
+    # model files store ln(rho) to 8 decimals, so a round-tripped 100.0 lands ~4e-7 off
+    @test all(isapprox.(zero_iter_ground, 100.0; rtol = 1e-6))
     @test last(perturbable_z) < length(zero_iter_mesh.z_cell_sizes)
 
     example_run = VFSA2DMT(
