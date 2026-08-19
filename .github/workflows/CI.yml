@@ -35,7 +35,7 @@ jobs:
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
-      - uses: julia-actions/cache@v2
+      - uses: julia-actions/cache@v3
       # GLMakie is a hard dependency and cannot precompile without a display,
       # which otherwise aborts the test-environment precompile pass
       - name: Install virtual display for GLMakie
