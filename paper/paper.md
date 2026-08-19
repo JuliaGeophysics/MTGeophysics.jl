@@ -195,8 +195,8 @@ wider community. Its components are reusable building blocks for the broader
 JuliaGeophysics ecosystem.
 
 The package and the research built on it have been presented to the
-geophysics and scientific-computing communities by Pankaj K. Mishra and
-Cédric Patzer, including at the EGU General Assembly 2026, the 27th
+geophysics and scientific-computing communities by Pankaj K Mishra and
+Cedric Patzer, including at the EGU General Assembly 2026, the 27th
 Electromagnetic Induction Workshop (EMIW 2026), and JuliaCon 2026.
 MTGeophysics.jl was also used to participate in the
 [MT3DINV-4 workshop](https://mt3dinv4.mtnet.info/Real_data.html)
@@ -206,15 +206,14 @@ dataset acquired over the Raglan mining district in northern Quebec, Canada.
 
 # AI usage disclosure
 
-GitHub Copilot was used as a coding assistant during development of this
-software and in drafting this paper. All AI-generated code and text were
+GitHub Copilot with various LLM providers was used as a coding assistant during development of this
+software and in drafting this paper for language correction. GitHub Copilot and Dependabot are used to automatically manage dependencies for continuous integration (CI). All AI-generated code and text were
 reviewed, tested, and verified by the author for correctness.
 
 # Acknowledgements
 
 This work was supported by the Research Council of Finland (project 359261).
 The author wishes to acknowledge CSC – IT Center for Science, Finland, for
-computational resources. The COMMEMI benchmark models used for validation were
-defined by @Zhdanov1997.
+computational resources. Author wishes to thank Jochen Kamm, Cedric Patzer, Uula Autio for discussion on various aspects of magnetotelluric geophysics.
 
 # References
