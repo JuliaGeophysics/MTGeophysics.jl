@@ -12,24 +12,31 @@ There are two ways to install, depending on how you intend to use the package.
 ### 1. From the registry
 
 MTGeophysics.jl is registered in the Julia General registry. Use this if you want to call the
-package from your own project or scripts:
+package from your own project or scripts. Install it into a dedicated project environment:
 
 ```julia
 julia> ]  # press ] to enter the Pkg REPL
+pkg> activate @mtgeophysics   # a named shared environment; or `activate .` for the current folder
 pkg> add MTGeophysics
 ```
 
 or, non-interactively:
 
 ```bash
-julia -e 'using Pkg; Pkg.add("MTGeophysics")'
+julia --project=@mtgeophysics -e 'using Pkg; Pkg.add("MTGeophysics")'
 ```
 
-To add it to a specific project environment rather than your default one:
+To add it to a specific project directory instead:
 
 ```bash
 julia --project=/path/to/your/project -e 'using Pkg; Pkg.add("MTGeophysics")'
 ```
+
+!!! tip
+    As a general Julia best practice, avoid installing packages into your default (global)
+    environment. A dedicated per-project environment keeps dependencies isolated and
+    reproducible, and avoids slow, unexpected version changes across unrelated packages you
+    already have installed.
 
 ### 2. From a clone
 
