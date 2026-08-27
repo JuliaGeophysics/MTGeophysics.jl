@@ -135,6 +135,44 @@ julia --project=. examples/plot_model_YZ_slices.jl <model.ws> <data.dat>
 
 ![YZ slices](assets/plot_yz_slices.png)
 
+## Phase tensor and induction vector map
+
+```julia
+PlotPTIVMap(data_file)
+```
+
+Period-stepped map of phase tensor ellipses and induction arrows, read straight
+from a ModEM data file. Ellipses are normalised so every site is the same size
+and coloured by beta skew, Phimin or Phi2; arrows use the Parkinson convention
+by default and so point towards conductors. Shapefile overlays can be imported
+from the window, and both the figure and the shapefiles can be exported.
+
+From a repository checkout, edit the settings at the top of the script:
+
+```bash
+julia --project=. examples/plot_PTIV_map.jl <data.dat> [EPSG:XXXX]
+```
+
+Every period can also be written to GIS without opening a window, which is what
+`--gis-only` does and what to call on a headless machine:
+
+```julia
+write_ptiv_gis(data_file; crs = "EPSG:4326", output_dir = "ptiv-gis")
+```
+
+Each period becomes `*_PT_T<period>.shp` (ellipse polygons, with the invariants
+as attributes) and `*_IV_T<period>.shp` (arrow polylines), plus `.prj`/`.qpj`
+sidecars and a `README.txt` recording the conventions.
+
+The invariants themselves are available for scripting:
+
+```julia
+d  = load_data_modem(data_file)
+PT = phase_tensors_from_data(d)              # nf x ns, `nothing` where undefined
+IV = induction_vectors_from_data(d; convention = :parkinson)
+PT[1, 1].beta                                 # skew angle in degrees
+```
+
 ## Coordinate systems
 
 Pass `crs` to the 2-D viewers (or as the third command-line argument to the

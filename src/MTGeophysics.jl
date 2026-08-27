@@ -8,6 +8,7 @@ module MTGeophysics
 using LinearAlgebra
 using Statistics
 using Dates
+using Printf
 using Shapefile
 using GeoInterface
 using Proj
@@ -28,6 +29,10 @@ include("CoreUtils3D.jl")
 include("ShapefileOverlay.jl")
 include("GeoRef3D.jl")
 
+#----- Phase tensors, induction vectors and their GIS export ---------------#
+
+include("PhaseTensor.jl")
+
 #----- WS3D format model I/O (log10 internal) -----------------------------#
 
 include("WS3DModel.jl")
@@ -46,9 +51,11 @@ try
     include("PlotModel3D.jl")
     include("EditModel3D.jl")
     include("MakeMesh3DGUI.jl")
+    include("PlotData3D.jl")
     export compute_colorrange, prepare_model_arrays
     export PlotModelXY, PlotModelXZ, PlotModelYZ, PlotModelXYZ
     export EditModelByLayers, EditModelByDrawing
+    export PlotPTIVMap
 catch LoadError
     @warn "GLMakie not available, interactive visualization functionality disabled"
 end
@@ -80,6 +87,13 @@ export lateral_core_ranges, core_view
 
 export detect_shapefile_crs, shapefile_coord_transform
 export load_shapefile_geometries, prepare_shapefiles
+export pick_shapefile
+
+#----- Exports: Phase tensors and induction vectors ------------------------#
+
+export phase_tensor, induction_vector, has_tipper_data
+export phase_tensors_from_data, induction_vectors_from_data
+export write_ptiv_gis
 
 #----- Exports: mesh design and mesh-to-mesh projection -------------------#
 

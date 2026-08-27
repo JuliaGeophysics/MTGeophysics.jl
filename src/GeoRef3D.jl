@@ -362,6 +362,24 @@ function _resolve_prj_wkt_for_crs(crs::AbstractString)
     end
 end
 
+"""
+    _write_shapefile_with_sidecars(path, shapes, feats, wkt)
+
+Write one shapefile plus its .prj / .qpj sidecars.
+In:  output path, the geometries, the attribute NamedTuple and the CRS WKT
+     (empty to skip the sidecars).
+Out: nothing.
+"""
+function _write_shapefile_with_sidecars(path::AbstractString, shapes, feats, wkt::AbstractString)
+    Shapefile.write(path, Shapefile.Writer(shapes, feats); force = true)
+    isempty(wkt) && return nothing
+    base = splitext(path)[1]
+    for ext in (".prj", ".qpj")
+        open(base * ext, "w") do io; write(io, wkt); end
+    end
+    return nothing
+end
+
 # ---------- GIS shapefile export for all depth slices ----------
 
 function _export_all_depth_slices_gis(;
@@ -458,15 +476,7 @@ function _export_all_depth_slices_gis(;
         filename = "$(model_name)_depth_$(depth_str).shp"
         outpath = joinpath(output_dir, filename)
 
-        writer = Shapefile.Writer(polygons, feats)
-        Shapefile.write(outpath, writer; force = true)
-
-        # Write .prj and .qpj sidecar files
-        if !isempty(wkt)
-            base = splitext(outpath)[1]
-            open(base * ".prj", "w") do io; write(io, wkt); end
-            open(base * ".qpj", "w") do io; write(io, wkt); end
-        end
+        _write_shapefile_with_sidecars(outpath, polygons, feats, wkt)
 
         println("  Layer $k/$nz: $filename  ($(length(polygons)) cells, depth $(round(depth_top, digits=1))–$(round(depth_bot, digits=1)) m)")
     end

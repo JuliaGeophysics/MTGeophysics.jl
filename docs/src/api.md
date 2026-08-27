@@ -69,6 +69,13 @@
 | `load_model_modem(path)` | Load 3D model file |
 | `write_model_modem(path, model)` | Write 3D model file |
 | `chi2_and_rms(obs, pred)` | Compute 3D misfit |
+| `phase_tensor(Zxx, Zxy, Zyx, Zyy)` | Phase tensor invariants for one site and period |
+| `induction_vector(Tzx, Tzy; convention)` | Induction arrow components from the tipper |
+| `phase_tensors_from_data(d)` | Phase tensors for every period and site |
+| `induction_vectors_from_data(d; convention)` | Induction vectors for every period and site |
+| `has_tipper_data(d)` | Whether a data set carries usable tippers |
+| `write_ptiv_gis(data_file; ...)` | Write phase tensor / induction vector shapefiles per period |
+| `PlotPTIVMap(data_file; ...)` | Interactive phase tensor and induction vector map |
 
 ## WS3D Model I/O
 

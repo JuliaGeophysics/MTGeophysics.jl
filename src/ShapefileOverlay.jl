@@ -112,3 +112,103 @@ function prepare_shapefiles(defs, target_crs::AbstractString)
     end
     return result
 end
+
+# ---------- interactive shapefile chooser ----------
+
+const _SHAPEFILE_PICKER_PS = """
+Add-Type -AssemblyName System.Windows.Forms
+\$f = New-Object System.Windows.Forms.OpenFileDialog
+\$f.Filter = 'Shapefile (*.shp)|*.shp|All files (*.*)|*.*'
+if (\$f.ShowDialog() -eq 'OK') { Write-Output \$f.FileName }
+"""
+
+"""
+    pick_shapefile()
+
+Open the platform file chooser for a shapefile, for viewers that import overlays
+while running.
+In:  nothing.
+Out: the chosen path, or "" if cancelled or no chooser is available.
+"""
+function pick_shapefile()
+    try
+        if Sys.isapple()
+            return readchomp(`osascript -e $("POSIX path of (choose file with prompt \"Select a shapefile\" of type {\"shp\"})")`)
+        elseif Sys.iswindows()
+            return readchomp(`powershell -NoProfile -Command $_SHAPEFILE_PICKER_PS`)
+        elseif !isnothing(Sys.which("zenity"))
+            return readchomp(`zenity --file-selection --title=$("Select a shapefile") --file-filter=$("Shapefiles | *.shp")`)
+        elseif !isnothing(Sys.which("kdialog"))
+            return readchomp(`kdialog --getopenfilename $(pwd()) $("*.shp")`)
+        elseif !isnothing(Sys.which("yad"))
+            return readchomp(`yad --file --file-filter=$("*.shp")`)
+        end
+    catch
+    end
+    return ""
+end
+
+# ---------- clipping overlays to a plot extent ----------
+
+"""
+    _clip_segment_to_box(x1, y1, x2, y2, xmin, xmax, ymin, ymax)
+
+Liang-Barsky clip of one segment against an axis-aligned box.
+In:  segment endpoints and box bounds.
+Out: clipped (x1, y1, x2, y2), or `nothing` if the segment misses the box.
+"""
+function _clip_segment_to_box(x1, y1, x2, y2, xmin, xmax, ymin, ymax)
+    dx, dy = x2 - x1, y2 - y1
+    t0, t1 = 0.0, 1.0
+    for (pk, qk) in ((-dx, x1 - xmin), (dx, xmax - x1), (-dy, y1 - ymin), (dy, ymax - y1))
+        if pk == 0
+            qk < 0 && return nothing
+        else
+            r = qk / pk
+            if pk < 0
+                r > t1 && return nothing
+                r > t0 && (t0 = r)
+            else
+                r < t0 && return nothing
+                r < t1 && (t1 = r)
+            end
+        end
+    end
+    return (x1 + t0*dx, y1 + t0*dy, x1 + t1*dx, y1 + t1*dy)
+end
+
+"""
+    _clip_polyline_to_box(xs, ys, lim)
+
+Clip a polyline to a box, splitting it where it leaves and re-enters.
+In:  polyline vertices and lim = (xmin, xmax, ymin, ymax).
+Out: vector of (xs, ys) pieces inside the box; empty if none are.
+"""
+function _clip_polyline_to_box(xs, ys, lim)
+    xmin, xmax, ymin, ymax = lim
+    pieces = Tuple{Vector{Float64},Vector{Float64}}[]
+    cx = Float64[]; cy = Float64[]
+    flush!() = (length(cx) > 1 && push!(pieces, (copy(cx), copy(cy))); empty!(cx); empty!(cy))
+    for k in 1:length(xs)-1
+        seg = _clip_segment_to_box(xs[k], ys[k], xs[k+1], ys[k+1], xmin, xmax, ymin, ymax)
+        if isnothing(seg)
+            flush!()
+            continue
+        end
+        ax1, ay1, ax2, ay2 = seg
+        if isempty(cx) || cx[end] != ax1 || cy[end] != ay1
+            flush!()
+            push!(cx, ax1); push!(cy, ay1)
+        end
+        push!(cx, ax2); push!(cy, ay2)
+    end
+    flush!()
+    return pieces
+end
+
+"""
+    _inside_box(x, y, lim)
+
+Whether a point lies inside lim = (xmin, xmax, ymin, ymax).
+"""
+_inside_box(x, y, lim) = lim[1] <= x <= lim[2] && lim[3] <= y <= lim[4]
