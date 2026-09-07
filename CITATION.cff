@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: If you use this software, please cite it as below.
+title: 'MTGeophysics.jl: A software repository for magnetotelluric research and applications'
+type: software
+authors:
+- given-names: Pankaj K
+  family-names: Mishra
+  orcid: https://orcid.org/0000-0003-4907-4724
+repository-code: https://github.com/JuliaGeophysics/MTGeophysics.jl
+license: MIT
