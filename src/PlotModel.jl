@@ -49,3 +49,19 @@ function prepare_model_arrays(M;
 
     return x, y, z, R, ix, iy, kz
 end
+
+"""
+    _save_figure_headless(path, fig, px_per_unit)
+
+Write a figure to PNG through CairoMakie.
+In:  output path, a Figure that was never displayed, and the pixel scale.
+Out: the path.
+
+Rendering an off-screen figure with GLMakie creates a second GL context and
+destroys it again, which takes any open viewer window down with it, so the file
+is always written by the software backend.
+"""
+function _save_figure_headless(path::AbstractString, fig, px_per_unit::Real = 3)
+    save(path, fig; px_per_unit = px_per_unit, backend = CairoMakie)
+    return path
+end

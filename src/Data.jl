@@ -291,7 +291,16 @@ function _write_data_block_header!(io;
     origin_lon::Real,
     nf::Int,
     ns::Int)
-    signline = sign == -1 ? "exp(-iωt)" : "exp(+iωt)"
+    # ModEM writes the sign as ASCII "exp(-i\\omega t)" and reads the line back into a
+    # character(20); a UTF-8 ω is two bytes and shifts that field, so stay ASCII.
+    signline = sign == -1 ? "exp(-i\\omega t)" : "exp(+i\\omega t)"
+    # ModEM consumes exactly TWO lines before each block's data-type line
+    # (DataIO.f90:606-608 reads typeInfo and typeHeader unconditionally, skipping the
+    # first two characters of each). One line for the whole file shifts every block
+    # header by one and ModEM dies with "Unknown data type:exp(...)" -- so the pair is
+    # written per block, and write_data_modem writes no file-level comment.
+    println(io, "# Written by MTGeophysics.jl write_data_modem")
+    println(io, "# Period(s) Code GG_Lat GG_Lon X(m) Y(m) Z(m) Component Real Imag Error")
     println(io, "> $datatype")
     println(io, "> $signline")
     println(io, "> $units")
@@ -397,8 +406,6 @@ function write_data_modem(outputfile::AbstractString, d::Data;
     origin_lon = length(d.origin) >= 2 ? d.origin[2] : 0.0
 
     open(outputfile, "w") do io
-        println(io, "# Written by MTGeophysics.jl write_data_modem")
-
         if include_impedance
             _write_data_block_header!(io;
                 datatype = "Full_Impedance",
