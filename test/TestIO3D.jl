@@ -86,7 +86,8 @@
             @test d6.Z[finite_mask] ≈ d5.Z[finite_mask]
             @test d6.tip ≈ d5.tip
             lines = readlines(preserved)
-            @test any(contains("exp(-iωt)"), lines)
+            # ModEM's sign line is ASCII "exp(-i\omega t)" (see _write_data_block_header!)
+            @test any(contains("exp(-i\\omega t)"), lines)
             @test any(contains("[mV/km]/[nT]"), lines)
         end
     end

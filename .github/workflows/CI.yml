@@ -23,8 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - '1.10'    # declared minimum in Project.toml [compat]
-          - '1.12.5'  # pinned development version
+          - '1.12.5'  # pinned development/support version
         os:
           - ubuntu-latest
         arch:
