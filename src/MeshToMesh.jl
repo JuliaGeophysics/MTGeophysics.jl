@@ -100,7 +100,11 @@ function write_covariance(path::AbstractString,
             @printf(io, " %d %d %d.\n", e[1], e[2], e[3])
         end
         println(io)
-        for k in 1:nz
+        # layer nz goes before nz-1: read_iscalar (sg_scalar.f90) leaves its
+        # block loop on `k == Nz` with k the spent DO counter k2+1, so it stops
+        # right after a block ending at nz-1 and never reads a later one. in
+        # plain order the bottom layer silently stays free
+        for k in (nz > 1 ? [1:nz-2; nz; nz-1] : 1:nz)
             @printf(io, " %d %d\n", k, k)
             # rows run north to south: ModEM's read_iscalar takes the first row of
             # a block as x = Nx (sg_scalar.f90, `do j = Nx,1,-1`). Writing them
