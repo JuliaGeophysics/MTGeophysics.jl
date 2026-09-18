@@ -27,6 +27,7 @@
 
 - 1D and 2D MT forward solvers (analytical and finite-difference)
 - 2D/3D VFSA inversion with ensemble uncertainty quantification
+- [2D deterministic inversion](docs/src/gaussnewton2d.md): modular framework with Gauss-Newton and NLCG, implicit Fréchet derivatives and their transpose, skin-depth mesh (`examples/run_inv2D.jl`)
 - ModEM 3D model and data I/O
 - Interactive 3D slice viewers (GLMakie) with GIS overlays and coordinate reprojection
 - Shapefile export for GIS integration

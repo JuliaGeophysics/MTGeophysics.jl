@@ -12,6 +12,13 @@
 | `ModelFile2D` | Parsed 2D model file |
 | `DataFile2D` | Parsed 2D data file |
 | `FitSummary2D` | Misfit summary (χ², RMS, count) |
+| `Inv2DOptions` | Algorithm-independent 2D inversion controls |
+| `Inv2DResult` | Recovered model, fit, history, and stopping reason |
+| `AbstractInversion2D` | Supertype of 2D deterministic inversion algorithms |
+| `GaussNewton2DConfig` | Damped Gauss-Newton algorithm settings |
+| `GaussNewton2DResult` | `Inv2DResult` produced by Gauss-Newton |
+| `NLCG2DConfig` | Preconditioned NLCG algorithm settings |
+| `NLCG2DResult` | `Inv2DResult` produced by NLCG |
 | `VFSA2DMTConfig` | VFSA 2D inversion parameters |
 | `VFSA2DMTParams` | VFSA 2D run paths and configuration |
 | `VFSA3DMTConfig` | VFSA 3D inversion parameters |
@@ -38,6 +45,9 @@
 | Function | Description |
 |:---------|:------------|
 | `BuildMesh2D(; ...)` | Build a 2D tensor mesh |
+| `BuildMesh2D(; ...)` | Profile mesh; vertical core uniform to one skin depth of the lowest frequency |
+| `mt2d_skin_depth(ρ, f)` | Skin depth in metres |
+| `mt2d_skin_depth_layers(f; ...)` | Uniform-core plus geometric-padding ground layers |
 | `build_default_mt2d_mesh()` | Default COMEMI mesh |
 | `build_mt2d_halfspace_model(mesh)` | Uniform resistivity model |
 | `build_mt2d_layered_model(mesh)` | Layered model |
@@ -49,7 +59,19 @@
 | `plot_mt2d_model(mesh, ρ)` | Plot model cross-section |
 | `plot_mt2d_data_maps(response)` | Plot TE/TM maps |
 | `plot_mt2d_site_curves(response)` | Plot per-site curves |
+| `plot_mt2d_mesh(mesh; region)` | Plot mesh edges, air, uniform core, and skin depths |
+| `plot_mt2d_data_fit(obs, pred)` | Observed vs predicted curves at selected sites |
+| `plot_inv2d_convergence(history)` | RMS and objective terms per iteration |
 | `chi2_rms2d(obs, pred)` | Compute misfit |
+| `Invert2D(mesh, initial, observed; algorithm, options, ...)` | Regularized impedance inversion with any algorithm |
+| `Invert2D(model_path, data_path; output_dir, ...)` | File-driven inversion workflow |
+| `GaussNewton2D(...)` | `Invert2D` with `algorithm = GaussNewton2DConfig()` |
+| `NLCG2D(...)` | `Invert2D` with `algorithm = NLCG2DConfig()` |
+| `inv2d_frechet(problem, state)` | Data-weighted Fréchet derivative C_D^{-1/2} G in log10 resistivity |
+| `inv2d_gradient(problem, state[, J])` | Objective gradient (explicit or adjoint) |
+| `FrechetDerivative2D(mesh, ρ; ...)` | Explicit Fréchet derivative G = ∂g/∂m |
+| `ApplyFrechet2D(mesh, ρ, δm; ...)` | Tangent linear application δd = G δm |
+| `ApplyFrechetTranspose2D(mesh, ρ, δd̂; ...)` | Transpose application δm̂ = Gᵗ δd̂ |
 
 ## VFSA Inversion
 

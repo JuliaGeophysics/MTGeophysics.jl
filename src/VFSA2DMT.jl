@@ -1,7 +1,7 @@
 # This script runs a full 2D VFSA inversion workflow with RBF-controlled models and shared 2D file I/O.
 
 if !isdefined(@__MODULE__, :plot_mt2d_model)
-    include(joinpath(@__DIR__, "MTGeophysics2D.jl"))
+    foreach(f -> include(joinpath(@__DIR__, f)), ("Mesh2D.jl", "Fwd2D.jl", "PlotModel2D.jl", "PlotData2D.jl"))
 end
 
 using CairoMakie

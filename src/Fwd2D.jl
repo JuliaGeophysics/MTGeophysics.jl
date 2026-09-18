@@ -1,30 +1,51 @@
-using CairoMakie
+# 2D MT forward modelling
+# Author: @pankajkmishra
+# Finite-difference (box integration) TE/TM solver, data file I/O, misfit, and Fréchet derivatives
+# Fréchet derivatives in Tarantola (2005) notation, d = g(m), G = ∂g/∂m: FrechetDerivative2D (G),
+# ApplyFrechet2D (δd = G δm), ApplyFrechetTranspose2D (δm̂ = Gᵗ δd̂); the discrete system is
+# differentiated implicitly, no finite differences
+
+#***********************************************************************
+# Description: 2D MT forward problem
+#
+#   convention   exp(+iωt), quasi-static, μ = μ₀
+#                strike along x, y along the profile, z positive down
+#                from the top of the air layer
+#   maxwell      ∇×E = -iωμ H,   ∇×H = σ E
+#   domain       Ω = [y₀, y₁] × [0, z_max], air included with σ_air = 1e-9 S/m
+#
+#   TE (E-polarisation), E = Ex(y,z) x̂
+#     ∇·(μ⁻¹ ∇Ex) - iωσ Ex = 0                                   in Ω
+#     Hy = -(1/iωμ) ∂z Ex,   Hz = (1/iωμ) ∂y Ex
+#
+#   TM (H-polarisation), H = Hx(y,z) x̂,  ρ = 1/σ
+#     ∇·(ρ ∇Hx) - iωμ Hx = 0                                     in Ω
+#     Ey = ρ ∂z Hx,   Ez = -ρ ∂y Hx
+#
+#   boundary conditions, dirichlet on ∂Ω, u = Ex (TE) or Hx (TM)
+#     top      u(y, 0) = 1
+#     sides    u(y₀, z) = u¹ᴰ[σ(y₀, ·)](z),   u(y₁, z) = u¹ᴰ[σ(y₁, ·)](z)
+#     bottom   u(y, z_max) = u¹ᴰ[σ(y, ·)](z_max)
+#     u¹ᴰ[σ] = 1D field of the column σ(z) at that y, normalised to u¹ᴰ(0) = 1
+#
+#   1D problem for a column σ(z) over a halfspace continuing its deepest value
+#     d²E/dz² + k² E = 0,   k² = ω²μ₀ε₀ - iωμ₀σ,   Im k < 0
+#     E and dE/dz continuous, only the decaying exp(-ikz) wave in the halfspace
+#     TE takes u¹ᴰ = E
+#     TM takes u¹ᴰ = H = -(1/iωμ) dE/dz, which solves d/dz(ρ dH/dz) - iωμ H = 0
+#     the ω²μ₀ε₀ term is kept only in this 1D problem
+#
+#   data, fields at each receiver on the air/earth interface
+#     Zxy = Ex / Hy (TE),   Zyx = Ey / Hx (TM)
+#     ρa = |Z|² / (ωμ₀),   φ = atan(Im Z, Re Z)
+#     Zxy lies in the first quadrant, Zyx in the third
+#***********************************************************************
+
 using LinearAlgebra
 using Printf
 using Random
 using SparseArrays
-
-"""
-    MT2DMesh
-
-Inputs:
-- Horizontal and vertical mesh nodes, cell sizes, receiver positions, frequencies, and air-cell count.
-
-Output:
-- `MT2DMesh`: Container for a 2D MT profile mesh.
-
-Description:
-- Stores the profile mesh geometry and survey definition used by the 2D workflows.
-"""
-Base.@kwdef struct MT2DMesh
-    y_nodes::Vector{Float64}
-    z_nodes::Vector{Float64}
-    y_cell_sizes::Vector{Float64}
-    z_cell_sizes::Vector{Float64}
-    receiver_positions::Vector{Float64}
-    frequencies::Vector{Float64}
-    n_air_cells::Int
-end
+using ForwardDiff
 
 """
     MT2DResponse
@@ -48,31 +69,6 @@ Base.@kwdef struct MT2DResponse
     rho_yx::Matrix{Float64}
     phase_yx::Matrix{Float64}
     z_yx::Matrix{ComplexF64}
-end
-
-"""
-    ModelFile2D
-
-Inputs:
-- Model metadata, mesh spacings, resistivity values, air-cell count, origin, and rotation.
-
-Output:
-- `ModelFile2D`: Parsed 2D model file container.
-
-Description:
-- Stores a 2D model file exactly as needed for round-tripping between disk and the forward solver.
-"""
-Base.@kwdef struct ModelFile2D
-    title::String
-    x_cell_sizes::Vector{Float64}
-    y_cell_sizes::Vector{Float64}
-    z_cell_sizes::Vector{Float64}
-    resistivity::Matrix{Float64}
-    n_air_cells::Int
-    origin::Vector{Float64}
-    rotation::Float64
-    format::String
-    path::String = ""
 end
 
 """
@@ -138,7 +134,7 @@ Output:
 - `TensorMesh2D`: Solver-ready tensor mesh.
 
 Description:
-- Stores the sparse-operator form of the 2D tensor mesh used by the finite-volume solver.
+- Stores the sparse-operator form of the 2D tensor mesh used by the finite-difference (box integration) solver.
 """
 mutable struct TensorMesh2D
     y_lengths::Vector{Float64}
@@ -172,491 +168,16 @@ mutable struct CoeffMat{T<:Float64}
     imag_io::SparseMatrixCSC{T, Int}
 end
 
-const μ₀_2D = 4π * 1e-7
-
-"""
-    mt2d_y_centers(mesh)
-
-Inputs:
-- `mesh`: 2D MT mesh.
-
-Output:
-- `Vector{Float64}`: Horizontal cell-center positions.
-
-Description:
-- Computes the horizontal cell centers of the 2D mesh.
-"""
-mt2d_y_centers(mesh::MT2DMesh) = 0.5 .* (mesh.y_nodes[1:end-1] .+ mesh.y_nodes[2:end])
-
-"""
-    mt2d_z_centers(mesh)
-
-Inputs:
-- `mesh`: 2D MT mesh.
-
-Output:
-- `Vector{Float64}`: Vertical cell-center positions.
-
-Description:
-- Computes the vertical cell centers of the 2D mesh.
-"""
-mt2d_z_centers(mesh::MT2DMesh) = 0.5 .* (mesh.z_nodes[1:end-1] .+ mesh.z_nodes[2:end])
-
-"""
-    mt2d_center_station(mesh)
-
-Inputs:
-- `mesh`: 2D MT mesh.
-
-Output:
-- `Int`: Index of the middle receiver location.
-
-Description:
-- Returns the central survey station used by plotting and smoke tests.
-"""
-mt2d_center_station(mesh::MT2DMesh) = cld(length(mesh.receiver_positions), 2)
-
-"""
-    build_mt2d_mesh(; frequencies=..., y_core_range=(-6000.0, 6000.0), y_core_cell=300.0, y_padding=9000.0, pad_factor=1.25, air_top=-12000.0, air_cells=8, ground_layers=..., receiver_stride=2, receiver_positions=nothing)
-
-Inputs:
-- Frequency axis and horizontal/vertical mesh controls.
-
-Output:
-- `MT2DMesh`: Survey mesh and receiver geometry.
-
-Description:
-- Builds the padded 2D MT profile mesh used by the forward and inversion workflows.
-"""
-function build_mt2d_mesh(;
-    frequencies::AbstractVector{<:Real} = collect(10 .^ range(-2, 2, length = 10)),
-    y_core_range::Tuple{<:Real, <:Real} = (-6000.0, 6000.0),
-    y_core_cell::Real = 300.0,
-    y_padding::Real = 9000.0,
-    pad_factor::Real = 1.25,
-    air_top::Real = -12000.0,
-    air_cells::Integer = 8,
-    ground_layers::AbstractVector{<:Real} = vcat(fill(100.0, 8), fill(250.0, 10), fill(500.0, 10)),
-    receiver_stride::Integer = 2,
-    receiver_positions::Union{Nothing, AbstractVector{<:Real}} = nothing,
-)
-    y_core_cell > 0 || error("y_core_cell must be positive")
-    y_padding > 0 || error("y_padding must be positive")
-    pad_factor > 1 || error("pad_factor must be greater than 1")
-    air_cells > 0 || error("air_cells must be positive")
-    receiver_stride > 0 || error("receiver_stride must be positive")
-    any(Δz -> Δz <= 0, ground_layers) && error("all ground layer thicknesses must be positive")
-
-    y1, y2 = Float64.(y_core_range)
-    y_core_nodes = collect(y1:y_core_cell:y2)
-    abs(y_core_nodes[end] - y2) > 1e-9 && push!(y_core_nodes, y2)
-
-    left_nodes = Float64[]
-    Δy = Float64(y_core_cell)
-    y = y1
-    while y - Δy > y1 - y_padding - 1e-9
-        Δy *= pad_factor
-        y -= Δy
-        push!(left_nodes, y)
-    end
-    reverse!(left_nodes)
-
-    right_nodes = Float64[]
-    Δy = Float64(y_core_cell)
-    y = y2
-    while y + Δy < y2 + y_padding + 1e-9
-        Δy *= pad_factor
-        y += Δy
-        push!(right_nodes, y)
-    end
-
-    y_nodes = vcat(left_nodes, y_core_nodes, right_nodes)
-    y_cell_sizes = diff(y_nodes)
-
-    z_air = collect(range(Float64(air_top), 0.0, length = air_cells + 1))
-    z_ground = vcat(0.0, cumsum(Float64.(ground_layers)))
-    z_nodes = vcat(z_air[1:end-1], z_ground)
-    z_cell_sizes = diff(z_nodes)
-
-    receivers = if receiver_positions === nothing
-        y_receivers = 0.5 .* (y_core_nodes[1:end-1] .+ y_core_nodes[2:end])
-        collect(y_receivers[1:receiver_stride:end])
-    else
-        Float64.(receiver_positions)
-    end
-
-    MT2DMesh(
-        y_nodes = y_nodes,
-        z_nodes = z_nodes,
-        y_cell_sizes = y_cell_sizes,
-        z_cell_sizes = z_cell_sizes,
-        receiver_positions = receivers,
-        frequencies = Float64.(frequencies),
-        n_air_cells = air_cells,
-    )
-end
-
-"""
-    BuildMesh2D(; kwargs...)
-
-Inputs:
-- Keyword arguments accepted by `build_mt2d_mesh`.
-
-Output:
-- `MT2DMesh`: Survey mesh and receiver geometry.
-
-Description:
-- Public alias for `build_mt2d_mesh`.
-"""
-BuildMesh2D(; kwargs...) = build_mt2d_mesh(; kwargs...)
-
-"""
-    build_mt2d_block_model(mesh; background_resistivity=100.0, blocks=NamedTuple[])
-
-Inputs:
-- `mesh`: 2D MT mesh.
-- `background_resistivity`: Host resistivity in ohm metres.
-- `blocks`: Rectangular anomaly definitions.
-
-Output:
-- `Matrix{Float64}`: Cell resistivity model.
-
-Description:
-- Builds a 2D block model on the provided mesh.
-"""
-function build_mt2d_block_model(
-    mesh::MT2DMesh;
-    background_resistivity::Real = 100.0,
-    blocks::AbstractVector = NamedTuple[],
-)
-    n_z = length(mesh.z_cell_sizes)
-    n_y = length(mesh.y_cell_sizes)
-    ρ = fill(Float64(background_resistivity), n_z, n_y)
-    ρ[1:mesh.n_air_cells, :] .= 1e9
-
-    y_centers = mt2d_y_centers(mesh)
-    z_centers = mt2d_z_centers(mesh)
-    for block in blocks
-        y1, y2 = Float64.(block.y_range)
-        z1, z2 = Float64.(block.z_range)
-        ρblock = Float64(block.resistivity)
-        for iy in eachindex(y_centers), iz in eachindex(z_centers)
-            if y1 <= y_centers[iy] <= y2 && z1 <= z_centers[iz] <= z2
-                ρ[iz, iy] = ρblock
-            end
-        end
-    end
-
-    ρ
-end
-
-"""
-    build_mt2d_halfspace_model(mesh; background_resistivity=100.0)
-
-Inputs:
-- `mesh`: 2D MT mesh.
-- `background_resistivity`: Half-space resistivity in ohm metres.
-
-Output:
-- `Matrix{Float64}`: Half-space resistivity model.
-
-Description:
-- Builds a homogeneous half-space on the given mesh.
-"""
-build_mt2d_halfspace_model(mesh::MT2DMesh; background_resistivity::Real = 100.0) =
-    build_mt2d_block_model(mesh; background_resistivity = background_resistivity, blocks = NamedTuple[])
-
-"""
-    build_mt2d_layered_model(mesh; layer_resistivities, interface_depths)
-
-Inputs:
-- `mesh`: 2D MT mesh.
-- `layer_resistivities`: Layer resistivities including the basement.
-- `interface_depths`: Interface depths in metres.
-
-Output:
-- `Matrix{Float64}`: Layered resistivity model.
-
-Description:
-- Builds a laterally uniform layered model on the 2D mesh.
-"""
-function build_mt2d_layered_model(
-    mesh::MT2DMesh;
-    layer_resistivities::AbstractVector{<:Real},
-    interface_depths::AbstractVector{<:Real},
-)
-    length(layer_resistivities) == length(interface_depths) + 1 || error("layer_resistivities must contain one more value than interface_depths")
-
-    n_z = length(mesh.z_cell_sizes)
-    n_y = length(mesh.y_cell_sizes)
-    ρ = fill(Float64(layer_resistivities[end]), n_z, n_y)
-    ρ[1:mesh.n_air_cells, :] .= 1e9
-
-    z_centers = mt2d_z_centers(mesh)
-    z_interfaces = Float64.(interface_depths)
-    ρlayers = Float64.(layer_resistivities)
-    for iz in (mesh.n_air_cells + 1):n_z
-        layer = searchsortedfirst(z_interfaces, z_centers[iz])
-        ρ[iz, :] .= ρlayers[clamp(layer, 1, length(ρlayers))]
-    end
-
-    ρ
-end
-
-"""
-    add_mt2d_rect!(resistivity, mesh; y_range, z_range, resistivity_value)
-
-Inputs:
-- `resistivity`: Existing 2D resistivity model.
-- `mesh`: 2D MT mesh.
-- `y_range`, `z_range`, `resistivity_value`: Rectangle geometry and value.
-
-Output:
-- `AbstractMatrix`: Updated resistivity model.
-
-Description:
-- Overwrites a rectangular region of a 2D model with a new resistivity value.
-"""
-function add_mt2d_rect!(
-    resistivity::AbstractMatrix{<:Real},
-    mesh::MT2DMesh;
-    y_range::Tuple{<:Real, <:Real},
-    z_range::Tuple{<:Real, <:Real},
-    resistivity_value::Real,
-)
-    y1, y2 = Float64.(y_range)
-    z1, z2 = Float64.(z_range)
-    ρrect = Float64(resistivity_value)
-    y_centers = mt2d_y_centers(mesh)
-    z_centers = mt2d_z_centers(mesh)
-
-    for iy in eachindex(y_centers), iz in (mesh.n_air_cells + 1):length(z_centers)
-        if y1 <= y_centers[iy] <= y2 && z1 <= z_centers[iz] <= z2
-            resistivity[iz, iy] = ρrect
-        end
-    end
-
-    resistivity
-end
-
-"""
-    build_mt2d_comemi_models(mesh)
-
-Inputs:
-- `mesh`: 2D MT mesh.
-
-Output:
-- `Vector`: Named tuples containing the benchmark names, labels, and resistivity models.
-
-Description:
-- Builds the three package COMEMI-style 2D benchmark models.
-"""
-function build_mt2d_comemi_models(mesh::MT2DMesh)
-    case1 = build_mt2d_layered_model(mesh; layer_resistivities = [100.0, 500.0], interface_depths = [2000.0])
-    add_mt2d_rect!(case1, mesh; y_range = (-1200.0, 1200.0), z_range = (200.0, 3500.0), resistivity_value = 5.0)
-
-    case2 = build_mt2d_layered_model(mesh; layer_resistivities = [30.0, 100.0], interface_depths = [1500.0])
-    add_mt2d_rect!(case2, mesh; y_range = (-5000.0, -500.0), z_range = (600.0, 2800.0), resistivity_value = 800.0)
-    add_mt2d_rect!(case2, mesh; y_range = (2000.0, 6500.0), z_range = (1200.0, 4500.0), resistivity_value = 400.0)
-
-    case3 = build_mt2d_layered_model(mesh; layer_resistivities = [80.0, 20.0, 300.0], interface_depths = [800.0, 3500.0])
-    add_mt2d_rect!(case3, mesh; y_range = (-7000.0, -2000.0), z_range = (300.0, 1800.0), resistivity_value = 3.0)
-    add_mt2d_rect!(case3, mesh; y_range = (1500.0, 6000.0), z_range = (2200.0, 6500.0), resistivity_value = 1000.0)
-
-    [
-        (name = "comemi2d_case1_dyke", label = "COMEMI2D 1", resistivity = case1),
-        (name = "comemi2d_case2_resistive_blocks", label = "COMEMI2D 2", resistivity = case2),
-        (name = "comemi2d_case3_mixed", label = "COMEMI2D 3", resistivity = case3),
-    ]
-end
-
-"""
-    mt2d_resistivity_at(mesh, resistivity, y, z)
-
-Inputs:
-- `mesh`: 2D MT mesh.
-- `resistivity`: Cell resistivity model.
-- `y`, `z`: Query coordinates in metres.
-
-Output:
-- `Float64`: Resistivity at the requested cell.
-
-Description:
-- Returns the resistivity of the cell containing the requested coordinate.
-"""
-function mt2d_resistivity_at(mesh::MT2DMesh, resistivity::AbstractMatrix{<:Real}, y::Real, z::Real)
-    iy = findfirst(i -> mesh.y_nodes[i] <= y < mesh.y_nodes[i + 1], 1:length(mesh.y_cell_sizes))
-    iz = findfirst(i -> mesh.z_nodes[i] <= z < mesh.z_nodes[i + 1], 1:length(mesh.z_cell_sizes))
-    iy === nothing && error("requested y=$y m is outside mesh bounds")
-    iz === nothing && error("requested z=$z m is outside mesh bounds")
-    Float64(resistivity[iz, iy])
-end
-
-"""
-    validate_mt2d_comemi_models(mesh, models)
-
-Inputs:
-- `mesh`: 2D MT mesh.
-- `models`: COMEMI benchmark models.
-
-Output:
-- `Vector{String}`: Descriptions of the passed geometry checks.
-
-Description:
-- Verifies that the benchmark models contain the expected anomalies and host values.
-"""
-function validate_mt2d_comemi_models(mesh::MT2DMesh, models)
-    lookup = Dict(model.name => model.resistivity for model in models)
-    required = [
-        "comemi2d_case1_dyke",
-        "comemi2d_case2_resistive_blocks",
-        "comemi2d_case3_mixed",
-    ]
-    for name in required
-        haskey(lookup, name) || error("missing COMEMI benchmark model: $name")
-    end
-
-    checks = [
-        ("comemi2d_case1_dyke", 0.0, 1000.0, 5.0, "conductive dyke core"),
-        ("comemi2d_case1_dyke", 4000.0, 1000.0, 100.0, "upper host away from dyke"),
-        ("comemi2d_case1_dyke", 4000.0, 3000.0, 500.0, "lower host away from dyke"),
-        ("comemi2d_case2_resistive_blocks", -2000.0, 1200.0, 800.0, "left resistive block"),
-        ("comemi2d_case2_resistive_blocks", 4000.0, 3000.0, 400.0, "right resistive block"),
-        ("comemi2d_case2_resistive_blocks", 0.0, 1000.0, 30.0, "upper conductive host"),
-        ("comemi2d_case2_resistive_blocks", 0.0, 3000.0, 100.0, "lower host"),
-        ("comemi2d_case3_mixed", -4000.0, 1000.0, 3.0, "left conductive anomaly"),
-        ("comemi2d_case3_mixed", 3000.0, 5000.0, 1000.0, "right deep resistive anomaly"),
-        ("comemi2d_case3_mixed", 0.0, 500.0, 80.0, "shallow background"),
-        ("comemi2d_case3_mixed", 0.0, 2000.0, 20.0, "middle background"),
-        ("comemi2d_case3_mixed", 0.0, 8000.0, 300.0, "deep background"),
-    ]
-
-    results = String[]
-    for (name, y, z, expected, label) in checks
-        value = mt2d_resistivity_at(mesh, lookup[name], y, z)
-        isapprox(value, expected; rtol = 1e-8, atol = 1e-8) || error("$name failed check '$label': got $value Ω·m, expected $expected Ω·m")
-        push!(results, "$(name) | $(label) | rho=$(round(value; digits = 3)) ohm.m")
-    end
-
-    results
-end
-
-"""
-    build_default_mt2d_mesh()
-
-Inputs:
-- None.
-
-Output:
-- `MT2DMesh`: Default COMEMI benchmark mesh.
-
-Description:
-- Builds the standard 2D benchmark mesh used by the package examples and tests.
-"""
-function build_default_mt2d_mesh()
-    build_mt2d_mesh(
-        frequencies = collect(10 .^ range(-2, 2, length = 7)),
-        y_core_range = (-9000.0, 9000.0),
-        y_core_cell = 400.0,
-        y_padding = 12_000.0,
-        pad_factor = 1.25,
-        air_top = -15_000.0,
-        air_cells = 6,
-        ground_layers = vcat(fill(200.0, 8), fill(400.0, 10), fill(800.0, 10)),
-        receiver_positions = collect(-8000.0:1600.0:8000.0),
-    )
-end
-
-"""
-    MakeMesh2D(; output_dir=...)
-
-Inputs:
-- `output_dir`: Directory where the benchmark models are written.
-
-Output:
-- Named tuple with `mesh` and `model_paths`.
-
-Description:
-- Builds the standard 2D benchmark mesh and writes the COMEMI-style models to disk.
-"""
-function MakeMesh2D(;
-    output_dir::AbstractString = joinpath(dirname(@__DIR__), "Models"),
-)
-    mesh = build_default_mt2d_mesh()
-    models = build_mt2d_comemi_models(mesh)
-    paths = Dict{String, String}()
-    filename_map = Dict(
-        "comemi2d_case1_dyke" => "Comemi2D1.true",
-        "comemi2d_case2_resistive_blocks" => "Comemi2D2.true",
-        "comemi2d_case3_mixed" => "Comemi2D3.true",
-    )
-
-    for model in models
-        filename = get(
-            filename_map,
-            model.name,
-            replace(join(uppercasefirst.(split(model.name, "_")), ""), "1d" => "1D", "2d" => "2D", "3d" => "3D") * ".true",
-        )
-        paths[model.name] = write_model2d(joinpath(output_dir, filename), mesh, model.resistivity; title = model.label)
-    end
-
-    (mesh = mesh, model_paths = paths)
-end
-
-"""
-    spunit(n)
-
-Inputs:
-- `n`: Matrix dimension.
-
-Output:
-- Sparse identity matrix.
-
-Description:
-- Builds an `n × n` sparse identity matrix.
-"""
+# sparse identity
 spunit(n::Integer) = sparse(1.0I, n, n)
 
-"""
-    spdiag((x1, x2), (d1, d2), m, n)
-
-Inputs:
-- Two diagonal vectors, their offsets, and matrix dimensions.
-
-Output:
-- Sparse matrix.
-
-Description:
-- Convenience helper for constructing a sparse two-diagonal matrix.
-"""
+# sparse two-diagonal matrix
 spdiag((x1, x2), (d1, d2), m, n) = spdiagm(m, n, d1 => x1, d2 => x2)
 
-"""
-    ddx(n)
-
-Inputs:
-- `n`: Number of cells.
-
-Output:
-- Sparse first-difference operator.
-
-Description:
-- Builds the nodal first-difference operator used by the tensor-mesh discretization.
-"""
+# first difference, n cells to n+1 nodes
 ddx(n::Integer) = spdiag((-ones(n), ones(n)), (0, 1), n, n + 1)
 
-"""
-    av(n)
-
-Inputs:
-- `n`: Number of cells.
-
-Output:
-- Sparse averaging operator.
-
-Description:
-- Builds the simple one-dimensional node-to-cell averaging operator.
-"""
+# node-to-cell average
 av(n::Integer) = spdiag((0.5 .* ones(n), 0.5 .* ones(n)), (0, 1), n, n + 1)
 
 """
@@ -678,32 +199,10 @@ function avcn(n::Integer)
     A
 end
 
-"""
-    sdiag(values)
-
-Inputs:
-- `values`: Diagonal entries.
-
-Output:
-- Sparse diagonal matrix.
-
-Description:
-- Builds a sparse diagonal matrix from a vector.
-"""
+# sparse diagonal
 sdiag(values::AbstractVector) = spdiagm(0 => values)
 
-"""
-    mesh_geo_face_2d(d1, d2)
-
-Inputs:
-- `d1`, `d2`: Cell sizes along the two tensor-mesh axes.
-
-Output:
-- Sparse diagonal face-geometry matrix.
-
-Description:
-- Builds the face geometry matrix used in the 2D tensor-mesh discretization.
-"""
+# cell areas as a sparse diagonal
 mesh_geo_face_2d(d1::Vector, d2::Vector) = kron(sdiag(d2), sdiag(d1))
 
 """
@@ -746,18 +245,7 @@ function nodal_gradient_2d(d1::Vector, d2::Vector)
     mesh_geo_edge_inv_2d(d1, d2) * [g1; g2]
 end
 
-"""
-    average_cell_to_node_2d(grid_size)
-
-Inputs:
-- `grid_size`: Two-element vector `[n_y, n_z]`.
-
-Output:
-- Sparse averaging matrix.
-
-Description:
-- Builds the 2D tensor-mesh cell-to-node averaging operator.
-"""
+# 2D cell-to-node average
 average_cell_to_node_2d(grid_size::Vector{Int}) = kron(avcn(grid_size[2]), avcn(grid_size[1]))
 
 """
@@ -788,7 +276,7 @@ Output:
 - `TensorMesh2D`: Unassembled solver mesh.
 
 Description:
-- Builds the tensor-mesh container used by the 2D finite-volume solver.
+- Builds the tensor-mesh container used by the 2D finite-difference (box integration) solver.
 """
 function TensorMesh2D(
     y_lengths::Vector{Float64},
@@ -851,7 +339,7 @@ Description:
 """
 function mt1d_boundary_field(
     frequency::Float64,
-    conductivity::Vector{Float64},
+    conductivity::AbstractVector{<:Real},
     z_nodes::Vector{Float64};
     return_magnetic::Bool = false,
 )
@@ -873,7 +361,7 @@ function mt1d_boundary_field(
         Zs = Zi * (Zs + Zi * q) / (Zi + Zs * q)
     end
 
-    layers = zeros(ComplexF64, 2, n_layers)
+    layers = zeros(Complex{eltype(conductivity)}, 2, n_layers)
     layers[1, 1] = 0.5 * Etop * (1 - ω * μ₀_2D / (Zs * k))
     layers[2, 1] = 0.5 * Etop * (1 + ω * μ₀_2D / (Zs * k))
     kall = sqrt.(μ₀_2D * ε₀ * ω^2 .- μ₀_2D .* σext .* ω .* 1im)
@@ -947,13 +435,13 @@ function get_boundary_mt2d_te(
     frequency::Float64,
     y_lengths::Vector{Float64},
     z_lengths::Vector{Float64},
-    conductivity::Vector{Float64},
+    conductivity::AbstractVector{<:Real},
 )
     n_y = length(y_lengths)
     n_z = length(z_lengths)
     z_nodes = [0.0; cumsum(z_lengths)]
     σ2d = reshape(conductivity, n_y, n_z)'
-    boundary = zeros(ComplexF64, 2 * (n_y + n_z))
+    boundary = zeros(Complex{eltype(conductivity)}, 2 * (n_y + n_z))
 
     boundary[1:n_y+1] .= 1.0 + 0.0im
     σ1d = σ2d[:, 1]
@@ -991,13 +479,13 @@ function get_boundary_mt2d_tm(
     frequency::Float64,
     y_lengths::Vector{Float64},
     z_lengths::Vector{Float64},
-    conductivity::Vector{Float64},
+    conductivity::AbstractVector{<:Real},
 )
     n_y = length(y_lengths)
     n_z = length(z_lengths)
     z_nodes = [0.0; cumsum(z_lengths)]
     σ2d = reshape(conductivity, n_y, n_z)'
-    boundary = zeros(ComplexF64, 2 * (n_y + n_z))
+    boundary = zeros(Complex{eltype(conductivity)}, 2 * (n_y + n_z))
 
     boundary[1:n_y+1] .= 1.0 + 0.0im
     σ1d = σ2d[:, 1]
@@ -1036,8 +524,8 @@ function compute_fields_at_receivers_te(
     receiver_locations::Matrix{Float64},
     y_nodes::Vector{Float64},
     first_cell_thickness::Float64,
-    sigma_row::Vector{Float64},
-    electric_pair::Matrix{ComplexF64},
+    sigma_row::AbstractVector{<:Real},
+    electric_pair::AbstractMatrix{<:Complex},
 )
     y_lengths = diff(y_nodes)
     n_y = length(y_lengths)
@@ -1053,13 +541,14 @@ function compute_fields_at_receivers_te(
     σavg = (av(n_y - 1) * (sigma_row .* y_lengths)) ./ (av(n_y - 1) * y_lengths)
     ∂Hz∂y = (ddx(n_y - 1) * Hzquarter) ./ (av(n_y - 1) * y_lengths)
 
-    Hysurface = zeros(ComplexF64, n_y + 1)
+    CT = promote_type(Complex{eltype(sigma_row)}, eltype(electric_pair))
+    Hysurface = zeros(CT, n_y + 1)
     Hysurface[2:end-1] = Hyhalf .- (∂Hz∂y .- σavg .* Equarter) .* (0.5 * first_cell_thickness)
     Hysurface[1] = Hysurface[2]
     Hysurface[end] = Hysurface[end - 1]
 
-    Erec = zeros(ComplexF64, n_receivers)
-    Hrec = zeros(ComplexF64, n_receivers)
+    Erec = zeros(CT, n_receivers)
+    Hrec = zeros(CT, n_receivers)
     for i in 1:n_receivers
         y = receiver_locations[i, 1]
         node = findfirst(v -> v > y, y_nodes)
@@ -1089,8 +578,8 @@ function compute_fields_at_receivers_tm(
     receiver_locations::Matrix{Float64},
     y_nodes::Vector{Float64},
     first_cell_thickness::Float64,
-    sigma_row::Vector{Float64},
-    magnetic_pair::Matrix{ComplexF64},
+    sigma_row::AbstractVector{<:Real},
+    magnetic_pair::AbstractMatrix{<:Complex},
 )
     y_lengths = diff(y_nodes)
     n_y = length(y_lengths)
@@ -1106,13 +595,14 @@ function compute_fields_at_receivers_tm(
     Hquarter = 0.75 .* magnetic_pair[2:end-1, 1] .+ 0.25 .* magnetic_pair[2:end-1, 2]
     ∂Ez∂y = (ddx(n_y - 1) * Ezquarter) ./ (av(n_y - 1) * y_lengths)
 
-    Eysurface = zeros(ComplexF64, n_y + 1)
+    CT = promote_type(Complex{eltype(sigma_row)}, eltype(magnetic_pair))
+    Eysurface = zeros(CT, n_y + 1)
     Eysurface[2:end-1] = Eyhalf .- (∂Ez∂y .+ 1im * ω * μ₀_2D .* Hquarter) .* (0.5 * first_cell_thickness)
     Eysurface[1] = Eysurface[2]
     Eysurface[end] = Eysurface[end - 1]
 
-    Erec = zeros(ComplexF64, n_receivers)
-    Hrec = zeros(ComplexF64, n_receivers)
+    Erec = zeros(CT, n_receivers)
+    Hrec = zeros(CT, n_receivers)
     for i in 1:n_receivers
         y = receiver_locations[i, 1]
         node = findfirst(v -> v > y, y_nodes)
@@ -1125,18 +615,7 @@ function compute_fields_at_receivers_tm(
     Erec, Hrec
 end
 
-"""
-    _phase_fold_to_0_90(phases)
-
-Inputs:
-- `phases`: Phase values in degrees.
-
-Output:
-- Folded phase values in the range `[0, 90]`.
-
-Description:
-- Folds TM phases into the convention used by the package plots and comparisons.
-"""
+# fold phases into [0, 90] degrees
 _phase_fold_to_0_90(phases::AbstractArray) = map(ϕ -> begin
     folded = ϕ < 0 ? ϕ + 180 : ϕ
     folded > 90 ? 180 - folded : folded
@@ -1215,7 +694,8 @@ function solve_mt2d_te(
     mesh::TensorMesh2D,
     coefficients::CoeffMat,
     receiver_locations::Matrix{Float64},
-    data_type::String,
+    data_type::String;
+    return_state::Bool = false,
 )
     y_lengths = mesh.y_lengths
     z_lengths = mesh.z_lengths
@@ -1229,7 +709,8 @@ function solve_mt2d_te(
     Aio = coefficients.real_io + 1im * ω * coefficients.imag_io
     boundary = get_boundary_mt2d_te(frequency, y_lengths, z_lengths, conductivity)
     rhs = -Aio * boundary
-    interior = lu(Aii) \ rhs
+    factor = lu(Aii)
+    interior = factor \ rhs
 
     field = zeros(ComplexF64, n_z + 1, n_y + 1)
     field[1, :] = boundary[1:n_y+1]
@@ -1246,7 +727,9 @@ function solve_mt2d_te(
     Erec, Hrec = compute_fields_at_receivers_te(ω, receiver_locations, y_nodes, Δz1, σrow, Epair)
 
     response = compute_mt_response_te(ω, Erec, Hrec, data_type)
-    response, vec(copy(transpose(field)))
+    u = vec(copy(transpose(field)))
+    return_state && return response, u, (; factor, Aio, u, z_index, frequency)
+    response, u
 end
 
 """
@@ -1268,6 +751,7 @@ function solve_mt2d_tm(
     receiver_locations::Matrix{Float64},
     data_type::String;
     fold_phase::Bool = true,
+    return_state::Bool = false,
 )
     y_lengths = mesh.y_lengths
     z_lengths = mesh.z_lengths
@@ -1281,7 +765,8 @@ function solve_mt2d_tm(
     Aio = coefficients.real_io + 1im * ω * coefficients.imag_io
     boundary = get_boundary_mt2d_tm(frequency, y_lengths, z_lengths, conductivity)
     rhs = -Aio * boundary
-    interior = lu(Aii) \ rhs
+    factor = lu(Aii)
+    interior = factor \ rhs
 
     field = zeros(ComplexF64, n_z + 1, n_y + 1)
     field[1, :] = boundary[1:n_y+1]
@@ -1298,7 +783,9 @@ function solve_mt2d_tm(
     Erec, Hrec = compute_fields_at_receivers_tm(ω, receiver_locations, y_nodes, Δz1, σrow, Hpair)
 
     response = compute_mt_response_tm(ω, Erec, Hrec, data_type; fold_phase = fold_phase)
-    response, vec(copy(transpose(field)))
+    u = vec(copy(transpose(field)))
+    return_state && return response, u, (; factor, Aio, u, z_index, frequency)
+    response, u
 end
 
 """
@@ -1312,7 +799,7 @@ Output:
 - Tuple with the tensor mesh, TE coefficients, TM coefficients, and receiver locations.
 
 Description:
-- Assembles the sparse finite-volume operators needed for the 2D forward solve.
+- Assembles the sparse finite-difference (box integration) operators needed for the 2D forward solve.
 """
 function _assemble_mt2d_system(mesh::MT2DMesh, resistivity::AbstractMatrix{<:Real})
     n_z = length(mesh.z_cell_sizes)
@@ -1360,6 +847,42 @@ function _assemble_mt2d_system(mesh::MT2DMesh, resistivity::AbstractMatrix{<:Rea
     tensor_mesh, coeffs_te, coeffs_tm, receiver_locations
 end
 
+function _mt2d_forward_cache(mesh, resistivity; mode = :TETM, cache_fields::Bool = true)
+    mode in (:TE, :TM, :TETM) || throw(ArgumentError("mode must be :TE, :TM, or :TETM"))
+    size(resistivity) == (length(mesh.z_cell_sizes), length(mesh.y_cell_sizes)) ||
+        throw(DimensionMismatch("resistivity must have shape (nz, ny)"))
+    0 <= mesh.n_air_cells < size(resistivity, 1) || throw(ArgumentError("invalid air cell count"))
+    all(x -> isfinite(x) && x > 0, resistivity[mesh.n_air_cells+1:end, :]) ||
+        throw(ArgumentError("earth resistivities must be finite and positive"))
+    all(x -> isfinite(x) && x > 0, mesh.frequencies) || throw(ArgumentError("frequencies must be finite and positive"))
+    all(y -> first(mesh.y_nodes) <= y < last(mesh.y_nodes), mesh.receiver_positions) ||
+        throw(ArgumentError("receivers must lie in [first(y_nodes), last(y_nodes))"))
+    t, te, tm, locations = _assemble_mt2d_system(mesh, resistivity)
+    inside, outside = get_boundary_index(t.grid_size...)
+    nf, nr = length(mesh.frequencies), length(mesh.receiver_positions)
+    arrays = (rho_xy = zeros(nf, nr), phase_xy = zeros(nf, nr), z_xy = zeros(ComplexF64, nf, nr),
+              rho_yx = zeros(nf, nr), phase_yx = zeros(nf, nr), z_yx = zeros(ComplexF64, nf, nr))
+    states = []
+    if nr > 0
+        for (i, f) in enumerate(mesh.frequencies), pol in (:TE, :TM)
+            mode in (pol, :TETM) || continue
+            solver, coeff = pol == :TE ? (solve_mt2d_te, te) : (solve_mt2d_tm, tm)
+            data, _, state = solver(f, t, coeff, locations, "Impedance"; return_state = true)
+            Z = complex.(data[:, 1], data[:, 2])
+            rho, phase, z = pol == :TE ? (arrays.rho_xy, arrays.phase_xy, arrays.z_xy) :
+                                       (arrays.rho_yx, arrays.phase_yx, arrays.z_yx)
+            z[i, :] = Z
+            rho[i, :] = abs2.(Z) ./ (2π * f * μ₀_2D)
+            phase[i, :] = rad2deg.(angle.(Z))
+            cache_fields && push!(states, (; state..., pol, i))
+        end
+    end
+    response = MT2DResponse(; frequencies = mesh.frequencies, periods = 1 ./ mesh.frequencies,
+                            receivers = mesh.receiver_positions, arrays...)
+    response, (; mesh, t, locations, inside, outside, states, response)
+end
+
+
 """
     run_mt2d_forward(mesh, resistivity; mode=:TETM)
 
@@ -1379,45 +902,8 @@ function run_mt2d_forward(
     resistivity::AbstractMatrix{<:Real};
     mode::Symbol = :TETM,
 )
-    tensor_mesh, coeffs_te, coeffs_tm, receiver_locations = _assemble_mt2d_system(mesh, resistivity)
-
-    n_f = length(mesh.frequencies)
-    n_r = length(mesh.receiver_positions)
-    rho_xy = zeros(n_f, n_r)
-    phase_xy = zeros(n_f, n_r)
-    z_xy = zeros(ComplexF64, n_f, n_r)
-    rho_yx = zeros(n_f, n_r)
-    phase_yx = zeros(n_f, n_r)
-    z_yx = zeros(ComplexF64, n_f, n_r)
-
-    for (i, f) in enumerate(mesh.frequencies)
-        if mode in (:TE, :TETM)
-            response_te, _ = solve_mt2d_te(f, tensor_mesh, coeffs_te, receiver_locations, "Rho_Pha")
-            rho_xy[i, :] .= response_te[:, 1]
-            phase_xy[i, :] .= response_te[:, 2]
-            impedance_te, _ = solve_mt2d_te(f, tensor_mesh, coeffs_te, receiver_locations, "Impedance")
-            z_xy[i, :] .= complex.(impedance_te[:, 1], impedance_te[:, 2])
-        end
-        if mode in (:TM, :TETM)
-            response_tm, _ = solve_mt2d_tm(f, tensor_mesh, coeffs_tm, receiver_locations, "Rho_Pha"; fold_phase = false)
-            rho_yx[i, :] .= response_tm[:, 1]
-            phase_yx[i, :] .= response_tm[:, 2]
-            impedance_tm, _ = solve_mt2d_tm(f, tensor_mesh, coeffs_tm, receiver_locations, "Impedance"; fold_phase = false)
-            z_yx[i, :] .= complex.(impedance_tm[:, 1], impedance_tm[:, 2])
-        end
-    end
-
-    MT2DResponse(
-        frequencies = mesh.frequencies,
-        periods = 1.0 ./ mesh.frequencies,
-        receivers = mesh.receiver_positions,
-        rho_xy = rho_xy,
-        phase_xy = phase_xy,
-        z_xy = z_xy,
-        rho_yx = rho_yx,
-        phase_yx = phase_yx,
-        z_yx = z_yx,
-    )
+    response, _ = _mt2d_forward_cache(mesh, resistivity; mode, cache_fields = false)
+    response
 end
 
 """
@@ -1473,198 +959,7 @@ Output:
 Description:
 - Public alias for `run_mt2d_forward`.
 """
-Forward2D(mesh::MT2DMesh, resistivity::AbstractMatrix{<:Real}) = run_mt2d_forward(mesh, resistivity)
-
-"""
-    _write_vector_lines(io, values; per_line=12)
-
-Inputs:
-- Output stream, numeric values, and the number of values per line.
-
-Output:
-- Nothing.
-
-Description:
-- Writes a numeric vector to an open text stream using fixed-width scientific notation.
-"""
-function _write_vector_lines(io, values::AbstractVector{<:Real}; per_line::Int = 12)
-    for first_index in 1:per_line:length(values)
-        last_index = min(first_index + per_line - 1, length(values))
-        println(io, join([@sprintf("%.8e", Float64(values[idx])) for idx in first_index:last_index], " "))
-    end
-end
-
-"""
-    write_model2d(path, mesh, resistivity; title="MTGeophysics.jl 2D profile model", use_loge=true)
-
-Inputs:
-- Output path, 2D mesh, resistivity model, and file-format options.
-
-Output:
-- `String`: Path to the written model file.
-
-Description:
-- Writes a 2D profile model file that can be reloaded by the package.
-"""
-function write_model2d(
-    path::AbstractString,
-    mesh::MT2DMesh,
-    resistivity::AbstractMatrix{<:Real};
-    title::AbstractString = "MTGeophysics.jl 2D profile model",
-    use_loge::Bool = true,
-)
-    n_z = length(mesh.z_cell_sizes)
-    n_y = length(mesh.y_cell_sizes)
-    size(resistivity) == (n_z, n_y) || error("resistivity must be size ($(n_z), $(n_y))")
-
-    mkpath(dirname(path))
-    open(path, "w") do io
-        println(io, "# $(title)")
-        println(io, "# NZA=$(mesh.n_air_cells)")
-        println(io, "1 $(n_y) $(n_z) 0 $(use_loge ? "LOGE" : "LINEAR")")
-        _write_vector_lines(io, [1.0])
-        _write_vector_lines(io, mesh.y_cell_sizes)
-        _write_vector_lines(io, mesh.z_cell_sizes)
-
-        values = Float64[]
-        sizehint!(values, n_y * n_z)
-        for iz in 1:n_z, iy in 1:n_y
-            ρ = Float64(resistivity[iz, iy])
-            push!(values, use_loge ? log(ρ) : ρ)
-        end
-        _write_vector_lines(io, values)
-
-        println(io, @sprintf("%.8e %.8e %.8e", 0.0, first(mesh.y_nodes), first(mesh.z_nodes)))
-        println(io, "0.0")
-    end
-
-    String(path)
-end
-
-"""
-    load_model2d(path)
-
-Inputs:
-- `path`: Path to a 2D model file.
-
-Output:
-- `ModelFile2D`: Parsed model file.
-
-Description:
-- Reads a 2D model file written by the package and reconstructs the stored metadata.
-"""
-function load_model2d(path::AbstractString)
-    isfile(path) || error("model file not found: $path")
-    lines = readlines(path)
-
-    title = "MTGeophysics.jl 2D profile model"
-    n_air_cells = 0
-    dims_index = nothing
-    for (line_index, line) in enumerate(lines)
-        stripped = strip(line)
-        isempty(stripped) && continue
-        if startswith(stripped, "#")
-            title == "MTGeophysics.jl 2D profile model" && (title = strip(replace(stripped, "#" => "")))
-            if occursin("NZA=", stripped)
-                parts = split(stripped, "NZA=")
-                length(parts) > 1 && (n_air_cells = something(tryparse(Int, strip(parts[2])), 0))
-            end
-            continue
-        end
-        tokens = split(stripped)
-        if length(tokens) >= 5 && all(token -> occursin(r"^-?\d+$", token), tokens[1:4])
-            dims_index = line_index
-            break
-        end
-    end
-    dims_index === nothing && error("could not locate model dimension line in $path")
-
-    dims_tokens = split(strip(lines[dims_index]))
-    n_x = parse(Int, dims_tokens[1])
-    n_y = parse(Int, dims_tokens[2])
-    n_z = parse(Int, dims_tokens[3])
-    format = uppercase(dims_tokens[5])
-    n_x == 1 || error("this 2D profile file expects nx=1, got $n_x")
-
-    numeric_tokens = String[]
-    for line in lines[(dims_index + 1):end]
-        stripped = strip(line)
-        isempty(stripped) && continue
-        startswith(stripped, "#") && continue
-        append!(numeric_tokens, split(stripped))
-    end
-    values = parse.(Float64, numeric_tokens)
-    required_values = n_x + n_y + n_z + n_x * n_y * n_z + 4
-    length(values) >= required_values || error("model file is incomplete: expected at least $required_values numeric values, got $(length(values))")
-
-    index = 1
-    x_cell_sizes = values[index:(index + n_x - 1)]
-    index += n_x
-    y_cell_sizes = values[index:(index + n_y - 1)]
-    index += n_y
-    z_cell_sizes = values[index:(index + n_z - 1)]
-    index += n_z
-
-    block_values = values[index:(index + n_x * n_y * n_z - 1)]
-    index += n_x * n_y * n_z
-    ρvalues = format == "LOGE" ? exp.(block_values) : block_values
-
-    resistivity = Matrix{Float64}(undef, n_z, n_y)
-    value_index = 1
-    for iz in 1:n_z, iy in 1:n_y
-        resistivity[iz, iy] = ρvalues[value_index]
-        value_index += 1
-    end
-
-    origin = Float64[values[index], values[index + 1], values[index + 2]]
-    index += 3
-    rotation = values[index]
-
-    ModelFile2D(
-        title = title,
-        x_cell_sizes = Float64.(x_cell_sizes),
-        y_cell_sizes = Float64.(y_cell_sizes),
-        z_cell_sizes = Float64.(z_cell_sizes),
-        resistivity = resistivity,
-        n_air_cells = n_air_cells,
-        origin = origin,
-        rotation = rotation,
-        format = format,
-        path = String(path),
-    )
-end
-
-"""
-    build_mesh_from_model2d(model; frequencies, receiver_positions)
-
-Inputs:
-- `model`: Parsed 2D model file.
-- `frequencies`: Survey frequencies in hertz.
-- `receiver_positions`: Receiver offsets in metres.
-
-Output:
-- `MT2DMesh`: Solver mesh matching the stored model.
-
-Description:
-- Reconstructs a 2D solver mesh from a saved model file and survey definition.
-"""
-function build_mesh_from_model2d(
-    model::ModelFile2D;
-    frequencies::AbstractVector{<:Real},
-    receiver_positions::AbstractVector{<:Real},
-)
-    y_nodes = model.origin[2] .+ vcat(0.0, cumsum(model.y_cell_sizes))
-    z_nodes = model.origin[3] .+ vcat(0.0, cumsum(model.z_cell_sizes))
-    MT2DMesh(
-        y_nodes = Float64.(y_nodes),
-        z_nodes = Float64.(z_nodes),
-        y_cell_sizes = Float64.(model.y_cell_sizes),
-        z_cell_sizes = Float64.(model.z_cell_sizes),
-        receiver_positions = Float64.(receiver_positions),
-        frequencies = Float64.(frequencies),
-        n_air_cells = model.n_air_cells,
-    )
-end
+Forward2D(mesh::MT2DMesh, resistivity::AbstractMatrix{<:Real}; kwargs...) = run_mt2d_forward(mesh, resistivity; kwargs...)
 
 """
     _impedance_to_rho_phase(impedance, frequency)
@@ -1795,7 +1090,7 @@ function write_data2d(
     mkpath(dirname(path))
     open(path, "w") do io
         println(io, "# $(data.title)")
-        println(io, "# Generated by MTGeophysics.jl/src/MTGeophysics2D.jl")
+        println(io, "# Generated by MTGeophysics.jl/src/Fwd2D.jl")
         println(io, "# Period(s) Site Lat Lon X(m) Y(m) Z(m) Component Real Imag Error")
         println(io, "> Full_Impedance")
         println(io, "> exp(+i\\omega t)")
@@ -2220,269 +1515,248 @@ function ForwardSolve2D(
     write_data2d(destination, observed)
 end
 
-"""
-    _plot_core_indices_2d(cell_sizes; tol=0.20)
 
-Inputs:
-- Cell sizes and a core-detection tolerance.
+#---------- fréchet derivatives ----------
 
-Output:
-- `UnitRange{Int}`: Detected core-cell range.
 
-Description:
-- Detects the central uniform-cell part of the 2D mesh for plotting.
-"""
-function _plot_core_indices_2d(cell_sizes::AbstractVector{<:Real}; tol::Real = 0.20)
-    minimum_size = minimum(Float64.(cell_sizes))
-    threshold = minimum_size * (1 + Float64(tol))
-    indices = findall(size -> Float64(size) <= threshold + 1e-9, cell_sizes)
-    isempty(indices) ? (1:length(cell_sizes)) : (first(indices):last(indices))
+const _MT2D_FIELDS = (:rho_xy, :phase_xy, :z_xy, :rho_yx, :phase_yx, :z_yx)
+
+# forwarddiff only on the small model-dependent boundary and receiver kernels
+# the sparse lu is differentiated implicitly, A δu = -δA u with δu = δb on the boundary
+_mt2d_seed(x::Real, δx::Real) = ForwardDiff.Dual{Nothing}(x, δx)
+_mt2d_seed(x::Complex, δx::Complex) = complex(_mt2d_seed(real(x), real(δx)), _mt2d_seed(imag(x), imag(δx)))
+_mt2d_partial(x::ForwardDiff.Dual) = ForwardDiff.partials(x)[1]
+_mt2d_partial(x::Complex) = complex(_mt2d_partial(real(x)), _mt2d_partial(imag(x)))
+
+function _mt2d_parameter_scale(mesh, rho, parameterization)
+    parameterization in (:resistivity, :log_resistivity, :log10_resistivity) ||
+        throw(ArgumentError("parameterization must be :resistivity, :log_resistivity, or :log10_resistivity"))
+    scale = parameterization == :resistivity ? ones(size(rho)) :
+            parameterization == :log_resistivity ? Float64.(rho) : log(10.0) .* rho
+    scale[1:mesh.n_air_cells, :] .= 0
+    scale
 end
 
-"""
-    plot_mt2d_model(mesh, resistivity; output_path, show_air=false, show_grid=false, show_padding=true, maximum_depth_km=Inf, resistivity_log10_range=(0.0, 4.0))
+function _mt2d_surface_input(c, s)
+    ny = c.t.grid_size[1]
+    row = (s.z_index-1)*ny+1:s.z_index*ny
+    nodes = (s.z_index-1)*(ny+1)+1:(s.z_index+1)*(ny+1)
+    vcat(c.t.conductivity[row], real.(s.u[nodes]), imag.(s.u[nodes])), row, nodes
+end
 
-Inputs:
-- 2D mesh, resistivity model, output image path, and plotting controls.
+function _mt2d_sample(c, s, x)
+    ny = c.t.grid_size[1]
+    n = 2*(ny+1)
+    σ = x[1:ny]
+    pair = reshape(complex.(x[ny+1:ny+n], x[ny+n+1:ny+2n]), ny+1, 2)
+    sampler = s.pol == :TE ? compute_fields_at_receivers_te : compute_fields_at_receivers_tm
+    E, H = sampler(2π*s.frequency, c.locations, [0.0; cumsum(c.t.y_lengths)],
+                   c.t.z_lengths[s.z_index], σ, pair)
+    E ./ H
+end
 
-Output:
-- `String`: Path to the written plot.
-
-Description:
-- Writes the standard 2D resistivity-model plot.
-"""
-function plot_mt2d_model(
-    mesh::MT2DMesh,
-    resistivity::AbstractMatrix{<:Real};
-    output_path::AbstractString,
-    show_air::Bool = false,
-    show_grid::Bool = false,
-    show_padding::Bool = true,
-    maximum_depth_km::Real = Inf,
-    resistivity_log10_range::Tuple{Float64, Float64} = (0.0, 4.0),
-)
-    CairoMakie.activate!()
-    mkpath(dirname(output_path))
-
-    core_y = _plot_core_indices_2d(mesh.y_cell_sizes)
-    column_range = show_padding ? (1:size(resistivity, 2)) : core_y
-    y_edges = mesh.y_nodes[first(column_range):(last(column_range) + 1)] ./ 1000
-    row_range = show_air ? (1:size(resistivity, 1)) : ((mesh.n_air_cells + 1):size(resistivity, 1))
-    z_edges = show_air ? (mesh.z_nodes ./ 1000) : (mesh.z_nodes[(mesh.n_air_cells + 1):end] ./ 1000)
-    rho_plot = log10.(resistivity[row_range, column_range])
-
-    figure = Figure(size = (1100, 650))
-    axis = Axis(
-        figure[1, 1],
-        xlabel = "Offset (km)",
-        ylabel = "Depth (km)",
-        yreversed = !show_air,
-        title = show_air ? "2D resistivity model with air" : "2D resistivity model",
-    )
-    heatmap = heatmap!(axis, y_edges, z_edges, rho_plot', colormap = :Spectral, colorrange = resistivity_log10_range)
-    Colorbar(figure[1, 2], heatmap, label = "log10(ρ)")
-    xlims!(axis, minimum(y_edges), maximum(y_edges))
-
-    scatter!(
-        axis,
-        mesh.receiver_positions ./ 1000,
-        fill(0.0, length(mesh.receiver_positions));
-        marker = :dtriangle,
-        markersize = 12,
-        color = :black,
-    )
-
-    if show_grid
-        for edge in y_edges
-            vlines!(axis, [edge], color = (:black, 0.15), linewidth = 1)
-        end
-        for edge in z_edges
-            hlines!(axis, [edge], color = (:black, 0.15), linewidth = 1)
-        end
+function _mt2d_frechet(c, δρ)
+    σ = c.t.conductivity
+    δσ = -σ.^2 .* vec(permutedims(δρ))
+    δσ[1:c.mesh.n_air_cells*c.t.grid_size[1]] .= 0
+    Mn = c.t.average_cell_to_node * c.t.face
+    Mf = c.t.average_cell_to_face * c.t.face
+    D = c.t.gradient
+    out = NamedTuple{_MT2D_FIELDS}(Tuple(zeros(eltype(getproperty(c.response, k)), size(getproperty(c.response, k))) for k in _MT2D_FIELDS))
+    for s in c.states
+        boundary = s.pol == :TE ? get_boundary_mt2d_te : get_boundary_mt2d_tm
+        δb = _mt2d_partial.(boundary(s.frequency, c.t.y_lengths, c.t.z_lengths, _mt2d_seed.(σ, δσ)))
+        δAu = s.pol == :TE ? 1im*2π*s.frequency .* (Mn * δσ) .* s.u :
+                             D' * ((Mf * (-δσ ./ σ.^2)) .* (D*s.u))
+        δu = zeros(ComplexF64, length(s.u))
+        δu[c.outside] = δb
+        δu[c.inside] = s.factor \ (-δAu[c.inside] - s.Aio * δb)
+        x, row, nodes = _mt2d_surface_input(c, s)
+        δx = vcat(δσ[row], real.(δu[nodes]), imag.(δu[nodes]))
+        δz = _mt2d_partial.(_mt2d_sample(c, s, _mt2d_seed.(x, δx)))
+        rk, pk, zk = s.pol == :TE ? (:rho_xy, :phase_xy, :z_xy) : (:rho_yx, :phase_yx, :z_yx)
+        z = getproperty(c.response, zk)[s.i, :]
+        getproperty(out, zk)[s.i, :] = δz
+        getproperty(out, rk)[s.i, :] = 2 .* real.(conj.(z) .* δz) ./ (2π*s.frequency*μ₀_2D)
+        getproperty(out, pk)[s.i, :] = rad2deg.(imag.(δz ./ z))
     end
+    out
+end
 
-    if !show_air
-        depth_limit_km = isfinite(Float64(maximum_depth_km)) ? min(Float64(maximum_depth_km), maximum(z_edges)) : maximum(z_edges)
-        ylims!(axis, depth_limit_km, 0.0)
+# Gᵗ through the 1D boundary columns, one column at a time, so no dense boundary
+# fréchet block is formed and the reverse pass stays local to each profile
+function _mt2d_boundary_frechet_transpose(c, s, b̂)
+    ny, nz = c.t.grid_size
+    σ = reshape(c.t.conductivity, ny, nz)
+    g = zeros(ny, nz)
+    zn = [0.0; cumsum(c.t.z_lengths)]
+    function profile(x)
+        if s.pol == :TE
+            E = mt1d_boundary_field(s.frequency, x, zn)
+            return vec(E ./ E[1])
+        end
+        _, H = mt1d_boundary_field(s.frequency, x, zn; return_magnetic = true)
+        vec(H ./ H[1])
     end
+    for (iy, inds) in ((1, ny+2:ny+nz+1), (ny, ny+nz+2:ny+2nz+1))
+        weights = b̂[inds]
+        g[iy, :] .+= ForwardDiff.gradient(x -> real(dot(weights, profile(x)[2:end])), σ[iy, :])
+    end
+    for iy in 2:ny
+        w = c.t.y_lengths[iy-1] / (c.t.y_lengths[iy-1] + c.t.y_lengths[iy])
+        x = w .* σ[iy-1, :] .+ (1-w) .* σ[iy, :]
+        weight = b̂[ny+2nz+iy]
+        x̂ = ForwardDiff.gradient(x -> real(conj(weight)*profile(x)[end]), x)
+        g[iy-1, :] .+= w .* x̂
+        g[iy, :] .+= (1-w) .* x̂
+    end
+    vec(g)
+end
 
-    save(output_path, figure)
-    String(output_path)
+function _mt2d_dual(δd̂, key, template)
+    !hasproperty(δd̂, key) && return zero(template)
+    value = getproperty(δd̂, key)
+    size(value) == size(template) || throw(DimensionMismatch("δd̂ $key has the wrong shape"))
+    value
+end
+
+_mt2d_ops(c) = (Mn = c.t.average_cell_to_node * c.t.face, Mf = c.t.average_cell_to_face * c.t.face, D = c.t.gradient)
+
+# Gᵗ for one frequency and mode: adds ∂ real(dot(ẑ, z)) / ∂σ into σ̂,
+# ẑ = impedance part of δd̂ at the receivers, λ = adjoint field
+function _mt2d_state_frechet_transpose!(σ̂, c, s, ẑ, ops)
+    σ = c.t.conductivity
+    x, row, nodes = _mt2d_surface_input(c, s)
+    x̂ = ForwardDiff.gradient(x -> real(dot(ẑ, _mt2d_sample(c, s, x))), x)
+    ny = c.t.grid_size[1]
+    n = length(nodes)
+    û = zeros(ComplexF64, length(s.u))
+    û[nodes] = complex.(x̂[ny+1:ny+n], x̂[ny+n+1:ny+2n])
+    σ̂[row] .+= x̂[1:ny]
+    λ = zeros(ComplexF64, length(s.u))
+    λ[c.inside] = s.factor' \ û[c.inside]
+    b̂ = û[c.outside] - s.Aio' * λ[c.inside]
+    if s.pol == :TE
+        σ̂ .+= ops.Mn' * real.(-1im*2π*s.frequency .* conj.(λ) .* s.u)
+    else
+        σ̂ .+= (ops.Mf' * real.(conj.(ops.D*λ) .* (ops.D*s.u))) ./ σ.^2
+    end
+    σ̂ .+= _mt2d_boundary_frechet_transpose(c, s, b̂)
+    σ̂
+end
+
+# σ̂ to model-shaped ρ̂ = -σ² σ̂, air zeroed
+function _mt2d_dual_to_rho(c, σ̂)
+    ρ̂ = permutedims(reshape(-c.t.conductivity.^2 .* σ̂, c.t.grid_size...))
+    ρ̂[1:c.mesh.n_air_cells, :] .= 0
+    ρ̂
+end
+
+function _mt2d_frechet_transpose(c, δd̂)
+    σ̂ = zeros(length(c.t.conductivity))
+    ops = _mt2d_ops(c)
+    d̂ = NamedTuple{_MT2D_FIELDS}(Tuple(_mt2d_dual(δd̂, k, getproperty(c.response, k)) for k in _MT2D_FIELDS))
+    for s in c.states
+        rk, pk, zk = s.pol == :TE ? (:rho_xy, :phase_xy, :z_xy) : (:rho_yx, :phase_yx, :z_yx)
+        z = getproperty(c.response, zk)[s.i, :]
+        ẑ = getproperty(d̂, zk)[s.i, :] .+
+               (2/(2π*s.frequency*μ₀_2D)) .* getproperty(d̂, rk)[s.i, :] .* z .+
+               (180/π) .* getproperty(d̂, pk)[s.i, :] .* (1im ./ conj.(z))
+        _mt2d_state_frechet_transpose!(σ̂, c, s, ẑ, ops)
+    end
+    _mt2d_dual_to_rho(c, σ̂)
+end
+
+# rows of G by transpose solves, each (key, index, weight) row gives
+# ∂ real(conj(weight) z[key][index]) / ∂ρ over the whole model, one adjoint
+# solve per row in its own frequency and mode, rows × model cells, (z, y) order
+function _mt2d_frechet_rows(c, rows)
+    ops = _mt2d_ops(c)
+    nr = size(c.response.z_xy, 2)
+    state = Dict((s.pol == :TE ? :z_xy : :z_yx, s.i) => s for s in c.states)
+    out = zeros(length(rows), prod(c.t.grid_size))
+    σ̂ = zeros(length(c.t.conductivity))
+    ẑ = zeros(ComplexF64, nr)
+    for (k, row) in enumerate(rows)
+        f, r = Tuple(CartesianIndices(size(c.response.z_xy))[row.index])
+        fill!(σ̂, 0); fill!(ẑ, 0)
+        ẑ[r] = row.weight
+        _mt2d_state_frechet_transpose!(σ̂, c, state[(row.key, f)], ẑ, ops)
+        out[k, :] = vec(_mt2d_dual_to_rho(c, σ̂))
+    end
+    out
 end
 
 """
-    PlotModel2D(model_path; output_path, show_grid=false, show_padding=true, maximum_depth_km=Inf, resistivity_log10_range=(0.0, 4.0))
+    ApplyFrechet2D(mesh, ρ, δm; mode=:TETM, parameterization=:resistivity)
 
-Inputs:
-- 2D model path, output image path, and plotting controls.
-
-Output:
-- `String`: Path to the written plot.
-
-Description:
-- Loads a saved 2D model and writes the standard model plot.
+Tangent linear application δd = G δm without forming G, with G = ∂g/∂m the Fréchet
+derivative of the forward relation d = g(m) (Tarantola, 2005).
+- `ρ`: model in ohm metres, air included
+- `δm`: model-shaped perturbation in `parameterization` coordinates,
+  `:resistivity`, `:log_resistivity` (natural log), or `:log10_resistivity`
+- returns δd as a named tuple of `rho_xy`, `phase_xy`, `z_xy`, `rho_yx`, `phase_yx`, `z_yx`,
+  each `(frequency, receiver)`, phases in degrees; air cells are fixed
 """
-function PlotModel2D(
-    model_path::AbstractString;
-    output_path::AbstractString,
-    show_grid::Bool = false,
-    show_padding::Bool = true,
-    maximum_depth_km::Real = Inf,
-    resistivity_log10_range::Tuple{Float64, Float64} = (0.0, 4.0),
-)
-    model = load_model2d(model_path)
-    mesh = build_mesh_from_model2d(model; frequencies = [1.0], receiver_positions = Float64[])
-    plot_mt2d_model(
-        mesh,
-        model.resistivity;
-        output_path = output_path,
-        show_grid = show_grid,
-        show_padding = show_padding,
-        maximum_depth_km = maximum_depth_km,
-        resistivity_log10_range = resistivity_log10_range,
-    )
+function ApplyFrechet2D(mesh::MT2DMesh, ρ::AbstractMatrix{<:Real}, δm::AbstractMatrix{<:Real};
+                  mode::Symbol = :TETM, parameterization::Symbol = :resistivity)
+    size(δm) == size(ρ) || throw(DimensionMismatch("δm must match resistivity"))
+    _, c = _mt2d_forward_cache(mesh, ρ; mode)
+    _mt2d_frechet(c, δm .* _mt2d_parameter_scale(mesh, ρ, parameterization))
 end
 
 """
-    phase180(values)
+    ApplyFrechetTranspose2D(mesh, ρ, δd̂; mode=:TETM, parameterization=:resistivity)
 
-Inputs:
-- Phase values in degrees.
-
-Output:
-- Phase values folded to `[-180, 180]`.
-
-Description:
-- Wraps phase angles for the 2D map plot.
+Transpose application δm̂ = Gᵗ δd̂ (Tarantola, 2005), one adjoint solve per frequency and mode.
+- `δd̂`: dual data vector, a named tuple with any subset of the six response fields,
+  missing fields are zero; impedances pair as `real(dot(δd̂, δz))`
+- returns δm̂, model-shaped `(z, y)`, in `parameterization` coordinates, so that
+  `sum(δm̂ .* δm)` equals the pairing of δd̂ with `ApplyFrechet2D(mesh, ρ, δm)`
 """
-phase180(values) = ((values .+ 180) .% 360) .- 180
-
-"""
-    plot_mt2d_data_maps(response; output_path)
-
-Inputs:
-- 2D MT response and output image path.
-
-Output:
-- `String`: Path to the written plot.
-
-Description:
-- Writes the standard 2D TE/TM response maps.
-"""
-function plot_mt2d_data_maps(
-    response::MT2DResponse;
-    output_path::AbstractString,
-)
-    CairoMakie.activate!()
-    mkpath(dirname(output_path))
-
-    rx_km = response.receivers ./ 1000
-    periods = response.periods
-    log_periods = log10.(periods)
-    tm_phase = _phase_fold_to_0_90(response.phase_yx)
-    figure = Figure(size = (1400, 900))
-
-    # Clamp negative apparent resistivities (numerical artifacts) to eps() before log10
-    rho_xy_safe = max.(response.rho_xy, eps())
-    rho_yx_safe = max.(response.rho_yx, eps())
-
-    ax1 = Axis(figure[1, 1], xlabel = "Position (km)", ylabel = "log10 Period (s)", title = "TE log10(ρxy)")
-    hm1 = heatmap!(ax1, rx_km, log_periods, log10.(rho_xy_safe)', colormap = :Spectral)
-    Colorbar(figure[1, 2], hm1)
-
-    ax2 = Axis(figure[1, 3], xlabel = "Position (km)", ylabel = "log10 Period (s)", title = "TM log10(ρyx)")
-    hm2 = heatmap!(ax2, rx_km, log_periods, log10.(rho_yx_safe)', colormap = :Spectral)
-    Colorbar(figure[1, 4], hm2)
-
-    ax3 = Axis(figure[2, 1], xlabel = "Position (km)", ylabel = "log10 Period (s)", title = "TE phase")
-    hm3 = heatmap!(ax3, rx_km, log_periods, phase180(response.phase_xy)', colormap = :Spectral, colorrange = (-180, 180))
-    Colorbar(figure[2, 2], hm3, ticks = [-180, -90, 0, 90, 180])
-
-    ax4 = Axis(figure[2, 3], xlabel = "Position (km)", ylabel = "log10 Period (s)", title = "TM phase")
-    hm4 = heatmap!(ax4, rx_km, log_periods, tm_phase', colormap = :Spectral, colorrange = (0, 90))
-    Colorbar(figure[2, 4], hm4, ticks = [0, 30, 60, 90])
-
-    save(output_path, figure)
-    String(output_path)
+function ApplyFrechetTranspose2D(mesh::MT2DMesh, ρ::AbstractMatrix{<:Real}, δd̂;
+                  mode::Symbol = :TETM, parameterization::Symbol = :resistivity)
+    _, c = _mt2d_forward_cache(mesh, ρ; mode)
+    _mt2d_frechet_transpose(c, δd̂) .* _mt2d_parameter_scale(mesh, ρ, parameterization)
 end
 
 """
-    plot_mt2d_site_curves(response; station_index=cld(length(response.receivers), 2), output_path)
+    FrechetDerivative2D(mesh, ρ; mode=:TETM, parameterization=:resistivity, active_cells=nothing)
 
-Inputs:
-- 2D MT response, station index, and output image path.
-
-Output:
-- `String`: Path to the written plot.
-
-Description:
-- Writes the representative-station TE/TM response curves.
+Explicit Fréchet derivative G, Gⁱ_α = ∂gⁱ/∂mᵅ (Tarantola, 2005), one tangent linear solve per
+column with the forward lu factors reused.
+- returns `(response, cells, parameterization, rho_xy, phase_xy, z_xy, rho_yx, phase_yx, z_yx)`,
+  each block `(nf * nr, length(cells))`; rows follow `vec(response.field)`, frequency fastest;
+  columns follow `cells`, Cartesian indices in model `(z, y)` order
+- `active_cells`: `nothing` for all earth cells, a model-shaped Bool mask, or Cartesian/linear
+  indices; requested air columns are zero
+- for large models use `ApplyFrechet2D` and `ApplyFrechetTranspose2D` instead
 """
-function plot_mt2d_site_curves(
-    response::MT2DResponse;
-    station_index::Integer = cld(length(response.receivers), 2),
-    output_path::AbstractString,
-)
-    CairoMakie.activate!()
-    mkpath(dirname(output_path))
-
-    tm_phase = _phase_fold_to_0_90(response.phase_yx[:, station_index])
-    figure = Figure(size = (900, 700))
-    rho_axis = Axis(
-        figure[1, 1],
-        xlabel = "Period (s)",
-        ylabel = "Apparent resistivity (Ω·m)",
-        xscale = log10,
-        yscale = log10,
-        title = "Station $(station_index) response",
-    )
-    phase_axis = Axis(
-        figure[2, 1],
-        xlabel = "Period (s)",
-        ylabel = "Phase (deg)",
-        xscale = log10,
-        title = "Phase",
-    )
-
-    # Clamp negative apparent resistivities (numerical artifacts) to eps() before log-scale plot
-    rho_xy_site = max.(response.rho_xy[:, station_index], eps())
-    rho_yx_site = max.(response.rho_yx[:, station_index], eps())
-    lines!(rho_axis, response.periods, rho_xy_site, color = :navy, linewidth = 3, label = "TE")
-    lines!(rho_axis, response.periods, rho_yx_site, color = :darkorange, linewidth = 3, label = "TM")
-    lines!(phase_axis, response.periods, response.phase_xy[:, station_index], color = :navy, linewidth = 3, label = "TE")
-    lines!(phase_axis, response.periods, tm_phase, color = :darkorange, linewidth = 3, label = "TM")
-    axislegend(rho_axis, position = :rb)
-    axislegend(phase_axis, position = :rb)
-
-    save(output_path, figure)
-    String(output_path)
+function FrechetDerivative2D(mesh::MT2DMesh, ρ::AbstractMatrix{<:Real};
+                           mode::Symbol = :TETM, parameterization::Symbol = :resistivity,
+                           active_cells = nothing)
+    response, c = _mt2d_forward_cache(mesh, ρ; mode)
+    scale = _mt2d_parameter_scale(mesh, ρ, parameterization)
+    allcells = CartesianIndices(ρ)
+    cells = if active_cells === nothing
+        [i for i in allcells if i[1] > mesh.n_air_cells]
+    elseif active_cells isa AbstractArray{Bool}
+        size(active_cells) == size(ρ) || throw(DimensionMismatch("active mask must match resistivity"))
+        findall(active_cells)
+    else
+        [i isa CartesianIndex{2} ? i : allcells[i] for i in active_cells]
+    end
+    all(i -> checkbounds(Bool, ρ, i), cells) || throw(BoundsError(ρ, cells))
+    G = NamedTuple{_MT2D_FIELDS}(Tuple(zeros(eltype(getproperty(response, k)), length(response.z_xy), length(cells)) for k in _MT2D_FIELDS))
+    δm = zeros(size(ρ))
+    for (j, cell) in enumerate(cells)
+        δm[cell] = scale[cell]
+        δd = _mt2d_frechet(c, δm)
+        for k in _MT2D_FIELDS
+            getproperty(G, k)[:, j] = vec(getproperty(δd, k))
+        end
+        δm[cell] = 0
+    end
+    (; response, cells, parameterization, G...)
 end
 
-"""
-    PlotData2D(data_path; maps_output_path, curves_output_path, station_index=nothing)
-
-Inputs:
-- 2D data path, map image path, curve image path, and optional station index.
-
-Output:
-- Named tuple with the written plot paths.
-
-Description:
-- Loads a 2D data file and writes both the response maps and a representative-station plot.
-"""
-function PlotData2D(
-    data_path::AbstractString;
-    maps_output_path::AbstractString,
-    curves_output_path::AbstractString,
-    station_index::Union{Nothing, Int} = nothing,
-)
-    data = load_data2d(data_path)
-    response = data_to_response2d(data)
-    plot_mt2d_data_maps(response; output_path = maps_output_path)
-    plot_mt2d_site_curves(
-        response;
-        station_index = something(station_index, cld(length(response.receivers), 2)),
-        output_path = curves_output_path,
-    )
-    (maps_output_path = maps_output_path, curves_output_path = curves_output_path)
-end

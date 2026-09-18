@@ -63,7 +63,13 @@ end
 #----- 1-D / 2-D forward, I/O, plotting, and inversion (patch) -----------#
 
 include("MTGeophysics1D.jl")
-include("MTGeophysics2D.jl")
+include("Mesh2D.jl")
+include("Fwd2D.jl")
+include("PlotModel2D.jl")
+include("PlotData2D.jl")
+include("Inv2D.jl")
+include("Inv2D_GN.jl")
+include("Inv2D_NLCG.jl")
 include("VFSA2DMT.jl")
 
 #----- 3-D VFSA inversion and ensemble statistics -------------------------#
@@ -157,6 +163,7 @@ export load_model2d
 export write_model2d
 export build_mesh_from_model2d
 export build_default_mt2d_mesh
+export mt2d_skin_depth, mt2d_skin_depth_layers
 export build_mt2d_halfspace_model
 export build_mt2d_data_template
 export write_mt2d_data_template
@@ -165,6 +172,12 @@ export write_data2d
 export data_from_response2d
 export data_to_response2d
 export chi2_rms2d
+export FrechetDerivative2D, ApplyFrechet2D, ApplyFrechetTranspose2D
+export Invert2D, Inv2DOptions, Inv2DResult, AbstractInversion2D
+export inv2d_frechet, inv2d_gradient, write_inv2d_result
+export inv2d_tag, inv2d_init, inv2d_prepare!, inv2d_direction, inv2d_reject!, inv2d_accept!, inv2d_info, inv2d_validate
+export GaussNewton2D, GaussNewton2DConfig, GaussNewton2DResult
+export NLCG2D, NLCG2DConfig, NLCG2DResult
 export run_mt2d_forward
 
 export plot_mt1d_data
@@ -172,6 +185,9 @@ export plot_mt1d_model
 export plot_mt2d_data_maps
 export plot_mt2d_site_curves
 export plot_mt2d_model
+export plot_mt2d_mesh
+export plot_mt2d_data_fit
+export plot_inv2d_convergence
 export PlotData1D
 export PlotModel1D
 export PlotData2D

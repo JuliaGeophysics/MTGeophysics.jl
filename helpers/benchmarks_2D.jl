@@ -1,27 +1,59 @@
-# This helper script writes the standard 2D benchmark true-model, start-model, reference-data, and observed-data files.
+# 2D COMEMI benchmark generator
+# Author: @pankajkmishra
+# Writes true model, halfspace start model, error template, and noisy observed data per case
+# Usage: julia --project=. helpers/benchmarks_2D.jl      (settings below)
 
 using MTGeophysics
 
-# cases to generate when run as a script: 1 = dyke, 2 = resistive blocks, 3 = mixed
-const BENCHMARK_CASES = [1]
+#---------- script settings ----------
+
+# cases: 1 = dyke, 2 = resistive blocks, 3 = mixed
+const BENCHMARK_CASES = [3]
+
+# survey and skin-depth mesh used when run as a script; the inversion examples read
+# the files written here, so this is the one place the synthetic survey is defined
+const BENCHMARK_MESH = (
+    frequencies            = 10 .^ range(-1, 3, length = 17),   # 0.1-1000 Hz, 4 per decade
+    receiver_positions     = collect(-8000.0:1600.0:8000.0),
+    background_resistivity = 100.0,
+    y_core_range           = (-9000.0, 9000.0),
+    y_core_cell            = 500.0,
+    y_padding              = 40_000.0,
+    pad_factor             = 1.3,
+    air_top                = -40_000.0,
+    air_cells              = 8,
+    max_core_layers        = 50,        # uniform dz down to 1 skin depth of f_min
+)
+
+#---------- generator ----------
 
 """
-    SaveBenchmarks2D(; output_root=joinpath(dirname(@__DIR__), "examples"), cases=[1])
+    SaveBenchmarks2D(; output_root=joinpath(dirname(@__DIR__), "examples"), cases=[1],
+                     mesh=build_default_mt2d_mesh(), start_resistivity=100.0,
+                     error_fraction=0.05, rng_seed=20260308)
 
 Inputs:
 - `output_root`: Parent directory under which per-case benchmark directories are created.
-- `cases`: Which COMEMI2D cases to generate (1 = dyke, 2 = resistive blocks, 3 = mixed).
+- `cases`: COMEMI2D cases to generate (1 = dyke, 2 = resistive blocks, 3 = mixed).
+- `mesh`: Mesh and survey (frequencies, receivers) the models and data live on.
+- `start_resistivity`: Halfspace resistivity of the start model.
+- `error_fraction`: Impedance error as a fraction of |Z|.
+- `rng_seed`: Noise seed.
 
 Output:
-- Vector of named tuples containing the written true-model, start-model, reference-data, and observed-data paths.
+- Vector of named tuples with the written true-model, start-model, reference-data, and observed-data paths.
 
 Description:
-- Writes each selected 2D benchmark into its own sub-directory (e.g. `examples/0COMEMI2D-I/`).
-- Writes a homogeneous halfspace starting model (`.ini`) on the same grid as each true model.
+- Writes each case into its own directory, e.g. `examples/0COMEMI2D-III/Comemi2D3.{true,ini,ref,obs}`.
+- The COMEMI bodies are defined in metres, so any mesh that covers them works.
 """
 function SaveBenchmarks2D(;
     output_root::AbstractString = joinpath(dirname(@__DIR__), "examples"),
     cases::AbstractVector{Int} = [1],
+    mesh::MT2DMesh = build_default_mt2d_mesh(),
+    start_resistivity::Real = 100.0,
+    error_fraction::Real = 0.05,
+    rng_seed::Integer = 20260308,
 )
     all_cases = [
         ("comemi2d_case1_dyke", "Comemi2D1", "0COMEMI2D-I"),
@@ -30,78 +62,42 @@ function SaveBenchmarks2D(;
     ]
     all(c -> 1 <= c <= length(all_cases), cases) && !isempty(cases) ||
         error("cases must be a non-empty subset of 1:$(length(all_cases)), got $cases")
-    case_names = all_cases[cases]
 
-    # Build mesh once; write true models into first case dir as temp staging.
-    first_case_dir = joinpath(output_root, case_names[1][3])
-    mkpath(first_case_dir)
-    mesh_result = MakeMesh2D(output_dir = first_case_dir)
-
+    models = Dict(m.name => m for m in MTGeophysics.build_mt2d_comemi_models(mesh))
     saved = NamedTuple[]
-    for (case_key, case_label, dir_name) in case_names
+    for (case_key, case_label, dir_name) in all_cases[cases]
         case_dir = joinpath(output_root, dir_name)
         mkpath(case_dir)
+        model = models[case_key]
 
-        source_model_path = mesh_result.model_paths[case_key]
-        target_model_path = joinpath(case_dir, "$(case_label).true")
-        abspath(source_model_path) == abspath(target_model_path) || cp(source_model_path, target_model_path; force = true)
-
-        start_model_path = joinpath(case_dir, "$(case_label).ini")
-        halfspace_resistivity = build_mt2d_halfspace_model(mesh_result.mesh)
-        write_model2d(start_model_path, mesh_result.mesh, halfspace_resistivity; title = "Halfspace starting model for $(case_label)")
-
-        reference_path = write_mt2d_data_template(
-            joinpath(case_dir, "$(case_label).ref"),
-            mesh_result.mesh;
-            impedance_error_fraction = 0.05,
-        )
-        observed_path = ForwardSolve2D(
-            target_model_path,
-            reference_path;
-            add_noise = true,
-            output_path = joinpath(case_dir, "$(case_label).obs"),
-            rng_seed = 20260308,
-        )
-        push!(saved, (
-            case_dir = case_dir,
-            model_path = target_model_path,
-            start_model_path = start_model_path,
-            reference_path = reference_path,
-            observed_path = observed_path,
-        ))
+        model_path = write_model2d(joinpath(case_dir, "$(case_label).true"), mesh, model.resistivity;
+                                   title = model.label)
+        start_model_path = write_model2d(joinpath(case_dir, "$(case_label).ini"), mesh,
+            build_mt2d_halfspace_model(mesh; background_resistivity = start_resistivity);
+            title = "Halfspace starting model for $(case_label)")
+        reference_path = write_mt2d_data_template(joinpath(case_dir, "$(case_label).ref"), mesh;
+                                                  impedance_error_fraction = error_fraction)
+        observed_path = ForwardSolve2D(model_path, reference_path; add_noise = true,
+                                       output_path = joinpath(case_dir, "$(case_label).obs"), rng_seed = rng_seed)
+        push!(saved, (; case_dir, model_path, start_model_path, reference_path, observed_path))
     end
-
-    # Clean up stale model files that MakeMesh2D staged into the first case dir,
-    # including .true files of cases that were not selected.
-    for (case_key, case_label, dir_name) in all_cases
-        stale = joinpath(first_case_dir, "$(case_label).true")
-        target = joinpath(output_root, dir_name, "$(case_label).true")
-        keep = abspath(stale) == abspath(target) && (case_key, case_label, dir_name) in case_names
-        if !keep && isfile(stale)
-            rm(stale)
-        end
-    end
-
     saved
 end
 
 """
     save_benchmarks2d(; kwargs...)
 
-Inputs:
-- Keyword arguments accepted by `SaveBenchmarks2D`.
-
-Output:
-- Benchmark file records.
-
-Description:
-- Lowercase alias for `SaveBenchmarks2D`.
+Lowercase alias for `SaveBenchmarks2D`.
 """
 save_benchmarks2d(; kwargs...) = SaveBenchmarks2D(; kwargs...)
 
+#---------- script entry ----------
+
 function main(args::AbstractVector{<:AbstractString} = ARGS)
     isempty(args) || error("usage: julia --project=. helpers/benchmarks_2D.jl")
-    saved = SaveBenchmarks2D(cases = BENCHMARK_CASES)
+    mesh = BuildMesh2D(; BENCHMARK_MESH...)
+    saved = SaveBenchmarks2D(cases = BENCHMARK_CASES, mesh = mesh,
+                             start_resistivity = BENCHMARK_MESH.background_resistivity)
     println("SavedCases = ", length(saved))
     for s in saved
         println("  ", s.case_dir)
