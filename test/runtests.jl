@@ -8,6 +8,7 @@ using MTGeophysics
 
 include(joinpath(dirname(@__DIR__), "helpers", "benchmarks_1D.jl"))
 include(joinpath(dirname(@__DIR__), "helpers", "benchmarks_2D.jl"))
+include(joinpath(dirname(@__DIR__), "examples", "model_2D_to_SEGY.jl"))
 
 @testset "MTGeophysics.jl Tests" begin
 
@@ -21,4 +22,5 @@ include(joinpath(dirname(@__DIR__), "helpers", "benchmarks_2D.jl"))
     include(joinpath(@__DIR__, "TestForward2D.jl"))
     include(joinpath(@__DIR__, "TestGaussNewton2D.jl"))
     include(joinpath(@__DIR__, "TestIO2D.jl"))
+    include(joinpath(@__DIR__, "TestFormats2D.jl"))
 end

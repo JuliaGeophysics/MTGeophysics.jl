@@ -2,6 +2,19 @@
 
 using Test
 
+# older layout inputs (air rows in the model) that VFSA2DMT reads until it moves behind Inv2D
+function _legacy_benchmark2d(root)
+    mesh = build_default_mt2d_mesh()
+    dir = joinpath(root, "0COMEMI2D-I")
+    mkpath(dir)
+    truth = only(filter(m -> m.name == "comemi2d_case1_dyke", MTGeophysics.build_mt2d_comemi_models(mesh)))
+    model_path = write_model2d(joinpath(dir, "Comemi2D1.true"), mesh, truth.resistivity; title = truth.label)
+    start_model_path = write_model2d(joinpath(dir, "Comemi2D1.ini"), mesh, build_mt2d_halfspace_model(mesh))
+    observed = data_from_response2d(run_mt2d_forward(mesh, truth.resistivity); impedance_error_fraction = 0.05)
+    observed_path = write_data2d(joinpath(dir, "Comemi2D1.obs"), MTGeophysics._apply_mt2d_noise(observed; rng_seed = 20260308))
+    [(; case_dir = dir, model_path, start_model_path, observed_path)]
+end
+
 mesh = build_default_mt2d_mesh()
 true_resistivity = only(filter(model -> model.name == "comemi2d_case1_dyke", MTGeophysics.build_mt2d_comemi_models(mesh))).resistivity
 true_response = run_mt2d_forward(mesh, true_resistivity)
@@ -38,21 +51,9 @@ mktempdir() do temp_dir
     @test fit.rms < 1e-5
     @test isfile(PlotModel2D(model_path; output_path = joinpath(temp_dir, "ModelPlot2DPadding.png"), show_padding = true, maximum_depth_km = Inf))
 
-    mesh_result = MakeMesh2D(output_dir = temp_dir)
-    template_path = write_mt2d_data_template(joinpath(temp_dir, "Data.dat"), mesh_result.mesh)
-    observed_path = ForwardSolve2D(mesh_result.model_paths["comemi2d_case1_dyke"], template_path)
-    forward_data = load_data2d(observed_path)
-
-    @test basename(mesh_result.model_paths["comemi2d_case1_dyke"]) == "Comemi2D1.true"
-    @test basename(observed_path) == "Data.obs"
-    @test isfile(observed_path)
-    @test maximum(abs.(forward_data.z_xy_error .- 0.05 .* abs.(forward_data.z_xy))) < 1e-8
-    @test maximum(abs.(forward_data.z_yx_error .- 0.05 .* abs.(forward_data.z_yx))) < 1e-8
-
-    benchmarks = SaveBenchmarks2D(output_root = temp_dir)
+    benchmarks = _legacy_benchmark2d(temp_dir)
     @test isfile(benchmarks[1].model_path)
     @test isfile(benchmarks[1].start_model_path)
-    @test isfile(benchmarks[1].reference_path)
     @test isfile(benchmarks[1].observed_path)
     @test isdir(benchmarks[1].case_dir)
 

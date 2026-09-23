@@ -39,15 +39,6 @@ result = VFSA2DMT(
 )
 ```
 
-## CLI entry point
-
-```bash
-julia --project=. -e 'using MTGeophysics; MTGeophysics.main_vfsa2dmt()' -- \
-    examples/0COMEMI2D-I/Comemi2D1.ini \
-    examples/0COMEMI2D-I/Comemi2D1.obs \
-    --n-chains 3 --n-ctrl 400 --max-iter 300 --log-bounds 0,4 --seed 20260308
-```
-
 ## Configuration
 
 | Parameter | Default | Description |

@@ -60,9 +60,10 @@ catch LoadError
     @warn "GLMakie not available, interactive visualization functionality disabled"
 end
 
-#----- 1-D / 2-D forward, I/O, plotting, and inversion (patch) -----------#
+#----- 1-D / 2-D forward, I/O, plotting, and inversion ---------------------#
 
 include("MTGeophysics1D.jl")
+include("Control2D.jl")
 include("Mesh2D.jl")
 include("Fwd2D.jl")
 include("PlotModel2D.jl")
@@ -142,7 +143,6 @@ export VFSA2DMTParams
 export BuildMesh1D
 export BuildMesh2D
 export MakeMesh1D
-export MakeMesh2D
 
 export Forward1D
 export Forward2D
@@ -170,24 +170,27 @@ export write_mt2d_data_template
 export load_data2d
 export write_data2d
 export data_from_response2d
-export data_to_response2d
 export chi2_rms2d
 export FrechetDerivative2D, ApplyFrechet2D, ApplyFrechetTranspose2D
 export Invert2D, Inv2DOptions, Inv2DResult, AbstractInversion2D
-export inv2d_frechet, inv2d_gradient, write_inv2d_result
+export inv2d_frechet, inv2d_gradient
 export inv2d_tag, inv2d_init, inv2d_prepare!, inv2d_direction, inv2d_reject!, inv2d_accept!, inv2d_info, inv2d_validate
 export GaussNewton2D, GaussNewton2DConfig, GaussNewton2DResult
 export NLCG2D, NLCG2DConfig, NLCG2DResult
 export run_mt2d_forward
+export FwdCtrl2D, InvCtrl2D, Cov2D
+export ReadFwdCtrl2D, WriteFwdCtrl2D, ReadInvCtrl2D, WriteInvCtrl2D, ReadCov2D, WriteCov2D
+export ReadModel2D, WriteModel2D, Mesh2DFromInputs, mt2d_air_layers, mt2d_geometric_layers
+export WriteFrechet2D
 
 export plot_mt1d_data
 export plot_mt1d_model
-export plot_mt2d_data_maps
 export plot_mt2d_site_curves
 export plot_mt2d_model
 export plot_mt2d_mesh
 export plot_mt2d_data_fit
 export plot_inv2d_convergence
+export PlotInversion2D
 export PlotData1D
 export PlotModel1D
 export PlotData2D

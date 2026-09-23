@@ -8,14 +8,8 @@ using Printf
 """
     MT2DMesh
 
-Inputs:
-- Horizontal and vertical mesh nodes, cell sizes, receiver positions, frequencies, and air-cell count.
-
-Output:
-- `MT2DMesh`: Container for a 2D MT profile mesh.
-
-Description:
-- Stores the profile mesh geometry and survey definition used by the 2D workflows.
+Profile mesh and survey: y (along the profile) and z (down) nodes and cell sizes, air
+rows first, receiver positions on the air/earth interface and frequencies.
 """
 Base.@kwdef struct MT2DMesh
     y_nodes::Vector{Float64}
@@ -25,19 +19,13 @@ Base.@kwdef struct MT2DMesh
     receiver_positions::Vector{Float64}
     frequencies::Vector{Float64}
     n_air_cells::Int
+    air_resistivity::Float64 = 1e9
 end
 
 """
     ModelFile2D
 
-Inputs:
-- Model metadata, mesh spacings, resistivity values, air-cell count, origin, and rotation.
-
-Output:
-- `ModelFile2D`: Parsed 2D model file container.
-
-Description:
-- Stores a 2D model file exactly as needed for round-tripping between disk and the forward solver.
+A 2D model file on disk: cell sizes, resistivity `(nz, ny)`, air row count and origin.
 """
 Base.@kwdef struct ModelFile2D
     title::String
@@ -54,81 +42,21 @@ end
 
 const μ₀_2D = 4π * 1e-7
 
-"""
-    mt2d_y_centers(mesh)
-
-Inputs:
-- `mesh`: 2D MT mesh.
-
-Output:
-- `Vector{Float64}`: Horizontal cell-center positions.
-
-Description:
-- Computes the horizontal cell centers of the 2D mesh.
-"""
 mt2d_y_centers(mesh::MT2DMesh) = 0.5 .* (mesh.y_nodes[1:end-1] .+ mesh.y_nodes[2:end])
 
-"""
-    mt2d_z_centers(mesh)
-
-Inputs:
-- `mesh`: 2D MT mesh.
-
-Output:
-- `Vector{Float64}`: Vertical cell-center positions.
-
-Description:
-- Computes the vertical cell centers of the 2D mesh.
-"""
 mt2d_z_centers(mesh::MT2DMesh) = 0.5 .* (mesh.z_nodes[1:end-1] .+ mesh.z_nodes[2:end])
 
-"""
-    mt2d_center_station(mesh)
-
-Inputs:
-- `mesh`: 2D MT mesh.
-
-Output:
-- `Int`: Index of the middle receiver location.
-
-Description:
-- Returns the central survey station used by plotting and smoke tests.
-"""
-mt2d_center_station(mesh::MT2DMesh) = cld(length(mesh.receiver_positions), 2)
-
-"""
-    mt2d_skin_depth(resistivity, frequency)
-
-Inputs:
-- `resistivity`: Halfspace resistivity in ohm metres.
-- `frequency`: Frequency in Hz.
-
-Output:
-- `Float64`: Skin depth `δ = sqrt(2ρ/(ωμ₀)) ≈ 503·sqrt(ρ/f)` in metres.
-"""
+# δ = sqrt(2ρ/(ωμ₀)) ≈ 503 sqrt(ρ/f) metres
 mt2d_skin_depth(resistivity::Real, frequency::Real) = sqrt(2 * resistivity / (2π * frequency * μ₀_2D))
 
 """
     mt2d_skin_depth_layers(frequencies; background_resistivity=100.0, z_core_cell=nothing,
                            z_core_skin_depths=1.0, z_bottom_skin_depths=4.0,
-                           max_core_layers=80, pad_factor=1.25)
+                           max_core_layers=80, pad_factor=1.25) -> thicknesses
 
-Inputs:
-- `frequencies`: Survey frequencies in Hz.
-- `background_resistivity`: Reference halfspace resistivity for the skin depths.
-- `z_core_cell`: Uniform core thickness; `nothing` = `max(δ_min/3, δ_max/max_core_layers)`.
-- `z_core_skin_depths`: Depth of the uniform core in skin depths of the lowest frequency.
-- `z_bottom_skin_depths`: Total mesh depth in skin depths of the lowest frequency.
-- `pad_factor`: Geometric growth of the padding layers below the core.
-
-Output:
-- `Vector{Float64}`: Ground layer thicknesses, surface downward.
-
-Description:
-- The core is regular (constant dz) from the surface down to at least `z_core_skin_depths`
-  skin depths of the longest period; below it the layers grow geometrically until the
-  mesh bottom reaches `z_bottom_skin_depths` skin depths, far enough for the 1D
-  boundary fields to have decayed.
+Earth layers from the surface down: a uniform core of `z_core_cell` (default
+`max(δ_min/3, δ_max/max_core_layers)`) down to `z_core_skin_depths` skin depths of the
+lowest frequency, then layers growing by `pad_factor` down to `z_bottom_skin_depths`.
 """
 function mt2d_skin_depth_layers(
     frequencies::AbstractVector{<:Real};
@@ -165,26 +93,25 @@ function mt2d_skin_depth_layers(
 end
 
 """
-    build_mt2d_mesh(; frequencies=..., y_core_range=(-6000.0, 6000.0), y_core_cell=300.0,
-                    y_padding=9000.0, pad_factor=1.25, air_top=-12000.0, air_cells=8,
-                    ground_layers=nothing, background_resistivity=100.0, z_core_cell=nothing,
-                    z_core_skin_depths=1.0, z_bottom_skin_depths=4.0, max_core_layers=80,
-                    receiver_stride=2, receiver_positions=nothing)
+    mt2d_geometric_layers(frequencies; background_resistivity=100.0, first_layer_div=5.0,
+                          vertical_factor=1.1, depth_mult=4.0) -> thicknesses
 
-Inputs:
-- Frequency axis and horizontal/vertical mesh controls.
-- `ground_layers`: Explicit ground layer thicknesses; `nothing` = skin-depth design
-  from `mt2d_skin_depth_layers` with the `background_resistivity`, `z_core_*`,
-  `z_bottom_skin_depths`, `max_core_layers` and `pad_factor` keywords.
-
-Output:
-- `MT2DMesh`: Survey mesh and receiver geometry.
-
-Description:
-- Builds the padded 2D MT profile mesh used by the forward and inversion workflows.
-  By default the vertical core is regular down to one skin depth of the lowest
-  frequency in the background resistivity.
+Earth layers from the surface down, as in `MakeMesh3D`: the first layer is the skin
+depth of the highest frequency over `first_layer_div`, each next layer is
+`vertical_factor` thicker, down to `depth_mult` skin depths of the lowest frequency.
 """
+function mt2d_geometric_layers(frequencies::AbstractVector{<:Real}; background_resistivity::Real = 100.0,
+                               first_layer_div::Real = 5.0, vertical_factor::Real = 1.1, depth_mult::Real = 4.0)
+    first_layer_div > 0 && vertical_factor >= 1 && depth_mult > 0 ||
+        throw(ArgumentError("need first_layer_div > 0, vertical_factor >= 1, depth_mult > 0"))
+    layers = [mt2d_skin_depth(background_resistivity, maximum(frequencies)) / first_layer_div]
+    bottom = depth_mult * mt2d_skin_depth(background_resistivity, minimum(frequencies))
+    while sum(layers) < bottom
+        push!(layers, layers[end] * vertical_factor)
+    end
+    layers
+end
+
 function build_mt2d_mesh(;
     frequencies::AbstractVector{<:Real} = collect(10 .^ range(-2, 2, length = 10)),
     y_core_range::Tuple{<:Real, <:Real} = (-6000.0, 6000.0),
@@ -263,33 +190,19 @@ function build_mt2d_mesh(;
 end
 
 """
-    BuildMesh2D(; kwargs...)
+    BuildMesh2D(; frequencies, y_core_range=(-6000.0, 6000.0), y_core_cell=300.0,
+                y_padding=9000.0, pad_factor=1.25, air_top=-12000.0, air_cells=8,
+                ground_layers=nothing, receiver_stride=2, receiver_positions=nothing,
+                background_resistivity, z_core_cell, z_core_skin_depths,
+                z_bottom_skin_depths, max_core_layers) -> MT2DMesh
 
-Inputs:
-- Keyword arguments accepted by `build_mt2d_mesh`.
-
-Output:
-- `MT2DMesh`: Survey mesh and receiver geometry.
-
-Description:
-- Public alias for `build_mt2d_mesh`.
+Padded profile mesh: a uniform core of `y_core_cell` over `y_core_range`, padding
+growing by `pad_factor` over `y_padding` on each side, `air_cells` uniform air layers up
+to `air_top`, and `ground_layers` below the surface (default `mt2d_skin_depth_layers`).
+Receivers default to every `receiver_stride`-th core cell centre.
 """
 BuildMesh2D(; kwargs...) = build_mt2d_mesh(; kwargs...)
 
-"""
-    build_mt2d_block_model(mesh; background_resistivity=100.0, blocks=NamedTuple[])
-
-Inputs:
-- `mesh`: 2D MT mesh.
-- `background_resistivity`: Host resistivity in ohm metres.
-- `blocks`: Rectangular anomaly definitions.
-
-Output:
-- `Matrix{Float64}`: Cell resistivity model.
-
-Description:
-- Builds a 2D block model on the provided mesh.
-"""
 function build_mt2d_block_model(
     mesh::MT2DMesh;
     background_resistivity::Real = 100.0,
@@ -316,36 +229,10 @@ function build_mt2d_block_model(
     ρ
 end
 
-"""
-    build_mt2d_halfspace_model(mesh; background_resistivity=100.0)
-
-Inputs:
-- `mesh`: 2D MT mesh.
-- `background_resistivity`: Half-space resistivity in ohm metres.
-
-Output:
-- `Matrix{Float64}`: Half-space resistivity model.
-
-Description:
-- Builds a homogeneous half-space on the given mesh.
-"""
+# homogeneous halfspace under 1e9 ohm m air
 build_mt2d_halfspace_model(mesh::MT2DMesh; background_resistivity::Real = 100.0) =
     build_mt2d_block_model(mesh; background_resistivity = background_resistivity, blocks = NamedTuple[])
 
-"""
-    build_mt2d_layered_model(mesh; layer_resistivities, interface_depths)
-
-Inputs:
-- `mesh`: 2D MT mesh.
-- `layer_resistivities`: Layer resistivities including the basement.
-- `interface_depths`: Interface depths in metres.
-
-Output:
-- `Matrix{Float64}`: Layered resistivity model.
-
-Description:
-- Builds a laterally uniform layered model on the 2D mesh.
-"""
 function build_mt2d_layered_model(
     mesh::MT2DMesh;
     layer_resistivities::AbstractVector{<:Real},
@@ -369,20 +256,6 @@ function build_mt2d_layered_model(
     ρ
 end
 
-"""
-    add_mt2d_rect!(resistivity, mesh; y_range, z_range, resistivity_value)
-
-Inputs:
-- `resistivity`: Existing 2D resistivity model.
-- `mesh`: 2D MT mesh.
-- `y_range`, `z_range`, `resistivity_value`: Rectangle geometry and value.
-
-Output:
-- `AbstractMatrix`: Updated resistivity model.
-
-Description:
-- Overwrites a rectangular region of a 2D model with a new resistivity value.
-"""
 function add_mt2d_rect!(
     resistivity::AbstractMatrix{<:Real},
     mesh::MT2DMesh;
@@ -405,18 +278,7 @@ function add_mt2d_rect!(
     resistivity
 end
 
-"""
-    build_mt2d_comemi_models(mesh)
-
-Inputs:
-- `mesh`: 2D MT mesh.
-
-Output:
-- `Vector`: Named tuples containing the benchmark names, labels, and resistivity models.
-
-Description:
-- Builds the three package COMEMI-style 2D benchmark models.
-"""
+# the three COMEMI-style benchmark models of helpers/benchmarks_2D.jl
 function build_mt2d_comemi_models(mesh::MT2DMesh)
     case1 = build_mt2d_layered_model(mesh; layer_resistivities = [100.0, 500.0], interface_depths = [2000.0])
     add_mt2d_rect!(case1, mesh; y_range = (-1200.0, 1200.0), z_range = (200.0, 3500.0), resistivity_value = 5.0)
@@ -436,89 +298,7 @@ function build_mt2d_comemi_models(mesh::MT2DMesh)
     ]
 end
 
-"""
-    mt2d_resistivity_at(mesh, resistivity, y, z)
-
-Inputs:
-- `mesh`: 2D MT mesh.
-- `resistivity`: Cell resistivity model.
-- `y`, `z`: Query coordinates in metres.
-
-Output:
-- `Float64`: Resistivity at the requested cell.
-
-Description:
-- Returns the resistivity of the cell containing the requested coordinate.
-"""
-function mt2d_resistivity_at(mesh::MT2DMesh, resistivity::AbstractMatrix{<:Real}, y::Real, z::Real)
-    iy = findfirst(i -> mesh.y_nodes[i] <= y < mesh.y_nodes[i + 1], 1:length(mesh.y_cell_sizes))
-    iz = findfirst(i -> mesh.z_nodes[i] <= z < mesh.z_nodes[i + 1], 1:length(mesh.z_cell_sizes))
-    iy === nothing && error("requested y=$y m is outside mesh bounds")
-    iz === nothing && error("requested z=$z m is outside mesh bounds")
-    Float64(resistivity[iz, iy])
-end
-
-"""
-    validate_mt2d_comemi_models(mesh, models)
-
-Inputs:
-- `mesh`: 2D MT mesh.
-- `models`: COMEMI benchmark models.
-
-Output:
-- `Vector{String}`: Descriptions of the passed geometry checks.
-
-Description:
-- Verifies that the benchmark models contain the expected anomalies and host values.
-"""
-function validate_mt2d_comemi_models(mesh::MT2DMesh, models)
-    lookup = Dict(model.name => model.resistivity for model in models)
-    required = [
-        "comemi2d_case1_dyke",
-        "comemi2d_case2_resistive_blocks",
-        "comemi2d_case3_mixed",
-    ]
-    for name in required
-        haskey(lookup, name) || error("missing COMEMI benchmark model: $name")
-    end
-
-    checks = [
-        ("comemi2d_case1_dyke", 0.0, 1000.0, 5.0, "conductive dyke core"),
-        ("comemi2d_case1_dyke", 4000.0, 1000.0, 100.0, "upper host away from dyke"),
-        ("comemi2d_case1_dyke", 4000.0, 3000.0, 500.0, "lower host away from dyke"),
-        ("comemi2d_case2_resistive_blocks", -2000.0, 1200.0, 800.0, "left resistive block"),
-        ("comemi2d_case2_resistive_blocks", 4000.0, 3000.0, 400.0, "right resistive block"),
-        ("comemi2d_case2_resistive_blocks", 0.0, 1000.0, 30.0, "upper conductive host"),
-        ("comemi2d_case2_resistive_blocks", 0.0, 3000.0, 100.0, "lower host"),
-        ("comemi2d_case3_mixed", -4000.0, 1000.0, 3.0, "left conductive anomaly"),
-        ("comemi2d_case3_mixed", 3000.0, 5000.0, 1000.0, "right deep resistive anomaly"),
-        ("comemi2d_case3_mixed", 0.0, 500.0, 80.0, "shallow background"),
-        ("comemi2d_case3_mixed", 0.0, 2000.0, 20.0, "middle background"),
-        ("comemi2d_case3_mixed", 0.0, 8000.0, 300.0, "deep background"),
-    ]
-
-    results = String[]
-    for (name, y, z, expected, label) in checks
-        value = mt2d_resistivity_at(mesh, lookup[name], y, z)
-        isapprox(value, expected; rtol = 1e-8, atol = 1e-8) || error("$name failed check '$label': got $value Ω·m, expected $expected Ω·m")
-        push!(results, "$(name) | $(label) | rho=$(round(value; digits = 3)) ohm.m")
-    end
-
-    results
-end
-
-"""
-    build_default_mt2d_mesh()
-
-Inputs:
-- None.
-
-Output:
-- `MT2DMesh`: Default COMEMI benchmark mesh.
-
-Description:
-- Builds the standard 2D benchmark mesh used by the package examples and tests.
-"""
+# small benchmark mesh used by the tests
 function build_default_mt2d_mesh()
     build_mt2d_mesh(
         frequencies = collect(10 .^ range(-2, 2, length = 7)),
@@ -533,54 +313,7 @@ function build_default_mt2d_mesh()
     )
 end
 
-"""
-    MakeMesh2D(; output_dir=...)
-
-Inputs:
-- `output_dir`: Directory where the benchmark models are written.
-
-Output:
-- Named tuple with `mesh` and `model_paths`.
-
-Description:
-- Builds the standard 2D benchmark mesh and writes the COMEMI-style models to disk.
-"""
-function MakeMesh2D(;
-    output_dir::AbstractString = joinpath(dirname(@__DIR__), "Models"),
-)
-    mesh = build_default_mt2d_mesh()
-    models = build_mt2d_comemi_models(mesh)
-    paths = Dict{String, String}()
-    filename_map = Dict(
-        "comemi2d_case1_dyke" => "Comemi2D1.true",
-        "comemi2d_case2_resistive_blocks" => "Comemi2D2.true",
-        "comemi2d_case3_mixed" => "Comemi2D3.true",
-    )
-
-    for model in models
-        filename = get(
-            filename_map,
-            model.name,
-            replace(join(uppercasefirst.(split(model.name, "_")), ""), "1d" => "1D", "2d" => "2D", "3d" => "3D") * ".true",
-        )
-        paths[model.name] = write_model2d(joinpath(output_dir, filename), mesh, model.resistivity; title = model.label)
-    end
-
-    (mesh = mesh, model_paths = paths)
-end
-
-"""
-    _write_vector_lines(io, values; per_line=12)
-
-Inputs:
-- Output stream, numeric values, and the number of values per line.
-
-Output:
-- Nothing.
-
-Description:
-- Writes a numeric vector to an open text stream using fixed-width scientific notation.
-"""
+# fixed-width scientific notation, per_line values per line
 function _write_vector_lines(io, values::AbstractVector{<:Real}; per_line::Int = 12)
     for first_index in 1:per_line:length(values)
         last_index = min(first_index + per_line - 1, length(values))
@@ -589,16 +322,10 @@ function _write_vector_lines(io, values::AbstractVector{<:Real}; per_line::Int =
 end
 
 """
-    write_model2d(path, mesh, resistivity; title="MTGeophysics.jl 2D profile model", use_loge=true)
+    write_model2d(path, mesh, resistivity; title="MTGeophysics.jl 2D profile model", use_loge=true) -> path
 
-Inputs:
-- Output path, 2D mesh, resistivity model, and file-format options.
-
-Output:
-- `String`: Path to the written model file.
-
-Description:
-- Writes a 2D profile model file that can be reloaded by the package.
+Write the older MTGeophysics model layout, air rows included, which `VFSA2DMT` still
+reads and writes. New inputs and results use `WriteModel2D`.
 """
 function write_model2d(
     path::AbstractString,
@@ -636,16 +363,9 @@ function write_model2d(
 end
 
 """
-    load_model2d(path)
+    load_model2d(path) -> ModelFile2D
 
-Inputs:
-- `path`: Path to a 2D model file.
-
-Output:
-- `ModelFile2D`: Parsed model file.
-
-Description:
-- Reads a 2D model file written by the package and reconstructs the stored metadata.
+Read the older MTGeophysics model layout written by `write_model2d`, air rows included.
 """
 function load_model2d(path::AbstractString)
     isfile(path) || error("model file not found: $path")
@@ -729,18 +449,9 @@ function load_model2d(path::AbstractString)
 end
 
 """
-    build_mesh_from_model2d(model; frequencies, receiver_positions)
+    build_mesh_from_model2d(model; frequencies, receiver_positions) -> MT2DMesh
 
-Inputs:
-- `model`: Parsed 2D model file.
-- `frequencies`: Survey frequencies in hertz.
-- `receiver_positions`: Receiver offsets in metres.
-
-Output:
-- `MT2DMesh`: Solver mesh matching the stored model.
-
-Description:
-- Reconstructs a 2D solver mesh from a saved model file and survey definition.
+Solver mesh of a model read by `load_model2d`, air rows included.
 """
 function build_mesh_from_model2d(
     model::ModelFile2D;
@@ -760,3 +471,130 @@ function build_mesh_from_model2d(
     )
 end
 
+#---------- ModEM-layout model files ----------
+#
+# layout, as Mod2DMT writes it, earth cells only, after one '#' description line as in
+# ModEM 3D model files:
+#   ny nz LOGE            (or LINEAR)
+#   ny cell widths (m)
+#   nz layer thicknesses (m), top to bottom
+#   0
+#   nz rows of ny values, top row first, ln(ρ) for LOGE, ρ for LINEAR
+# the grid is centred on y = 0, the same origin as the data file's local y
+
+"""
+    ReadModel2D(path) -> ModelFile2D
+
+Read a ModEM-layout 2D model, earth cells only, centred on y = 0. The older
+MTGeophysics layout with air rows is also accepted; its air rows are dropped.
+"""
+function ReadModel2D(path::AbstractString)
+    isfile(path) || error("model file not found: $path")
+    lines = filter(l -> !isempty(strip(l)) && !startswith(strip(l), "#"), readlines(path))
+    isempty(lines) && error("$path: empty model file")
+    head = split(strip(lines[1]))
+    if length(head) >= 5 && all(t -> occursin(r"^-?\d+$", t), head[1:4])
+        legacy = load_model2d(path)
+        na = legacy.n_air_cells
+        return ModelFile2D(title = legacy.title, x_cell_sizes = [1.0], y_cell_sizes = legacy.y_cell_sizes,
+                           z_cell_sizes = legacy.z_cell_sizes[na+1:end], resistivity = legacy.resistivity[na+1:end, :],
+                           n_air_cells = 0, origin = [0.0, legacy.origin[2], 0.0], rotation = legacy.rotation,
+                           format = legacy.format, path = String(path))
+    end
+    length(head) >= 2 || error("$path: first line must be 'ny nz LOGE' or 'ny nz LINEAR'")
+    ny, nz = parse(Int, head[1]), parse(Int, head[2])
+    format = occursin("LOGE", uppercase(strip(lines[1]))) ? "LOGE" : "LINEAR"
+    tokens = parse.(Float64, reduce(vcat, split.(strip.(lines[2:end]))))
+    length(tokens) == ny + nz + 1 + ny * nz ||
+        error("$path: expected $(ny + nz + 1 + ny * nz) numbers after the header, got $(length(tokens))")
+    dy = tokens[1:ny]
+    dz = tokens[ny+1:ny+nz]
+    values = permutedims(reshape(tokens[ny+nz+2:end], ny, nz))
+    ρ = format == "LOGE" ? exp.(values) : values
+    all(>(0), dy) && all(>(0), dz) && all(x -> isfinite(x) && x > 0, ρ) ||
+        error("$path: cell sizes and resistivities must be positive")
+    ModelFile2D(title = "", x_cell_sizes = [1.0], y_cell_sizes = dy, z_cell_sizes = dz, resistivity = ρ,
+                n_air_cells = 0, origin = [0.0, -sum(dy) / 2, 0.0], rotation = 0.0, format = format,
+                path = String(path))
+end
+
+"""
+    WriteModel2D(path, y_cell_sizes, z_cell_sizes, ρ; loge=true) -> path
+    WriteModel2D(path, mesh, ρ; loge=true) -> path
+
+Write a ModEM-layout 2D model. With a mesh, `ρ` holds every mesh row and the air
+rows are left out.
+"""
+function WriteModel2D(path::AbstractString, dy::AbstractVector{<:Real}, dz::AbstractVector{<:Real},
+                      ρ::AbstractMatrix{<:Real}; loge::Bool = true)
+    size(ρ) == (length(dz), length(dy)) || throw(DimensionMismatch("model must be (nz, ny) = ($(length(dz)), $(length(dy)))"))
+    all(x -> isfinite(x) && x > 0, ρ) || throw(ArgumentError("resistivity must be positive and finite"))
+    mkpath(dirname(abspath(path)))
+    open(path, "w") do io
+        println(io, "# 2D MT model written by MTGeophysics.jl in ModEM format")
+        @printf(io, "%5d%5d %s\n", length(dy), length(dz), loge ? "LOGE" : "LINEAR")
+        _write_model_rows(io, "%12.3f", dy)
+        _write_model_rows(io, "%12.3f", dz)
+        println(io, "0")
+        for iz in axes(ρ, 1)
+            println(io)
+            _write_model_rows(io, "%13.5E", loge ? log.(ρ[iz, :]) : ρ[iz, :])
+        end
+    end
+    String(path)
+end
+
+# ten fixed-width values per line
+function _write_model_rows(io, fmt::String, values)
+    f = Printf.Format(fmt)
+    for row in Iterators.partition(values, 10)
+        foreach(v -> Printf.format(io, f, v), row)
+        println(io)
+    end
+end
+
+function WriteModel2D(path::AbstractString, mesh::MT2DMesh, ρ::AbstractMatrix{<:Real}; loge::Bool = true)
+    # the layout has no origin, readers centre the grid on y = 0
+    abs(mesh.y_nodes[1] + mesh.y_nodes[end]) <= 1e-6 * (mesh.y_nodes[end] - mesh.y_nodes[1]) ||
+        throw(ArgumentError("mesh must be centred on y = 0, it spans $(mesh.y_nodes[1]) to $(mesh.y_nodes[end]) m"))
+    WriteModel2D(path, mesh.y_cell_sizes, mesh.z_cell_sizes[mesh.n_air_cells+1:end],
+                 ρ[mesh.n_air_cells+1:end, :]; loge)
+end
+
+#---------- mesh from model, data and fwd.ctrl ----------
+
+"""
+    mt2d_air_layers(n, thickness, growth) -> Vector{Float64}
+
+Air layer thicknesses, top to bottom: `n` layers adding up to `thickness`, each
+`growth` times thicker than the one below it.
+"""
+function mt2d_air_layers(n::Integer, thickness::Real, growth::Real)
+    n > 0 && thickness > 0 && growth >= 1 || throw(ArgumentError("need n > 0, thickness > 0, growth >= 1"))
+    t1 = growth == 1 ? thickness / n : thickness * (growth - 1) / (growth^n - 1)
+    reverse(t1 .* growth .^ (0:n-1))
+end
+
+"""
+    Mesh2DFromInputs(model::ModelFile2D, data::DataFile2D, fwd::FwdCtrl2D) -> (mesh, ρ)
+
+Mesh and full resistivity (air rows first) for a ModEM-layout model, the survey in
+`data`, and the air in `fwd`. The model is centred on the data's local y = 0.
+"""
+function Mesh2DFromInputs(model::ModelFile2D, data, fwd::FwdCtrl2D)
+    model.n_air_cells == 0 || throw(ArgumentError("model must hold earth cells only, read it with ReadModel2D"))
+    all(z -> abs(z) < 1e-6, data.z_positions) ||
+        throw(ArgumentError("stations off the flat model top need topography support, not available yet"))
+    air = mt2d_air_layers(fwd.air_layers, fwd.air_thickness, fwd.air_growth)
+    dz = vcat(air, model.z_cell_sizes)
+    y_nodes = model.origin[2] .+ vcat(0.0, cumsum(model.y_cell_sizes))
+    z_nodes = vcat(0.0, cumsum(dz)) .- sum(air)
+    all(y -> y_nodes[1] <= y < y_nodes[end], data.receivers) ||
+        throw(ArgumentError("stations lie outside the model, which spans $(y_nodes[1]) to $(y_nodes[end]) m"))
+    mesh = MT2DMesh(y_nodes = y_nodes, z_nodes = z_nodes, y_cell_sizes = Float64.(model.y_cell_sizes),
+                    z_cell_sizes = dz, receiver_positions = Float64.(data.receivers),
+                    frequencies = Float64.(data.frequencies), n_air_cells = fwd.air_layers,
+                    air_resistivity = fwd.air_resistivity)
+    ρ = vcat(fill(fwd.air_resistivity, fwd.air_layers, length(model.y_cell_sizes)), model.resistivity)
+    mesh, ρ
+end

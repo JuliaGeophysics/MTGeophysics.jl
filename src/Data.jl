@@ -283,6 +283,7 @@ function calc_rho_pha(Z::Array{ComplexF64,3}, Zerr::Array{ComplexF64,3}, T::Vect
 end
 
 function _write_data_block_header!(io;
+    description::AbstractString,
     datatype::AbstractString,
     sign::Int,
     units::AbstractString,
@@ -299,15 +300,20 @@ function _write_data_block_header!(io;
     # first two characters of each). One line for the whole file shifts every block
     # header by one and ModEM dies with "Unknown data type:exp(...)" -- so the pair is
     # written per block, and write_data_modem writes no file-level comment.
-    println(io, "# Written by MTGeophysics.jl write_data_modem")
+    println(io, "# ", description)
     println(io, "# Period(s) Code GG_Lat GG_Lon X(m) Y(m) Z(m) Component Real Imag Error")
     println(io, "> $datatype")
     println(io, "> $signline")
     println(io, "> $units")
-    println(io, "> $(rotation)")
-    println(io, "> $(origin_lat) $(origin_lon)")
+    println(io, "> ", rotation == round(rotation; digits = 2) ? @sprintf("%.2f", rotation) : string(rotation))
+    @printf(io, "> %.6f %.6f\n", origin_lat, origin_lon)
     println(io, "> $(nf) $(ns)")
 end
+
+# one data line in fixed-width columns, ModEM style; the site code is padded to `w`
+_write_data_line(io, T, site, w, lat, lon, x, y, z, comp, v, err) =
+    @printf(io, "%12.6E  %s %11.6f %11.6f %13.3f %13.3f %11.3f  %-3s %15.6E %15.6E %15.6E\n",
+            T, rpad(site, w), lat, lon, x, y, z, comp, real(v), imag(v), err)
 
 _canonical_modem_units(units::AbstractString) = lowercase(replace(strip(units), " " => ""))
 
@@ -378,7 +384,8 @@ function write_data_modem(outputfile::AbstractString, d::Data;
     units::Union{Nothing, AbstractString} = nothing,
     rotation::Union{Nothing, Real} = nothing,
     include_impedance::Bool = true,
-    include_tipper::Bool = true)
+    include_tipper::Bool = true,
+    description::AbstractString = "Written by MTGeophysics.jl")
 
     ns = d.ns
     nf = d.nf
@@ -404,10 +411,12 @@ function write_data_modem(outputfile::AbstractString, d::Data;
 
     origin_lat = length(d.origin) >= 1 ? d.origin[1] : 0.0
     origin_lon = length(d.origin) >= 2 ? d.origin[2] : 0.0
+    w = maximum(length, d.site)
 
     open(outputfile, "w") do io
         if include_impedance
             _write_data_block_header!(io;
+                description = description,
                 datatype = "Full_Impedance",
                 sign = sign_val,
                 units = units_val,
@@ -433,7 +442,7 @@ function write_data_modem(outputfile::AbstractString, d::Data;
                         if isfinite(real(zval)) && isfinite(imag(zval))
                             err = abs(d.Zerr[ip, ic, is]) * impedance_scale
                             err_out = (isfinite(err) && err > 0) ? err : 1e12
-                            println(io, "$(T) $(site) $(lat) $(lon) $(x) $(y) $(elev) $(comp_labels[ic]) $(real(zval)) $(imag(zval)) $(err_out)")
+                            _write_data_line(io, T, site, w, lat, lon, x, y, elev, comp_labels[ic], zval, err_out)
                         end
                     end
                 end
@@ -442,6 +451,7 @@ function write_data_modem(outputfile::AbstractString, d::Data;
 
         if include_tipper
             _write_data_block_header!(io;
+                description = description,
                 datatype = "Full_Vertical_Components",
                 sign = sign_val,
                 units = units_val,
@@ -467,7 +477,7 @@ function write_data_modem(outputfile::AbstractString, d::Data;
                         if isfinite(real(tval)) && isfinite(imag(tval))
                             err = abs(d.tiperr[ip, ic, is])
                             err_out = (isfinite(err) && err > 0) ? err : 1e12
-                            println(io, "$(T) $(site) $(lat) $(lon) $(x) $(y) $(elev) $(tip_labels[ic]) $(real(tval)) $(imag(tval)) $(err_out)")
+                            _write_data_line(io, T, site, w, lat, lon, x, y, elev, tip_labels[ic], tval, err_out)
                         end
                     end
                 end

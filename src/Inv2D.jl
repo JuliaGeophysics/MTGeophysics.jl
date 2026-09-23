@@ -18,7 +18,7 @@ using Statistics
 #   inv2d_reject!(alg, work)                           -> true = retry with a new direction
 #   inv2d_accept!(alg, work, problem, old, new)        -> nothing
 #   inv2d_info(alg, work)                              -> NamedTuple added to history
-#   inv2d_tag(alg)                                     -> short file tag, e.g. "gn"
+#   inv2d_tag(alg)                                     -> short label for the log, e.g. "gn"
 #   inv2d_validate(alg)                                -> throws on bad settings
 #
 # the driver owns stopping tests, step capping, bounds, and the Armijo line search,
@@ -310,13 +310,14 @@ end
 Invert TE/TM complex impedances for earth-cell log10 resistivity, minimizing
 `0.5*sum(abs2, Wd*(F(m)-d)) + 0.5*beta*sum(abs2, R*(m-mref))`.
 
-- `algorithm`: any `AbstractInversion2D`; it supplies the search direction
+- `algorithm`: `GaussNewton2DConfig`, `NLCG2DConfig` or any `AbstractInversion2D`
 - `options`: `Inv2DOptions`, shared by every algorithm
 - `active_cells`: model-shaped Boolean mask or vector of cartesian/linear indices;
   default all earth cells. Other cells stay fixed, air is always fixed
 - `reference_resistivity`: model the regularization pulls toward; default the start
 
-Returns `Inv2DResult`; no files are written by this method.
+Returns `Inv2DResult`; no files are written by this method, the six-file method below
+writes a run directory.
 """
 function Invert2D(mesh::MT2DMesh, initial_resistivity::AbstractMatrix{<:Real}, observed::DataFile2D;
                   algorithm::AbstractInversion2D = GaussNewton2DConfig(),
@@ -337,9 +338,9 @@ function Invert2D(mesh::MT2DMesh, initial_resistivity::AbstractMatrix{<:Real}, o
         throw(ArgumentError("initial earth resistivity must be positive and finite"))
 
     # air takes part in neither the parameters nor the regularization
-    rho0[1:mesh.n_air_cells, :] .= 1e9
+    rho0[1:mesh.n_air_cells, :] .= mesh.air_resistivity
     reference = Matrix{Float64}(reference_resistivity)
-    reference[1:mesh.n_air_cells, :] .= 1e9
+    reference[1:mesh.n_air_cells, :] .= mesh.air_resistivity
     R = _inv2d_regularizer(mesh, rho0, opt)
     R_active = R[:, LinearIndices(rho0)[cells]]
     problem = Inv2DProblem(mesh, rows, cells, R, R_active, log10.(reference), opt)
@@ -415,59 +416,126 @@ end
 
 #---------- file workflow ----------
 
-"""
-    Invert2D(model_path, data_path; output_dir=nothing, kwargs...)
+# shared options and the algorithm config from inv.ctrl
+function _inv2d_from_ctrl(c::InvCtrl2D)
+    options = Inv2DOptions(mode = c.mode, max_iter = c.max_iter, beta = c.lambda, smallness = c.smallness,
+                           smooth_y = c.smooth_y, smooth_z = c.smooth_z, log_bounds = c.log_bounds,
+                           max_step = c.max_step, max_linesearch = c.max_linesearch, target_rms = c.target_rms)
+    algorithm = c.algorithm == :gn ? GaussNewton2DConfig(damping = c.gn_damping) :
+                NLCG2DConfig(restart = c.nlcg_restart, precondition = c.nlcg_precondition)
+    options, algorithm
+end
 
-Load a saved 2D starting model and impedance observations and invert them. With
-`output_dir`, write `model_<tag>.rho`, `data_<tag>.dat`, `history_<tag>.csv`, and
-`summary_<tag>.txt`, where `<tag>` comes from the algorithm (`gn` for Gauss–Newton).
-Existing result files are not overwritten. Other keywords follow the in-memory method.
-"""
-function Invert2D(model_path::AbstractString, data_path::AbstractString;
-                  output_dir::Union{Nothing, AbstractString} = nothing,
-                  algorithm::AbstractInversion2D = GaussNewton2DConfig(), kwargs...)
-    tag = inv2d_tag(algorithm)
-    files = ("model_$tag.rho", "data_$tag.dat", "history_$tag.csv", "summary_$tag.txt")
-    if output_dir !== nothing
-        any(f -> ispath(joinpath(output_dir, f)), files) &&
-            throw(ArgumentError("output directory already contains $tag inversion results"))
+# run_YYYYmmdd_HHMMSS next to the data, suffixed _2, _3 when started in the same second
+function _inv2d_run_dir(data_path::AbstractString)
+    base = joinpath(dirname(abspath(data_path)), "run_" * Dates.format(now(), "yyyymmdd_HHMMSS"))
+    dir, k = base, 1
+    while ispath(dir)
+        k += 1
+        dir = "$(base)_$k"
     end
-    model, data = load_model2d(model_path), load_data2d(data_path)
-    mesh = build_mesh_from_model2d(model; frequencies = data.frequencies, receiver_positions = data.receivers)
-    result = Invert2D(mesh, model.resistivity, data; algorithm, kwargs...)
-    output_dir === nothing || write_inv2d_result(output_dir, mesh, data, result)
-    result
+    mkpath(dir)
+    dir
+end
+
+_same_grid(a::ModelFile2D, b::ModelFile2D) =
+    size(a.resistivity) == size(b.resistivity) && a.y_cell_sizes ≈ b.y_cell_sizes && a.z_cell_sizes ≈ b.z_cell_sizes
+
+# predicted data on the observed survey, with the observed errors and coordinates
+function _inv2d_predicted(response::MT2DResponse, observed::DataFile2D, mode::Symbol)
+    predicted = data_from_response2d(response; z_xy_error = observed.z_xy_error, z_yx_error = observed.z_yx_error,
+        site_names = observed.site_names, x_positions = observed.x_positions, z_positions = observed.z_positions,
+        latitudes = observed.latitudes, longitudes = observed.longitudes, origin = observed.origin)
+    mode == :TE && (predicted.z_yx .= NaN)
+    mode == :TM && (predicted.z_xy .= NaN)
+    predicted
+end
+
+# vfsa keeps its own driver and file layout until it moves behind this interface
+function _invert2d_vfsa(dir, mesh, ρ0, observed, ctrl, fwd, cov)
+    any(==(0), cov.mask) && @warn "VFSA does not use the covariance mask yet, every earth cell is perturbed"
+    fwd.air_resistivity == 1e9 || @warn "VFSA uses 1e9 ohm m air, not the $(fwd.air_resistivity) in fwd.ctrl"
+    vdir = joinpath(dir, "vfsa")
+    mkpath(vdir)
+    config = VFSA2DMTConfig(n_chains = ctrl.vfsa_chains, n_ctrl = ctrl.vfsa_control_points, max_iter = ctrl.max_iter,
+                            n_trials = ctrl.vfsa_trials, log_bounds = ctrl.log_bounds, step_scale = ctrl.vfsa_step_scale,
+                            seed = ctrl.vfsa_seed, target_rms = ctrl.target_rms, keep_models = true)
+    vfsa = VFSA2DMT(write_model2d(joinpath(vdir, "start_with_air.rho"), mesh, ρ0),
+                    write_data2d(joinpath(vdir, "observed.dat"), observed); run_dir = vdir, config)
+    final = load_model2d(vfsa.best_chain.best_model_path).resistivity
+    final, _inv2d_predicted(vfsa.best_chain.best_response, observed, ctrl.mode)
 end
 
 """
-    write_inv2d_result(output_dir, mesh, observed, result)
+    Invert2D(start_path, data_path, fwd_path, inv_path, cov_path, prior_path; run_dir=nothing)
 
-Write the recovered model, predicted data (with the observed errors), iteration
-history, and a short summary, tagged by the algorithm.
+ModEM-style inversion from six files: the start model, the observed data, `fwd.ctrl`,
+`inv.ctrl`, the model covariance and the prior model. The algorithm (GN, NLCG or VFSA)
+comes from `inv.ctrl`, the air from `fwd.ctrl`, and the inverted cells from the
+covariance mask (0 = fixed). The prior is the reference model of the regularization.
+
+Everything is written to `run_dir`, by default `run_YYYYmmdd_HHMMSS/` next to the data:
+`model.rho` (ModEM layout, restartable), `data.pred`, `History.csv` (GN and NLCG),
+`Summary.txt`, and copies of the inputs in `inputs/`. `examples/model_2D_to_SEGY.jl`
+turns `model.rho` into a SEG-Y section. Returns a named tuple with the run directory,
+mesh, models, data, history, rms and termination reason.
 """
-function write_inv2d_result(output_dir::AbstractString, mesh::MT2DMesh, observed::DataFile2D, result::Inv2DResult)
-    tag = inv2d_tag(result.algorithm)
-    mkpath(output_dir)
-    write_model2d(joinpath(output_dir, "model_$tag.rho"), mesh, result.resistivity;
-                  title = "2D inversion ($tag) recovered model")
-    predicted = data_from_response2d(result.response; z_xy_error = observed.z_xy_error, z_yx_error = observed.z_yx_error,
-        site_names = observed.site_names, x_positions = observed.x_positions, z_positions = observed.z_positions,
-        title = "2D inversion ($tag) predicted data")
-    write_data2d(joinpath(output_dir, "data_$tag.dat"), predicted)
-    open(joinpath(output_dir, "history_$tag.csv"), "w") do io
-        println(io, join(string.(keys(first(result.history))), ','))
-        for h in result.history
-            println(io, join(values(h), ','))
+function Invert2D(start_path::AbstractString, data_path::AbstractString, fwd_path::AbstractString,
+                  inv_path::AbstractString, cov_path::AbstractString, prior_path::AbstractString;
+                  run_dir::Union{Nothing, AbstractString} = nothing)
+    observed = load_data2d(data_path)
+    fwd, ctrl, cov = ReadFwdCtrl2D(fwd_path), ReadInvCtrl2D(inv_path), ReadCov2D(cov_path)
+    start, prior = ReadModel2D(start_path), ReadModel2D(prior_path)
+    _same_grid(start, prior) || error("the prior model must be on the start model's grid")
+    size(cov.mask) == size(start.resistivity) ||
+        error("the covariance mask is $(size(cov.mask)) cells, the model is $(size(start.resistivity))")
+    mesh, ρ0 = Mesh2DFromInputs(start, observed, fwd)
+    _, ρref = Mesh2DFromInputs(prior, observed, fwd)
+    active = falses(size(ρ0))
+    active[mesh.n_air_cells+1:end, :] .= cov.mask .!= 0
+    any(active) || error("the covariance mask fixes every cell")
+
+    dir = run_dir === nothing ? _inv2d_run_dir(data_path) : String(run_dir)
+    inputs = joinpath(dir, "inputs")
+    mkpath(inputs)
+    for p in (start_path, data_path, fwd_path, inv_path, cov_path, prior_path)
+        cp(p, joinpath(inputs, basename(p)); force = true)
+    end
+    println("Run directory: ", dir)
+
+    history, reason, converged = nothing, :max_iter, false
+    if ctrl.algorithm == :vfsa
+        final, predicted = _invert2d_vfsa(dir, mesh, ρ0, observed, ctrl, fwd, cov)
+    else
+        options, algorithm = _inv2d_from_ctrl(ctrl)
+        result = Invert2D(mesh, ρ0, observed; algorithm, options, active_cells = active, reference_resistivity = ρref)
+        final, history, reason, converged = result.resistivity, result.history, result.reason, result.converged
+        predicted = _inv2d_predicted(result.response, observed, ctrl.mode)
+    end
+    components = ctrl.mode == :TETM ? ["ZXY", "ZYX"] : ctrl.mode == :TE ? ["ZXY"] : ["ZYX"]
+    fit = chi2_rms2d(observed, predicted; components)
+    if ctrl.algorithm == :vfsa
+        converged = fit.rms <= ctrl.target_rms
+        reason = converged ? :target_rms : :max_iter
+    end
+
+    WriteModel2D(joinpath(dir, "model.rho"), mesh, final)
+    write_data2d(joinpath(dir, "data.pred"), predicted)
+    if history !== nothing
+        open(joinpath(dir, "History.csv"), "w") do io
+            println(io, join(string.(keys(first(history))), ','))
+            foreach(h -> println(io, join(values(h), ',')), history)
         end
     end
-    open(joinpath(output_dir, "summary_$tag.txt"), "w") do io
-        println(io, "Algorithm: ", nameof(typeof(result.algorithm)))
-        println(io, "Termination: ", result.reason)
-        println(io, "Converged: ", result.converged)
-        println(io, "RMS: ", result.fit.rms)
-        println(io, "Real data count: ", result.fit.count)
-        println(io, "Accepted iterations: ", length(result.history) - 1)
-        println(io, "Active cells: ", length(result.active_cells))
+    open(joinpath(dir, "Summary.txt"), "w") do io
+        println(io, "Algorithm: ", uppercase(string(ctrl.algorithm)))
+        println(io, "Termination: ", reason)
+        println(io, "Converged: ", converged)
+        @printf(io, "RMS: %.6f\n", fit.rms)
+        println(io, "Real data count: ", fit.count)
+        history === nothing || println(io, "Accepted iterations: ", length(history) - 1)
+        println(io, "Active cells: ", count(active))
     end
-    output_dir
+    (; run_dir = dir, algorithm = ctrl.algorithm, ctrl, fwd, mesh, observed, predicted, start = ρ0, prior = ρref,
+       final, active, history, rms = fit.rms, reason, converged)
 end

@@ -1,17 +1,25 @@
-# Compute the 2D forward response and plot observed vs predicted data.
-# Usage: julia --project=. examples/run_fwd2D.jl <model_path> <reference_path>
+# 2D MT forward run, ModEM style: model + data file (sites, periods, errors) + FwdCtrl -> data.pred
+# Author: @pankajkmishra
+# data.pred is written next to the data file, with a data-fit plot beside it
+# FwdCtrl is shipped in examples/ctrl/2D; generate the models and data once: julia --project=. helpers/benchmarks_2D.jl
+# Usage: julia --project=. examples/run_fwd2D.jl [model.rho data.dat FwdCtrl]
 
 using MTGeophysics
 
-model_path = get(ARGS, 1, normpath(@__DIR__, "0COMEMI2D-I", "Comemi2D1.true"))
-ref_path   = get(ARGS, 2, normpath(@__DIR__, "0COMEMI2D-I", "Comemi2D1.ref"))
+const CASE_DIR = joinpath(@__DIR__, "data", "2D-III")
+const CTRL_DIR = joinpath(@__DIR__, "ctrl", "2D")
 
-pred_path = ForwardSolve2D(model_path, ref_path)
-out_dir   = dirname(pred_path)
-plots     = PlotData2D(pred_path;
-                maps_output_path   = joinpath(out_dir, "DataMaps2D.png"),
-                curves_output_path = joinpath(out_dir, "DataCurves2D.png"))
+inputs = if isempty(ARGS)
+    [joinpath(CASE_DIR, "model.true"), joinpath(CASE_DIR, "data.dat"), joinpath(CTRL_DIR, "FwdCtrl")]
+elseif length(ARGS) == 3
+    ARGS
+else
+    error("usage: julia --project=. examples/run_fwd2D.jl model.rho data.dat FwdCtrl")
+end
+all(isfile, inputs) || error("missing inputs $(filter(!isfile, inputs)); run julia --project=. helpers/benchmarks_2D.jl first")
 
-println("Predicted = ", pred_path)
-println("Maps      = ", plots.maps_output_path)
-println("Curves    = ", plots.curves_output_path)
+pred_path = ForwardSolve2D(inputs...)
+plot_path = PlotData2D(inputs[2]; predicted_path = pred_path, output_path = joinpath(dirname(pred_path), "DataFit.png"))
+
+println("Predicted : ", pred_path)
+println("Plot      : ", plot_path)

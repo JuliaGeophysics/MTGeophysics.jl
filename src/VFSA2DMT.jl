@@ -1,8 +1,7 @@
-# This script runs a full 2D VFSA inversion workflow with RBF-controlled models and shared 2D file I/O.
-
-if !isdefined(@__MODULE__, :plot_mt2d_model)
-    foreach(f -> include(joinpath(@__DIR__, f)), ("Mesh2D.jl", "Fwd2D.jl", "PlotModel2D.jl", "PlotData2D.jl"))
-end
+# 2D MT VFSA inversion
+# Author: @pankajkmishra
+# Very fast simulated annealing over RBF control points, in the older model layout with air rows
+# Invert2D reaches it through inv.ctrl; it moves behind the shared Inv2D front end in phase 6
 
 using CairoMakie
 using Dates
@@ -109,14 +108,6 @@ struct MT2DRBFMap
     z_centers::Vector{Float64}
 end
 
-core_cell_indices(cell_sizes::AbstractVector{<:Real}; tol::Real = 0.20) = begin
-    minimum_size = minimum(Float64.(cell_sizes))
-    threshold = minimum_size * (1 + Float64(tol))
-    indices = findall(size -> Float64(size) <= threshold + 1e-9, cell_sizes)
-    isempty(indices) && error("no core cells were detected")
-    first(indices):last(indices)
-end
-
 function _ensure_file_in_dir(path::AbstractString, target_dir::AbstractString; target_name::AbstractString = basename(path))
     mkpath(target_dir)
     target_path = joinpath(target_dir, target_name)
@@ -188,14 +179,6 @@ _vfsa2d_convergence_plot_filename() = "plot_convergence.png"
 _vfsa2d_mean_model_plot_filename() = "plot_model_mean.png"
 
 _vfsa2d_median_model_plot_filename() = "plot_model_median.png"
-
-_vfsa2d_observed_maps_plot_filename() = "plot_data_obs_maps.png"
-
-_vfsa2d_best_maps_plot_filename() = "plot_data_best_maps.png"
-
-_vfsa2d_observed_curves_plot_filename() = "plot_data_obs_curves.png"
-
-_vfsa2d_best_curves_plot_filename() = "plot_data_best_curves.png"
 
 function _vfsa2d_trial_model_filename(iteration::Integer, trial::Integer)
     @sprintf("itr_%05d_trial_%02d.rho", iteration, trial)
@@ -827,10 +810,10 @@ function _plot_mt2d_vfsa_convergence(path::AbstractString, chains::AbstractVecto
     mkpath(dirname(path))
 
     figure = Figure(size = (1400, 950))
-    ax1 = Axis(figure[1, 1], xlabel = "VFSA iteration", ylabel = "Best χ²", yscale = log10, title = "Best objective")
-    ax2 = Axis(figure[1, 2], xlabel = "VFSA iteration", ylabel = "Current RMS", title = "Current fit")
-    ax3 = Axis(figure[2, 1], xlabel = "VFSA iteration", ylabel = "Temperature", yscale = log10, title = "Annealing schedule")
-    ax4 = Axis(figure[2, 2], xlabel = "VFSA iteration", ylabel = "Rolling acceptance", title = "Acceptance")
+    ax1 = _mt_axis(figure[1, 1]; xlabel = "VFSA iteration", ylabel = "Best χ²", yscale = log10)
+    ax2 = _mt_axis(figure[1, 2]; xlabel = "VFSA iteration", ylabel = "Current RMS")
+    ax3 = _mt_axis(figure[2, 1]; xlabel = "VFSA iteration", ylabel = "Temperature", yscale = log10)
+    ax4 = _mt_axis(figure[2, 2]; xlabel = "VFSA iteration", ylabel = "Rolling acceptance")
 
     offset = 0
     plotted = false
@@ -886,7 +869,7 @@ function _run_mt2d_chain(
     _write_trials_header(trials_log, config, Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))
     _write_iteration_header(iteration_log, config, Dates.format(now(), "yyyy-mm-dd HH:MM:SS"))
 
-    core_y = core_cell_indices(mesh.y_cell_sizes; tol = config.pad_tolerance)
+    core_y = _core_range(mesh.y_cell_sizes; tol = config.pad_tolerance)
     core_z = _perturbable_ground_indices(mesh, config.perturb_depth_m)
 
     # Keep the prior in the sparse-control subspace. A dense random cell-by-cell
@@ -1346,18 +1329,9 @@ function VFSA2DMT(
     )
     plot_mt2d_model(mesh, result.ensemble.mean_resistivity; output_path = joinpath(result.output_dirs.plots, _vfsa2d_mean_model_plot_filename()))
     plot_mt2d_model(mesh, result.ensemble.median_resistivity; output_path = joinpath(result.output_dirs.plots, _vfsa2d_median_model_plot_filename()))
-    plot_mt2d_data_maps(data_to_response2d(observed_data); output_path = joinpath(result.output_dirs.plots, _vfsa2d_observed_maps_plot_filename()))
-    plot_mt2d_data_maps(result.best_chain.best_response; output_path = joinpath(result.output_dirs.plots, _vfsa2d_best_maps_plot_filename()))
-    plot_mt2d_site_curves(
-        data_to_response2d(observed_data);
-        station_index = mt2d_center_station(mesh),
-        output_path = joinpath(result.output_dirs.plots, _vfsa2d_observed_curves_plot_filename()),
-    )
-    plot_mt2d_site_curves(
-        result.best_chain.best_response;
-        station_index = mt2d_center_station(mesh),
-        output_path = joinpath(result.output_dirs.plots, _vfsa2d_best_curves_plot_filename()),
-    )
+    best_data = data_from_response2d(result.best_chain.best_response; z_xy_error = observed_data.z_xy_error,
+                                     z_yx_error = observed_data.z_yx_error, site_names = observed_data.site_names)
+    plot_mt2d_data_fit(observed_data, best_data; output_path = joinpath(result.output_dirs.plots, "DataFit.png"))
     convergence_plot_path = _plot_mt2d_vfsa_convergence(joinpath(result.output_dirs.plots, _vfsa2d_convergence_plot_filename()), result.chains)
     summary_path = _write_summary_2d_generic(
         joinpath(result.output_dirs.logs, "Summary.md"),
@@ -1383,35 +1357,7 @@ function VFSA2DMT(
     )
 end
 
-function _parse_cli_args(args::AbstractVector{<:AbstractString})
-    values = Dict{String, String}()
-    index = 1
-    while index <= length(args)
-        arg = args[index]
-        if startswith(arg, "--") && index < length(args)
-            values[arg] = args[index + 1]
-            index += 2
-        else
-            index += 1
-        end
-    end
-    values
-end
-
-function _parse_cli_int(cli::Dict{String, String}, key::AbstractString, default::Int)
-    haskey(cli, key) || return default
-    parsed = tryparse(Int, cli[key])
-    parsed === nothing && error("expected integer value for $key, got '$(cli[key])'")
-    parsed
-end
-
-function _parse_cli_float(cli::Dict{String, String}, key::AbstractString, default::Float64)
-    haskey(cli, key) || return default
-    parsed = tryparse(Float64, cli[key])
-    parsed === nothing && error("expected numeric value for $key, got '$(cli[key])'")
-    parsed
-end
-
+# run directory named after params.run_name beside the calling script
 function VFSA2DMT(params::VFSA2DMTParams)
     script_dir = dirname(abspath(params.script_path))
     run_info = _create_mt2d_run_dir(script_dir; run_name = params.run_name)
@@ -1422,59 +1368,4 @@ function VFSA2DMT(params::VFSA2DMTParams)
         true_model_path = isempty(params.model_path) ? nothing : abspath(params.model_path),
         config = params.config,
     )
-end
-
-# Prints the required and optional inputs for the 2D VFSA workflow.
-function _print_usage_2d(io::IO = stdout)
-    d = VFSA2DMTConfig()
-    println(io, "VFSA2DMT required inputs:")
-    println(io, "  1. start_model_path")
-    println(io, "  2. observed_data_path")
-    println(io, "VFSA2DMT optional inputs with defaults:")
-    println(io, "  --n-chains $(d.n_chains)")
-    println(io, "  --n-trials $(d.n_trials)")
-    println(io, "  --max-iter $(d.max_iter)")
-    println(io, "  --n-ctrl $(d.n_ctrl)")
-    println(io, "  --log-bounds $(d.log_bounds[1]),$(d.log_bounds[2])")
-    println(io, "  --perturb-depth $(d.perturb_depth_m)")
-    println(io, "  --output-root $(d.output_root)")
-    println(io, "  --seed $(d.seed)")
-end
-
-# Parses the log10 resistivity bounds from the CLI.
-function _parse_log_bounds_2d(cli::Dict{String, String}, default_value::Tuple{Float64, Float64})
-    haskey(cli, "--log-bounds") || return default_value
-    parts = split(cli["--log-bounds"], ",")
-    length(parts) == 2 || error("expected --log-bounds lo,hi")
-    (parse(Float64, strip(parts[1])), parse(Float64, strip(parts[2])))
-end
-
-# Runs the CLI entry point for the 2D VFSA workflow.
-function main_vfsa2dmt(args::AbstractVector{<:AbstractString} = ARGS)
-    length(args) < 2 && return _print_usage_2d()
-
-    d = VFSA2DMTConfig()
-    start_model_path = args[1]
-    observed_data_path = args[2]
-    cli = _parse_cli_args(args[3:end])
-    config = VFSA2DMTConfig(
-        n_chains = _parse_cli_int(cli, "--n-chains", d.n_chains),
-        n_trials = _parse_cli_int(cli, "--n-trials", d.n_trials),
-        max_iter = _parse_cli_int(cli, "--max-iter", d.max_iter),
-        n_ctrl = _parse_cli_int(cli, "--n-ctrl", d.n_ctrl),
-        log_bounds = _parse_log_bounds_2d(cli, d.log_bounds),
-        perturb_depth_m = _parse_cli_float(cli, "--perturb-depth", d.perturb_depth_m),
-        seed = _parse_cli_int(cli, "--seed", d.seed),
-        output_root = get(cli, "--output-root", d.output_root),
-    )
-    result = VFSA2DMT(start_model_path, observed_data_path; config = config)
-
-    println("VFSA2DMT outputs:")
-    println("  run_dir = ", result.run_info.run_dir)
-    println("  best_chi_square = ", round(result.best_chain.best_chi2, digits = 4))
-    println("  ensemble_rms = ", round(result.ensemble.mean_fit.rms, digits = 4))
-end
-
-if abspath(PROGRAM_FILE) == @__FILE__
-    main_vfsa2dmt()
 end

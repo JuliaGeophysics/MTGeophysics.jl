@@ -135,7 +135,6 @@ end
         invalid = deepcopy(observed); invalid.z_xy_error .= NaN; invalid.z_yx_error .= NaN
         @test_throws ArgumentError GaussNewton2D(mesh,initial,invalid)
 
-
         @testset "Generic driver and shared derivatives" begin
             generic = Invert2D(mesh,initial,observed;algorithm=GaussNewton2DConfig(),options=opts,active_cells=mask)
             @test generic.resistivity == result.resistivity
@@ -165,31 +164,6 @@ end
             @test nlcg.resistivity[.!mask] == initial[.!mask]
             @test haskey(nlcg.history[1], :restart)
             @test_throws ArgumentError NLCG2D(mesh,initial,observed;config=NLCG2DConfig(restart=0))
-            mktempdir() do dir
-                write_model2d(joinpath(dir,"initial.rho"),mesh,initial)
-                write_data2d(joinpath(dir,"observed.dat"),observed)
-                NLCG2D(joinpath(dir,"initial.rho"),joinpath(dir,"observed.dat");output_dir=dir,active_cells=mask,
-                       options=Inv2DOptions(max_iter=2,verbose=false))
-                @test isfile(joinpath(dir,"model_nlcg.rho"))
-                @test isfile(joinpath(dir,"history_nlcg.csv"))
-            end
-        end
-
-        @testset "File workflow" begin
-            mktempdir() do dir
-                modelpath = joinpath(dir,"initial.rho")
-                datapath = joinpath(dir,"observed.dat")
-                outdir = joinpath(dir,"results")
-                write_model2d(modelpath,mesh,initial)
-                write_data2d(datapath,observed)
-                saved = GaussNewton2D(modelpath,datapath;output_dir=outdir,active_cells=mask,options=opts)
-                @test saved.fit.rms < 0.01
-                @test load_model2d(joinpath(outdir,"model_gn.rho")).resistivity ≈ saved.resistivity rtol=1e-7
-                @test load_data2d(joinpath(outdir,"data_gn.dat")).z_xy ≈ saved.response.z_xy rtol=1e-7
-                @test isfile(joinpath(outdir,"history_gn.csv"))
-                @test isfile(joinpath(outdir,"summary_gn.txt"))
-                @test_throws ArgumentError GaussNewton2D(modelpath,datapath;output_dir=outdir,active_cells=mask,options=opts)
-            end
         end
     end
 end

@@ -118,15 +118,9 @@ end
 
 """
     NLCG2D(mesh, initial_resistivity, observed; config=NLCG2DConfig(), options=Inv2DOptions(), ...)
-    NLCG2D(model_path, data_path; output_dir=nothing, config=..., options=..., ...)
 
-NLCG shorthand for `Invert2D(...; algorithm=config)`. The file method writes
-`model_nlcg.rho`, `data_nlcg.dat`, `history_nlcg.csv`, and `summary_nlcg.txt`.
+NLCG shorthand for `Invert2D(...; algorithm=config)`.
 """
 NLCG2D(mesh::MT2DMesh, initial_resistivity::AbstractMatrix{<:Real}, observed::DataFile2D;
        config::NLCG2DConfig = NLCG2DConfig(), kwargs...) =
     Invert2D(mesh, initial_resistivity, observed; algorithm = config, kwargs...)
-
-NLCG2D(model_path::AbstractString, data_path::AbstractString;
-       config::NLCG2DConfig = NLCG2DConfig(), kwargs...) =
-    Invert2D(model_path, data_path; algorithm = config, kwargs...)

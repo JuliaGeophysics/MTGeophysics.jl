@@ -82,7 +82,7 @@ function make_convergence_gif(
             xlabel = "Offset (km)",
             ylabel = "Depth (km)",
             yreversed = true,
-            title = "Chain-mean best model — iteration $iter_str",
+            annotation = "Chain-mean best model, iteration $iter_str",
         )
         hm = heatmap!(ax, y_edges, z_edges, rho_plot', colormap = :Spectral, colorrange = resistivity_log10_range)
         Colorbar(figure[1, 2], hm, label = "log₁₀(ρ)")

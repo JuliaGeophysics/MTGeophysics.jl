@@ -82,15 +82,9 @@ end
     GaussNewton2D(mesh, initial_resistivity, observed; config=GaussNewton2DConfig(),
                   options=Inv2DOptions(), active_cells=nothing,
                   reference_resistivity=initial_resistivity)
-    GaussNewton2D(model_path, data_path; output_dir=nothing, config=..., options=..., ...)
 
-Gauss–Newton shorthand for `Invert2D(...; algorithm=config)`. The file method writes
-`model_gn.rho`, `data_gn.dat`, `history_gn.csv`, and `summary_gn.txt` to `output_dir`.
+Gauss–Newton shorthand for `Invert2D(...; algorithm=config)`.
 """
 GaussNewton2D(mesh::MT2DMesh, initial_resistivity::AbstractMatrix{<:Real}, observed::DataFile2D;
               config::GaussNewton2DConfig = GaussNewton2DConfig(), kwargs...) =
     Invert2D(mesh, initial_resistivity, observed; algorithm = config, kwargs...)
-
-GaussNewton2D(model_path::AbstractString, data_path::AbstractString;
-              config::GaussNewton2DConfig = GaussNewton2DConfig(), kwargs...) =
-    Invert2D(model_path, data_path; algorithm = config, kwargs...)
