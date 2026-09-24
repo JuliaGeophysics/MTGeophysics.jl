@@ -1,10 +1,12 @@
 # 2D MT VFSA inversion
 # Author: @pankajkmishra
-# Very fast simulated annealing over RBF control points, from five files (start, data, fwd.ctrl, the VFSA
-# control and mask.ctrl): no covariance and no prior, the mask alone says which cells move. The mesh,
-# topography, water, data rows and run directory are those of GN and NLCG. Independent chains run on
-# threads; their best models form the ensemble whose mean, median, spread and 5-95% range are the
-# uncertainty estimate
+# Very fast simulated annealing over Gaussian-RBF control points, parameterised as VFSA3DMT does in 3D: controls
+# only in the core (the uniform lateral block, optionally grown by whole cells, down to a skin-depth or layer
+# limit), the lateral padding blended from the core edge back to the start model and the cells below the core
+# carried down a third per layer. Five files (start, data, fwd.ctrl, the VFSA control and mask.ctrl): no
+# covariance and no prior, the mask says which cells are frozen. The mesh, topography, water, data rows and run
+# directory are those of GN and NLCG. Independent chains run on threads; their best models form the ensemble
+# whose mean, median, spread and 5-95% range are the uncertainty estimate
 
 using Dates
 using LinearAlgebra
@@ -16,18 +18,23 @@ using Statistics
 """
     VFSA2DConfig(; kwargs...)
 
-VFSA controls.
+VFSA controls, named as in `VFSA3DMTConfig`.
 - `n_chains`, `max_iter`, `n_trials`: independent chains, iterations per chain, proposals per iteration
-- `n_ctrl`: RBF control points per chain, drawn at random among the active core cells
-- `rbf_sigma_scale_y`, `rbf_sigma_scale_z`: RBF widths in cells; `trunc_sigmas`: truncation in widths
+- `n_ctrl`: RBF control points per chain, drawn among the free core cells
 - `log_bounds`, `step_scale`, `frac_update_controls`: log10 ρ box, proposal width as a share of
   the box, share of the controls moved per proposal
-- `temp_kappa`, `cool_ratio`: temperature at the start and its ratio at `max_iter`; one
-  schedule drives proposal width and acceptance
+- `T0`, `cool_ratio`: temperature at the start and its ratio at `max_iter`; one schedule
+  drives proposal width and acceptance
 - `target_rms`: a chain stops once its best rms reaches it
-- `padding_decay_length`: decay, in core cells, of the model change into the lateral padding
-- `perturb_depth_m`: deepest cell bottom the controls reach (Inf = whole model)
-- `pad_tolerance`: width tolerance of the lateral core, as in 3D
+- `pad_tol`, `core_expand_cells`: lateral core, the uniform-width block (as in 3D), grown
+  by `core_expand_cells` per side
+- `z_core_skin_depths`, `z_core_cells`: core depth, in skin depths of the data (median
+  off-diagonal apparent resistivity, longest period; Inf = whole model) or as the top
+  `z_core_cells` layers when that is positive
+- `sigma_scale`, `sigma_scale_deep`, `trunc_sigmas`: RBF widths in cells at the top and
+  the bottom of the core (linear in depth between them) and their truncation
+- `ctrl_depth_power`: control placement weight (depth + z₁)^(-p), 0 = uniform
+- `padding_decay_length`: e-fold, in core cells, of the blend from the core edge to the start model
 - `mode`, `seed`, `snapshot_interval` (0 = off), `verbose`
 """
 Base.@kwdef struct VFSA2DConfig
@@ -36,18 +43,21 @@ Base.@kwdef struct VFSA2DConfig
     max_iter::Int = 3000
     n_trials::Int = 1
     log_bounds::Tuple{Float64, Float64} = (0.0, 5.0)
-    frac_update_controls::Float64 = 1.0
-    step_scale::Float64 = 0.11
-    temp_kappa::Float64 = 1.0
+    frac_update_controls::Float64 = 0.2
+    step_scale::Float64 = 0.2
+    T0::Float64 = 1.0
     cool_ratio::Float64 = 1e-3
     target_rms::Float64 = 1.0
     seed::Int = 20260308
-    pad_tolerance::Float64 = 0.20
-    padding_decay_length::Float64 = 8.0
-    rbf_sigma_scale_y::Float64 = 2.0
-    rbf_sigma_scale_z::Float64 = 2.5
+    pad_tol::Float64 = 0.20
+    core_expand_cells::Int = 0
+    z_core_skin_depths::Float64 = 1.0
+    z_core_cells::Int = 0
+    sigma_scale::Float64 = 2.0
+    sigma_scale_deep::Float64 = sigma_scale
     trunc_sigmas::Float64 = 3.0
-    perturb_depth_m::Float64 = Inf
+    ctrl_depth_power::Float64 = 0.0
+    padding_decay_length::Float64 = 8.0
     mode::Symbol = :TETM
     snapshot_interval::Int = 0
     verbose::Bool = true
@@ -58,7 +68,12 @@ function _vfsa2d_validate(c::VFSA2DConfig)
         throw(ArgumentError("VFSA needs n_chains, n_ctrl, n_trials ≥ 1 and max_iter ≥ 0"))
     c.log_bounds[1] < c.log_bounds[2] || throw(ArgumentError("log_bounds must be increasing"))
     0 < c.frac_update_controls <= 1 || throw(ArgumentError("frac_update_controls must lie in (0, 1]"))
-    c.temp_kappa > 0 && 0 < c.cool_ratio <= 1 || throw(ArgumentError("need temp_kappa > 0 and 0 < cool_ratio ≤ 1"))
+    c.T0 > 0 && 0 < c.cool_ratio <= 1 || throw(ArgumentError("need T0 > 0 and 0 < cool_ratio ≤ 1"))
+    c.core_expand_cells >= 0 && c.z_core_cells >= 0 && c.z_core_skin_depths > 0 ||
+        throw(ArgumentError("need core_expand_cells ≥ 0, z_core_cells ≥ 0 and z_core_skin_depths > 0"))
+    c.sigma_scale > 0 && c.sigma_scale_deep > 0 && c.trunc_sigmas > 0 && c.ctrl_depth_power >= 0 ||
+        throw(ArgumentError("need positive RBF widths and truncation, and ctrl_depth_power ≥ 0"))
+    c.padding_decay_length > 0 || throw(ArgumentError("padding_decay_length must be positive"))
     c.mode in (:TE, :TM, :TETM) || throw(ArgumentError("mode must be :TE, :TM or :TETM"))
     c
 end
@@ -70,82 +85,123 @@ VFSA controls from a VFSA control file.
 """
 VFSA2DConfig(c::VFSACtrl2D; mode::Symbol = c.mode, n_ctrl::Int = c.control_points) =
     VFSA2DConfig(n_chains = c.chains, n_ctrl = n_ctrl, max_iter = c.max_iter, n_trials = c.trials,
-                 log_bounds = c.log_bounds, step_scale = c.step_scale, temp_kappa = c.temperature,
-                 cool_ratio = c.cooling, rbf_sigma_scale_y = c.rbf_y, rbf_sigma_scale_z = c.rbf_z, seed = c.seed,
-                 target_rms = c.target_rms, mode = mode, snapshot_interval = c.snapshots)
+                 log_bounds = c.log_bounds, frac_update_controls = c.share_moved, step_scale = c.step_scale,
+                 T0 = c.temperature, cool_ratio = c.cooling, target_rms = c.target_rms, seed = c.seed,
+                 core_expand_cells = c.core_expansion, z_core_skin_depths = c.core_skin_depths,
+                 z_core_cells = c.core_layers, sigma_scale = c.rbf_top, sigma_scale_deep = c.rbf_bottom,
+                 ctrl_depth_power = c.depth_power, padding_decay_length = c.padding_decay, mode = mode,
+                 snapshot_interval = c.snapshots)
 
-#---------- parameterisation ----------
+#---------- core ----------
 
-# model change on the parameterised cells as W p: core cells take normalised gaussian RBF
-# weights of the controls within trunc_sigmas (distances in cells, so the widths follow the
-# geometric layers), lateral padding cells a decayed copy of the nearest core cell in their row
+# lateral core columns and depth core rows (full-mesh indices, earth only), as core_ranges and z_core_range in 3D
+function _vfsa2d_core(mesh::MT2DMesh, observed, config::VFSA2DConfig)
+    ny, na = length(mesh.y_cell_sizes), mesh.n_air_cells
+    c = _core_range(mesh.y_cell_sizes; tol = config.pad_tol)
+    e = config.core_expand_cells
+    iy = max(1, first(c) - e):min(ny, last(c) + e)
+    depth = mt2d_z_centers(mesh)[na+1:end] .- mesh.z_nodes[na+1]
+    nz = length(depth)
+    last_row = if config.z_core_cells > 0
+        min(config.z_core_cells, nz)
+    elseif isfinite(config.z_core_skin_depths)
+        ρa = filter(x -> isfinite(x) && x > 0, vcat(vec(observed.rho_xy), vec(observed.rho_yx)))
+        δ = isempty(ρa) ? Inf : config.z_core_skin_depths * 503.0 * sqrt(median(ρa) * maximum(1 ./ observed.frequencies))
+        max(1, searchsortedlast(depth, δ))
+    else
+        nz
+    end
+    iy, na+1:na+last_row
+end
+
+#---------- rbf parameterisation ----------
+
+# core change as W p, as build_rbf_map in 3D: controls drawn among the free core cells with weight
+# (depth + z₁)^(-p) (Efraimidis-Spirakis), gaussian kernels in cell-index space whose width grows linearly
+# in depth from sigma_scale to sigma_scale_deep over the core, truncated at trunc_sigmas, normalised per
+# cell; a cell out of every kernel's reach takes its nearest control
 struct VFSA2DMap
     cells::Vector{CartesianIndex{2}}
+    frozen::BitVector
     controls::Vector{CartesianIndex{2}}
     W::SparseMatrixCSC{Float64, Int}
+    iy::UnitRange{Int}
+    kz::UnitRange{Int}
 end
 
-function _vfsa2d_map(mesh::MT2DMesh, active::AbstractMatrix{Bool}, config::VFSA2DConfig, rng::AbstractRNG)
-    core = _core_range(mesh.y_cell_sizes; tol = config.pad_tolerance)
-    zbottom = mesh.z_nodes[2:end] .- mesh.z_nodes[mesh.n_air_cells+1]
-    deep = isfinite(config.perturb_depth_m) ? zbottom .> config.perturb_depth_m + 1e-9 : falses(length(zbottom))
-    usable = copy(active)
-    usable[deep, :] .= false
-    corecells = [i for i in findall(usable) if i[2] in core]
-    isempty(corecells) && throw(ArgumentError("no active cells in the lateral core"))
-    controls = corecells[randperm(rng, length(corecells))[1:min(config.n_ctrl, length(corecells))]]
+function _vfsa2d_map(mesh::MT2DMesh, protected::AbstractMatrix{Bool}, iy, kz, config::VFSA2DConfig, rng::AbstractRNG)
+    cells = vec([CartesianIndex(k, j) for k in kz, j in iy])
+    frozen = BitVector([protected[c] for c in cells])
+    free = cells[.!frozen]
+    isempty(free) && throw(ArgumentError("every core cell is frozen"))
+    ztop = mesh.z_nodes[mesh.n_air_cells+1]
+    depth = mt2d_z_centers(mesh) .- ztop
+    z1 = depth[first(kz)] + eps()
+    p = config.ctrl_depth_power
+    keys = [rand(rng)^(1 / (p == 0 ? 1.0 : (depth[c[1]] + z1)^(-p))) for c in free]
+    controls = free[partialsortperm(keys, 1:min(config.n_ctrl, length(free)); rev = true)]
+    config.n_ctrl > length(controls) && @warn "VFSA: only $(length(controls)) of $(config.n_ctrl) controls placed"
 
-    sy, sz, cut2 = config.rbf_sigma_scale_y, config.rbf_sigma_scale_z, config.trunc_sigmas^2
-    weights = Dict{CartesianIndex{2}, Tuple{Vector{Int}, Vector{Float64}}}()
-    for c in corecells
-        r2 = [((c[2] - k[2]) / sy)^2 + ((c[1] - k[1]) / sz)^2 for k in controls]
-        near = findall(<=(cut2), r2)
+    span = depth[last(kz)] - depth[first(kz)]
+    σ = [config.sigma_scale + (span > 0 ? clamp((depth[q[1]] - depth[first(kz)]) / span, 0, 1) : 0.0) *
+         (config.sigma_scale_deep - config.sigma_scale) for q in controls]
+    I, J, V = Int[], Int[], Float64[]
+    for (r, c) in enumerate(cells)
+        r2 = [((c[1] - q[1])^2 + (c[2] - q[2])^2) / σ[n]^2 for (n, q) in enumerate(controls)]
+        near = findall(<=(config.trunc_sigmas^2), r2)
         isempty(near) && (near = [argmin(r2)])
         w = exp.(-0.5 .* r2[near])
-        weights[c] = (near, w ./ sum(w))
+        append!(I, fill(r, length(near))); append!(J, near); append!(V, w ./ sum(w))
     end
-    cells = copy(corecells)
-
-    # padding: decayed copy of the nearest core cell of the same row
-    yc = mt2d_y_centers(mesh)
-    scale = config.padding_decay_length * median(mesh.y_cell_sizes[core])
-    for i in findall(usable)
-        i[2] in core && continue
-        inward = i[2] < first(core) ? (first(core):last(core)) : (last(core):-1:first(core))
-        k = findfirst(iy -> haskey(weights, CartesianIndex(i[1], iy)), inward)
-        k === nothing && continue
-        src = CartesianIndex(i[1], inward[k])
-        near, w = weights[src]
-        weights[i] = (near, exp(-abs(yc[i[2]] - yc[src[2]]) / max(scale, eps())) .* w)
-        push!(cells, i)
-    end
-    I = reduce(vcat, [fill(r, length(weights[c][1])) for (r, c) in enumerate(cells)])
-    J = reduce(vcat, [weights[c][1] for c in cells])
-    V = reduce(vcat, [weights[c][2] for c in cells])
-    VFSA2DMap(cells, controls, sparse(I, J, V, length(cells), length(controls)))
+    VFSA2DMap(cells, frozen, controls, sparse(I, J, V, length(cells), length(controls)), iy, kz)
 end
 
-@inline function _vfsa_y(u::Float64, temperature::Float64)
-    sign = u >= 0.5 ? 1.0 : -1.0
-    sign * temperature * ((1 + 1 / temperature)^abs(2u - 1.0) - 1.0)
+#---------- padding ----------
+
+# below the core each core column continues its last value, a third per layer, towards the start model
+function _vfsa2d_decay_z!(m, iy, kz, protected, start)
+    k0 = last(kz)
+    @inbounds for k in k0+1:size(m, 1), j in iy
+        protected[k, j] && continue
+        w = (1 / 3)^(k - k0)
+        m[k, j] = protected[k0, j] ? start[k, j] : m[k0, j] * w + start[k, j] * (1 - w)
+    end
+    m
 end
 
-# Ingber's proposal on a random share of the controls, clipped to the log10 box
-function _vfsa2d_propose!(p, base, T, lo, hi, n_move, rng, step_scale)
-    span = (hi - lo) * step_scale
-    for j in randperm(rng, length(p))[1:n_move]
-        p[j] = clamp(p[j] + _vfsa_y(rand(rng), T) * span, lo - base[j], hi - base[j])
+# lateral padding: the median of the edge_window core columns at each edge, row by row, blended into the
+# start model with e-fold L (m) of the true distance from the edge column
+function _vfsa2d_decay_y!(m, iy, yc, L, protected, start; edge_window::Int = 2)
+    y1, y2 = first(iy), last(iy)
+    buf = Float64[]
+    @inbounds for k in axes(m, 1)
+        edge = map(((y1, y1:min(y2, y1 + edge_window)), (y2, max(y1, y2 - edge_window):y2))) do (_, cols)
+            empty!(buf)
+            foreach(j -> protected[k, j] || push!(buf, m[k, j]), cols)
+            isempty(buf) ? NaN : median!(buf)
+        end
+        for j in axes(m, 2)
+            (y1 <= j <= y2 || protected[k, j]) && continue
+            jc, src = j < y1 ? (y1, edge[1]) : (y2, edge[2])
+            w = exp(-abs(yc[j] - yc[jc]) / L)
+            m[k, j] = isfinite(src) ? src * w + start[k, j] * (1 - w) : start[k, j]
+        end
     end
-    p
+    m
 end
 
 #---------- one chain ----------
 
-# log10 model of control values p, and its data misfit (chi2 over real data, as GN)
+# log10 model of control changes p and its data misfit (chi2 over real data, as GN): the core from the RBF
+# map within the bounds, frozen cells at the start, then the blends below and beside the core
 function _vfsa2d_evaluate(problem, map::VFSA2DMap, p)
-    m = copy(problem.m0)
     lo, hi = problem.config.log_bounds
-    m[map.cells] .= clamp.(problem.m0[map.cells] .+ map.W * p, lo, hi)
+    m = copy(problem.m0)
+    v = clamp.(problem.m0[map.cells] .+ map.W * p, lo, hi)
+    v[map.frozen] .= problem.m0[map.cells[map.frozen]]
+    m[map.cells] .= v
+    _vfsa2d_decay_z!(m, map.iy, map.kz, problem.protected, problem.m0)
+    _vfsa2d_decay_y!(m, map.iy, problem.yc, problem.L, problem.protected, problem.m0)
     ρ = 10.0 .^ m
     response, _ = _mt2d_forward_cache(problem.mesh, ρ; mode = problem.config.mode, cache_fields = false)
     r = _inv2d_residual(response, problem.rows)
@@ -156,25 +212,26 @@ end
 function _vfsa2d_chain(k::Int, problem, dir::Union{Nothing, String})
     config = problem.config
     rng = MersenneTwister(config.seed + 1000 * (k - 1))
-    map = _vfsa2d_map(problem.mesh, problem.active, config, rng)
+    map = _vfsa2d_map(problem.mesh, problem.protected, problem.iy, problem.kz, config, rng)
     lo, hi = config.log_bounds
     base = problem.m0[map.controls]
     p = zeros(length(map.controls))
     n_move = max(1, round(Int, config.frac_update_controls * length(p)))
     current = _vfsa2d_evaluate(problem, map, p)
     best = current
-    history = [(chain = k, iteration = 0, temperature = config.temp_kappa, trial_rms = current.rms,
+    history = [(chain = k, iteration = 0, temperature = config.T0, trial_rms = current.rms,
                 rms = current.rms, best_rms = best.rms, accepted = true)]
     ak = _resolve_ak(config.cool_ratio, config.max_iter)
     every = max(1, config.max_iter ÷ 20)
     chaindir = dir === nothing ? nothing : mkpath(joinpath(dir, @sprintf("chain_%02d", k)))
     for it in 1:config.max_iter
         best.rms <= config.target_rms && break
-        T = _T_schedule(it; T0 = config.temp_kappa, ak)
+        T = _T_schedule(it; T0 = config.T0, ak)
         # all trials branch from the current state, the best one takes one metropolis test
         trial, trial_p = nothing, p
         for _ in 1:config.n_trials
-            q = _vfsa2d_propose!(copy(p), base, T, lo, hi, n_move, rng, config.step_scale)
+            q = copy(p)
+            propose_controls!(q, T, lo, hi, base, n_move, rng; step_scale = config.step_scale)
             t = _vfsa2d_evaluate(problem, map, q)
             (trial === nothing || !(t.rms >= trial.rms)) && ((trial, trial_p) = (t, q))
         end
@@ -262,11 +319,15 @@ end
     VFSA2D(mesh, initial_resistivity, observed::DataFile2D; config=VFSA2DConfig(),
            active_cells=nothing, water_cells=nothing, run_dir=nothing)
 
-Very fast simulated annealing over RBF control points, on the same problem as
-`Invert2D`: only the active earth cells change (default all earth cells; air, water and
-mask-0 cells stay fixed), the misfit is the error-weighted impedance chi2 of GN and NLCG.
-Chains run on the Julia threads, each with its own random controls and seed. Their best
-models form the ensemble: mean and median (log10), standard deviation and 5-95% range.
+Very fast simulated annealing over RBF control points, parameterised as `VFSA3DMT`: the
+controls sit in the core only (the uniform lateral block grown by `core_expand_cells`,
+down to `z_core_skin_depths` skin depths or `z_core_cells` layers); the lateral padding is
+blended from the core edge back to the start model over `padding_decay_length` core
+cells, and the cells below the core carry its bottom down a third per layer. Air, water
+and inactive (mask 0) cells never change. The misfit is the error-weighted impedance
+chi2 of GN and NLCG. Chains run on the Julia threads, each with its own random controls
+and seed. Their best models form the ensemble: mean and median (log10), standard
+deviation and 5-95% range.
 
 With `run_dir` the chains write `vfsa/chain_XX/{best.rho, History.csv}` and the ensemble
 `vfsa/{model.mean.rho, model.median.rho, model.p05.rho, model.p95.rho, model.best.rho,
@@ -286,9 +347,19 @@ function VFSA2D(mesh::MT2DMesh, initial_resistivity::AbstractMatrix{<:Real}, obs
     active = falses(size(ρ0))
     active[cells] .= true
     rows = _inv2d_data(mesh, observed, config.mode)
+    protected = .!active                        # air, water and mask-0 cells: no controls, no change
+
+    # the core carries the controls; the padding and the cells below it follow by the 3D blends
+    iy, kz = _vfsa2d_core(mesh, observed, config)
     lo, hi = config.log_bounds
-    all(i -> lo <= log10(ρ0[i]) <= hi, cells) || throw(ArgumentError("active starting resistivities are outside log_bounds"))
-    problem = (; mesh, rows, active, m0 = log10.(ρ0), config)
+    all(i -> lo <= log10(ρ0[i]) <= hi, (CartesianIndex(k, j) for k in kz, j in iy if !protected[k, j])) ||
+        throw(ArgumentError("free starting resistivities of the core are outside log_bounds"))
+    L = config.padding_decay_length * median(mesh.y_cell_sizes[_core_range(mesh.y_cell_sizes; tol = config.pad_tol)])
+    problem = (; mesh, rows, active, protected, iy, kz, yc = mt2d_y_centers(mesh), L, m0 = log10.(ρ0), config)
+    depth = mesh.z_nodes[last(kz)+1] - mesh.z_nodes[mesh.n_air_cells+1]
+    config.verbose && @printf("VFSA core: columns %d-%d of %d, layers 1-%d of %d (to %.0f m), %d free core cells\n",
+                              first(iy), last(iy), size(ρ0, 2), length(kz), size(ρ0, 1) - mesh.n_air_cells, depth,
+                              count(!, protected[kz, iy]))
     dir = run_dir === nothing ? nothing : mkpath(joinpath(String(run_dir), "vfsa"))
 
     # one chain per task; the sparse solves stay single threaded underneath

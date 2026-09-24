@@ -42,7 +42,7 @@ mktempdir() do temp_dir
     observed = MTGeophysics._apply_mt2d_noise(data_from_response2d(true_response; impedance_error_fraction = 0.05);
                                               rng_seed = 20260308)
     start = build_mt2d_halfspace_model(mesh)
-    smoke_config = VFSA2DConfig(n_ctrl = 8, n_chains = 2, max_iter = 2, perturb_depth_m = 600.0,
+    smoke_config = VFSA2DConfig(n_ctrl = 8, n_chains = 2, max_iter = 2, z_core_cells = 3,
                                 snapshot_interval = 1, verbose = false)
     smoke_run = joinpath(temp_dir, "VFSA2D_Test")
     inversion = VFSA2D(mesh, start, observed; config = smoke_config, run_dir = smoke_run)
@@ -57,7 +57,13 @@ mktempdir() do temp_dir
     @test length(inversion.chains) == 2 && all(c -> length(c.history) <= 3, inversion.chains)
     @test inversion.ensemble.count == 2 && all(isfinite, inversion.ensemble.std)
     @test isfinite(inversion.rms) && inversion.best_rms <= minimum(c.history[1].rms for c in inversion.chains)
-    @test all(c -> maximum(mesh.z_nodes[k[1]+1] for k in c.controls) <= 600.0 + 1e-6, inversion.chains)
+    na0 = mesh.n_air_cells
+    core = MTGeophysics._core_range(mesh.y_cell_sizes)
+    @test all(c -> all(k -> na0 < k[1] <= na0 + 3 && k[2] in core, c.controls), inversion.chains)
+    # below the core each column carries the core bottom down a third per layer, towards the start
+    b = inversion.chains[1].best.m
+    j = first(core) + 2
+    @test b[na0+4, j] - log10(start[na0+4, j]) ≈ (b[na0+3, j] - log10(start[na0+3, j])) / 3 atol = 1e-9
     @test countlines(joinpath(vdir, "Uncertainty.csv")) == 1 + count(.!mt2d_air_mask(mesh))
     stats = AnalyseEnsemble2D(smoke_run)
     @test length(stats.chains) == 2 && all(isfile, stats.paths)

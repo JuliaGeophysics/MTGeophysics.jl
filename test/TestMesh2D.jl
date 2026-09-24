@@ -67,5 +67,21 @@ using Test
         yc0 = mt.origin[2] .+ cumsum(mt.y_cell_sizes) .- mt.y_cell_sizes ./ 2
         @test all(mask[1:2, findall(abs.(yc0) .< 900)] .== 0)
         @test_throws ArgumentError MakeMesh2D(dpath; out_dir = joinpath(dir, "bad"), colour = 1)
+
+        # the mesh window, headless on CairoMakie: sliders rebuild the mesh and Save writes what batch mode writes
+        ctrls = (inv = joinpath(pkgdir(MTGeophysics), "examples", "ctrl", "2D", "InvCtrl.GN"),
+                 vfsa = joinpath(pkgdir(MTGeophysics), "examples", "ctrl", "2D", "InvCtrl.VFSA"))
+        w = MTGeophysics._makemesh2d_window(load_data2d(dpath), ReadTopo2D(tpath), lake, MTGeophysics._MAKEMESH2D_DEFAULTS,
+                                            joinpath(dir, "gui"), ctrls)
+        MTGeophysics.CairoMakie.set_close_to!(w.grid.sliders[1], 0.25)
+        MTGeophysics.CairoMakie.set_close_to!(w.grid.sliders[3], 8)
+        @test w.params().cell_width_frac == 0.25 && w.params().n_pad == 8
+        @test occursin("250 m", w.info.text[])
+        w.save_button.clicks[] += 1
+        b = MakeMesh2D(dpath; out_dir = joinpath(dir, "batch"), topo_path = tpath, water = lake, inv_ctrl = ctrls.inv,
+                       vfsa_ctrl = ctrls.vfsa, cell_width_frac = 0.25, n_pad = 8)
+        for f in ("model.start", "model.prior", "cov.ctrl", "mask.ctrl", "fwd.ctrl", "inv.ctrl", "vfsa.ctrl", "data.dat")
+            @test read(joinpath(dir, "gui", f)) == read(joinpath(dir, "batch", f))
+        end
     end
 end

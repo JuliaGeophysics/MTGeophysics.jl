@@ -50,11 +50,17 @@ Log10 resistivity bounds          : 0 4
 Number of chains                  : 2
 Control points                    : 400
 Trials per iteration              : 1
-Step scale                        : 0.11
-Starting temperature              : 1
+Share of controls moved           : 0.2
+Step scale                        : 0.2
+Starting temperature              : 0.03
 Cooling ratio                     : 0.001
-RBF width y (cells)               : 2
-RBF width z (cells)               : 2.5
+RBF width top (cells)             : 2
+RBF width bottom (cells)          : 3
+Control depth power               : 0.2
+Core depth (skin depths)          : 1
+Core depth (layers)               : 0
+Core expansion (cells)            : 0
+Padding decay (core cells)        : 8
 Random seed                       : 20260308
 Snapshot interval                 : 0
 ```
@@ -67,17 +73,26 @@ Snapshot interval                 : 0
 | `Number of chains` | independent chains (and ensemble size) |
 | `Control points` | RBF controls per chain, drawn among the free core cells |
 | `Trials per iteration` | proposals per iteration, the best takes one Metropolis test |
+| `Share of controls moved` | controls perturbed per proposal (3D `frac_update_controls`) |
 | `Step scale` | proposal width as a share of the box |
-| `Starting temperature`, `Cooling ratio` | start temperature and its ratio at the last iteration |
-| `RBF width y (cells)`, `RBF width z (cells)` | RBF widths; in cells, so they follow the geometric layers |
+| `Starting temperature`, `Cooling ratio` | start temperature, on the scale of a typical relative uphill change of rms², and its ratio at the last iteration |
+| `RBF width top (cells)`, `RBF width bottom (cells)` | kernel widths at the top and bottom of the core, linear in depth between (3D `sigma_scale`, `sigma_scale_deep`) |
+| `Control depth power` | control placement weight (depth + z₁)^(−p), 0 = uniform (3D `ctrl_depth_power`) |
+| `Core depth (skin depths)` | core depth in skin depths of the data: median off-diagonal ρa, longest period |
+| `Core depth (layers)` | core depth as the top N layers instead, when N > 0 |
+| `Core expansion (cells)` | cells added to each side of the uniform lateral core (3D `core_expand_cells`) |
+| `Padding decay (core cells)` | e-fold of the blend from the core edge back to the start model |
 | `Random seed` | chain k uses seed + 1000(k−1) |
 | `Snapshot interval` | write each chain's best model every N iterations (0 = off) |
 
 `ReadVFSACtrl2D` and `WriteVFSACtrl2D` read and write the file. `VFSA2DConfig(ctrl)`
 turns it into the in-memory configuration.
 
-Only free earth cells change. Air, water and mask-0 cells keep their start values. The
-lateral padding takes a decayed copy of the change at the core edge. The energy is the
+The parameterisation is the one of 3D VFSA (`VFSA3DMT`). Controls sit in the core only:
+the uniform lateral block (plus `Core expansion`), down to the core depth. Outside it, as
+in 3D, the lateral padding is blended row by row from the median of the edge core columns
+back to the start model, and the cells below the core carry its bottom value down,
+keeping a third per layer. Air, water and mask-0 cells never change. The energy is the
 chi2 of Gauss–Newton, and the temperature schedule is the 3D one.
 
 ## Output

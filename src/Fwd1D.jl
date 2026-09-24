@@ -1,7 +1,8 @@
 # 1D MT forward modelling
 # Author: @pankajkmishra
-# A 1D model is a one-column MT2DMesh (dimension = 1) in the ModEM-style model layout, solved exactly as a
-# layered earth; the 2D data file, inversion driver, algorithms and plots are reused as they are
+# A 1D model is a list of layer thicknesses and resistivities, stored as a one-column ModEM-style model file,
+# solved exactly by the layer recursion. Only the data and model file formats are shared with 2D; the
+# layering, forward, Fréchet derivatives and inversion (Inv1D.jl) are 1D's own, so 2D changes cannot break it
 # Fréchet derivatives by forward-mode differentiation of the layer recursion
 
 #***********************************************************************
@@ -18,7 +19,10 @@
 
 using ForwardDiff
 using Printf
+using Random
 using Statistics
+
+const μ₀_1D = 4π * 1e-7
 
 #---------- impedance mode ----------
 
@@ -26,36 +30,36 @@ using Statistics
 _ctrl_mode1d(s) = (m = Symbol(uppercase(strip(String(s)))); m in (:XY, :YX, :XYYX, :DET) ? m :
                    throw(ArgumentError("1D mode must be XY, YX, XYYX or DET")))
 
-# the 2D driver's mode for a 1D mode: XY fits z_xy (TE), YX z_yx (TM), DET its determinant as z_xy
-_mt1d_driver_mode(m::Symbol) = m in (:XY, :DET) ? :TE : m == :YX ? :TM : :TETM
+# data columns a mode fits: (key, error key, sign of Z)
+_mt1d_components(m::Symbol) = m in (:XY, :DET) ? ((:z_xy, :z_xy_error, 1),) : m == :YX ? ((:z_yx, :z_yx_error, -1),) :
+                              ((:z_xy, :z_xy_error, 1), (:z_yx, :z_yx_error, -1))
 
 # curve labels of a 1D mode for the data plots: 1D has no TE or TM, only the impedance fitted
 _mt1d_plot_names(m::Symbol) = m == :XY ? (TE = "XY", TM = nothing) : m == :YX ? (TE = nothing, TM = "YX") :
                               m == :DET ? (TE = "DET", TM = nothing) : (TE = "XY", TM = "YX")
 
-#---------- mesh ----------
+#---------- layering ----------
+
+mt1d_skin_depth(ρ::Real, f::Real) = sqrt(2 * ρ / (2π * f * μ₀_1D))
 
 """
-    Mesh1D(z_cell_sizes, frequencies) -> MT2DMesh
+    mt1d_layers(frequencies; background_resistivity=100.0, first_layer_div=5.0,
+                vertical_factor=1.1, depth_mult=4.0) -> thicknesses
 
-One-column mesh of a layered earth: `z_cell_sizes` from the surface down, the last layer
-a halfspace; one receiver on the surface. Solved exactly by the layer recursion.
+Layer thicknesses from the skin depths in `background_resistivity`: the first layer
+δ(f_max)/`first_layer_div`, each next one `vertical_factor` thicker, down to
+`depth_mult` δ(f_min). The last layer is the halfspace.
 """
-Mesh1D(z_cell_sizes::AbstractVector{<:Real}, frequencies::AbstractVector{<:Real}) =
-    MT2DMesh(y_nodes = [-0.5, 0.5], z_nodes = vcat(0.0, cumsum(Float64.(z_cell_sizes))), y_cell_sizes = [1.0],
-             z_cell_sizes = Float64.(z_cell_sizes), receiver_positions = [0.0], frequencies = Float64.(frequencies),
-             n_air_cells = 0, dimension = 1)
-
-"""
-    Mesh1DFromInputs(model::ModelFile2D, data) -> (mesh, ρ)
-
-1D mesh and resistivity `(nz, 1)` of a one-column ModEM-layout model for the
-frequencies of `data`.
-"""
-function Mesh1DFromInputs(model::ModelFile2D, data)
-    size(model.resistivity, 2) == 1 || throw(ArgumentError("a 1D model has one column, this one has $(size(model.resistivity, 2))"))
-    any(>(MT2D_AIR_THRESHOLD), model.resistivity) && throw(ArgumentError("1D models hold no air"))
-    Mesh1D(model.z_cell_sizes, data.frequencies), Matrix{Float64}(model.resistivity)
+function mt1d_layers(frequencies::AbstractVector{<:Real}; background_resistivity::Real = 100.0,
+                     first_layer_div::Real = 5.0, vertical_factor::Real = 1.1, depth_mult::Real = 4.0)
+    first_layer_div > 0 && vertical_factor >= 1 && depth_mult > 0 ||
+        throw(ArgumentError("need first_layer_div > 0, vertical_factor >= 1, depth_mult > 0"))
+    h = [mt1d_skin_depth(background_resistivity, maximum(frequencies)) / first_layer_div]
+    bottom = depth_mult * mt1d_skin_depth(background_resistivity, minimum(frequencies))
+    while sum(h) < bottom
+        push!(h, h[end] * vertical_factor)
+    end
+    h
 end
 
 """
@@ -63,8 +67,7 @@ end
 
 Layering of every site of `data` (a `DataFile2D` or a data file path) from its own skin
 depths: the background is the site's median apparent resistivity over the periods (of
-the impedance `mode` fits), the first layer δ(f_max)/`first_layer_div`, layers growing by
-`vertical_factor` down to `depth_mult` δ(f_min). Returns one `(; site, thicknesses,
+the impedance `mode` fits), then `mt1d_layers`. Returns one `(; site, thicknesses,
 background)` per site; `Invert1D` starts each site from its background halfspace.
 """
 function MakeMesh1D(data::DataFile2D; mode = :XYYX, first_layer_div::Real = 5.0, vertical_factor::Real = 1.1,
@@ -75,8 +78,8 @@ function MakeMesh1D(data::DataFile2D; mode = :XYYX, first_layer_div::Real = 5.0,
         ρa = mode == :YX ? site.rho_yx : mode == :XYYX ? vcat(site.rho_xy, site.rho_yx) : site.rho_xy
         v = filter(x -> isfinite(x) && x > 0, vec(ρa))
         background = isempty(v) ? 100.0 : 10^median(log10.(v))
-        thicknesses = mt2d_geometric_layers(data.frequencies; background_resistivity = background, first_layer_div,
-                                            vertical_factor, depth_mult)
+        thicknesses = mt1d_layers(data.frequencies; background_resistivity = background, first_layer_div,
+                                  vertical_factor, depth_mult)
         (; site = data.site_names[i], thicknesses, background)
     end
 end
@@ -89,12 +92,13 @@ MakeMesh1D(data_path::AbstractString; kwargs...) = MakeMesh1D(load_data2d(data_p
     mt1d_impedance(frequencies, ρ, h) -> Vector
 
 Surface impedance (ohm, exp(+iωt)) of layers `ρ` (ohm m, the last a halfspace) with
-thicknesses `h` (one fewer), by the layer recursion; generic in the number type.
+thicknesses `h` (one fewer, extra ones ignored), by the layer recursion; generic in the
+number type.
 """
 function mt1d_impedance(frequencies::AbstractVector{<:Real}, ρ::AbstractVector, h::AbstractVector{<:Real})
     length(h) >= length(ρ) - 1 || throw(ArgumentError("need a thickness for every layer above the halfspace"))
     map(frequencies) do f
-        iωμ = 1im * 2π * f * μ₀_2D
+        iωμ = 1im * 2π * f * μ₀_1D
         Z = sqrt(iωμ * ρ[end])
         for j in length(ρ)-1:-1:1
             ζ = sqrt(iωμ * ρ[j])
@@ -105,81 +109,19 @@ function mt1d_impedance(frequencies::AbstractVector{<:Real}, ρ::AbstractVector,
     end
 end
 
-# response and cache of a 1D mesh; J = ∂Z/∂ρ (nf × nz) when cache_fields
-struct MT1DCache
-    mesh::MT2DMesh
-    response::MT2DResponse
-    J::Matrix{ComplexF64}
-    mode::Symbol
-    air::BitMatrix
-end
+"""
+    mt1d_frechet(frequencies, ρ, h) -> G
 
-function _mt1d_forward_cache(mesh::MT2DMesh, resistivity::AbstractMatrix{<:Real}; mode = :TETM, cache_fields = true)
-    mode in (:TE, :TM, :TETM) || throw(ArgumentError("mode must be :TE, :TM, or :TETM"))
-    size(resistivity) == (length(mesh.z_cell_sizes), 1) || throw(DimensionMismatch("1D resistivity must be (nz, 1)"))
-    all(x -> isfinite(x) && x > 0, resistivity) || throw(ArgumentError("earth resistivities must be finite and positive"))
-    f, h = mesh.frequencies, mesh.z_cell_sizes
-    ρ = Float64.(resistivity[:, 1])
-    Z = mt1d_impedance(f, ρ, h)
-    J = cache_fields ? _mt1d_jacobian(f, ρ, h) : zeros(ComplexF64, 0, 0)
-    nf = length(f)
-    col(v) = reshape(v, nf, 1)
-    on(p) = mode in (p, :TETM)
-    z_xy = on(:TE) ? col(Z) : zeros(ComplexF64, nf, 1)
-    z_yx = on(:TM) ? col(-Z) : zeros(ComplexF64, nf, 1)
-    ρa(z) = abs2.(z) ./ (2π .* f .* μ₀_2D)
-    response = MT2DResponse(frequencies = f, periods = 1 ./ f, receivers = mesh.receiver_positions,
-                            rho_xy = on(:TE) ? ρa(z_xy) : zeros(nf, 1), phase_xy = on(:TE) ? rad2deg.(angle.(z_xy)) : zeros(nf, 1),
-                            z_xy = z_xy, rho_yx = on(:TM) ? ρa(z_yx) : zeros(nf, 1),
-                            phase_yx = on(:TM) ? rad2deg.(angle.(z_yx)) : zeros(nf, 1), z_yx = z_yx)
-    response, MT1DCache(mesh, response, J, mode, falses(length(h), 1))
-end
-
-function _mt1d_jacobian(f, ρ, h)
-    D = ForwardDiff.jacobian(x -> (Z = mt1d_impedance(f, x, h); vcat(real.(Z), imag.(Z))), ρ)
-    nf = length(f)
+Fréchet derivative G = ∂Z/∂log10 ρ (`nf × nlayers`, complex) of the surface impedance.
+"""
+function mt1d_frechet(frequencies::AbstractVector{<:Real}, ρ::AbstractVector{<:Real}, h::AbstractVector{<:Real})
+    nf = length(frequencies)
+    D = ForwardDiff.jacobian(m -> (Z = mt1d_impedance(frequencies, 10 .^ m, h); vcat(real.(Z), imag.(Z))), log10.(ρ))
     complex.(D[1:nf, :], D[nf+1:end, :])
 end
 
-#---------- fréchet derivatives on the 2D interface ----------
-
-# δd = G δρ, the six response fields as in 2D
-function _mt2d_frechet(c::MT1DCache, δρ)
-    δZ = c.J * δρ[:, 1]
-    ω = 2π .* c.mesh.frequencies
-    fields(z, δz) = (rho = reshape(2 .* real.(conj.(z) .* δz) ./ (ω .* μ₀_2D), :, 1),
-                     phase = reshape(rad2deg.(imag.(δz ./ z)), :, 1), z = reshape(δz, :, 1))
-    none = (rho = zeros(length(ω), 1), phase = zeros(length(ω), 1), z = zeros(ComplexF64, length(ω), 1))
-    xy = c.mode in (:TE, :TETM) ? fields(c.response.z_xy[:, 1], δZ) : none
-    yx = c.mode in (:TM, :TETM) ? fields(c.response.z_yx[:, 1], -δZ) : none
-    (rho_xy = xy.rho, phase_xy = xy.phase, z_xy = xy.z, rho_yx = yx.rho, phase_yx = yx.phase, z_yx = yx.z)
-end
-
-# δρ̂ = Gᵗ δd̂ with the pairing of 2D: real(dot(δd̂, δd))
-function _mt2d_frechet_transpose(c::MT1DCache, δd̂)
-    ω = 2π .* c.mesh.frequencies
-    ρ̂ = zeros(size(c.J, 2))
-    dual(k) = hasproperty(δd̂, k) ? getproperty(δd̂, k)[:, 1] : zeros(length(ω))
-    for (on, zk, rk, pk, s) in ((c.mode in (:TE, :TETM), :z_xy, :rho_xy, :phase_xy, 1),
-                                (c.mode in (:TM, :TETM), :z_yx, :rho_yx, :phase_yx, -1))
-        on || continue
-        z = getproperty(c.response, zk)[:, 1]
-        ẑ = dual(zk) .+ (2 ./ (ω .* μ₀_2D)) .* dual(rk) .* z .+ (180 / π) .* dual(pk) .* (1im ./ conj.(z))
-        ρ̂ .+= s .* real.(c.J' * ẑ)
-    end
-    reshape(ρ̂, :, 1)
-end
-
-# rows of G: ∂ real(conj(w) z[key][i]) / ∂ρ
-function _mt2d_frechet_rows(c::MT1DCache, rows)
-    out = zeros(length(rows), size(c.J, 2))
-    for (k, row) in enumerate(rows)
-        f = CartesianIndices(size(c.response.z_xy))[row.index][1]
-        s = row.key == :z_xy ? 1 : -1
-        out[k, :] = s .* real.(conj(row.weight) .* c.J[f, :])
-    end
-    out
-end
+# apparent resistivity and phase of an impedance
+_mt1d_rho_phase(z, f) = isfinite(z) ? (abs2(z) / (2π * f * μ₀_1D), rad2deg(angle(z))) : (NaN, NaN)
 
 #---------- data ----------
 
@@ -199,17 +141,82 @@ function mt1d_site_data(data::DataFile2D, i::Integer; mode::Symbol = :XYYX)
         z_xy = sqrt.(det)
         e_xy = (pick(data.z_xy_error) .+ pick(data.z_yx_error)) ./ 2
     end
-    rp = [_impedance_to_rho_phase(z_xy[k], data.frequencies[k]) for k in axes(z_xy, 1), _ in 1:1]
+    rp = [_mt1d_rho_phase(z_xy[k], data.frequencies[k]) for k in axes(z_xy, 1), _ in 1:1]
     DataFile2D(title = data.title, periods = data.periods, frequencies = data.frequencies,
                site_names = data.site_names[i:i], receivers = [0.0], x_positions = data.x_positions[i:i],
                z_positions = data.z_positions[i:i], z_xy = z_xy, z_xy_error = e_xy,
                z_yx = copy(pick(data.z_yx)), z_yx_error = copy(pick(data.z_yx_error)),
                z_xx = copy(pick(data.z_xx)), z_xx_error = copy(pick(data.z_xx_error)),
                z_yy = copy(pick(data.z_yy)), z_yy_error = copy(pick(data.z_yy_error)),
-               rho_xy = getfield.(rp, :rho), phase_xy = getfield.(rp, :phase),
+               rho_xy = first.(rp), phase_xy = last.(rp),
                rho_yx = copy(pick(data.rho_yx)), phase_yx = copy(pick(data.phase_yx)), path = data.path,
                latitudes = isempty(data.latitudes) ? Float64[] : data.latitudes[i:i],
                longitudes = isempty(data.longitudes) ? Float64[] : data.longitudes[i:i], origin = data.origin)
+end
+
+# the survey of `data` with Z at every site from one impedance column per site (nf × ns) and the errors of
+# `data`; a template's (all impedances zero) are fractions of |Z|
+function _mt1d_predicted(data::DataFile2D, Z::AbstractMatrix;
+                         fractional::Bool = all(iszero, data.z_xy) && all(iszero, data.z_yx))
+    err(e, z) = fractional ? max.(e .* abs.(z), 1e-6) : copy(e)
+    z_xy, z_yx = ComplexF64.(Z), ComplexF64.(-Z)
+    rp(z) = [_mt1d_rho_phase(z[k, j], data.frequencies[k]) for k in axes(z, 1), j in axes(z, 2)]
+    xy, yx = rp(z_xy), rp(z_yx)
+    DataFile2D(title = data.title, periods = data.periods, frequencies = data.frequencies, site_names = data.site_names,
+               receivers = data.receivers, x_positions = data.x_positions, z_positions = data.z_positions,
+               z_xy = z_xy, z_xy_error = err(data.z_xy_error, z_xy), z_yx = z_yx, z_yx_error = err(data.z_yx_error, z_yx),
+               z_xx = fill(complex(NaN), size(Z)), z_xx_error = fill(NaN, size(Z)),
+               z_yy = fill(complex(NaN), size(Z)), z_yy_error = fill(NaN, size(Z)),
+               rho_xy = first.(xy), phase_xy = last.(xy), rho_yx = first.(yx), phase_yx = last.(yx),
+               latitudes = data.latitudes, longitudes = data.longitudes, origin = data.origin)
+end
+
+# complex gaussian noise of each datum's error
+function _mt1d_add_noise(data::DataFile2D, rng_seed::Integer)
+    rng = MersenneTwister(rng_seed)
+    out = deepcopy(data)
+    for k in eachindex(out.z_xy)
+        out.z_xy[k] += out.z_xy_error[k] / sqrt(2) * (randn(rng) + im * randn(rng))
+        out.z_yx[k] += out.z_yx_error[k] / sqrt(2) * (randn(rng) + im * randn(rng))
+        out.rho_xy[k], out.phase_xy[k] = _mt1d_rho_phase(out.z_xy[k], out.frequencies[CartesianIndices(out.z_xy)[k][1]])
+        out.rho_yx[k], out.phase_yx[k] = _mt1d_rho_phase(out.z_yx[k], out.frequencies[CartesianIndices(out.z_yx)[k][1]])
+    end
+    out
+end
+
+# layer thicknesses and resistivities of a one-column model file
+function _mt1d_read_model(path::AbstractString)
+    model = ReadModel2D(path)
+    size(model.resistivity, 2) == 1 || throw(ArgumentError("a 1D model has one column, this one has $(size(model.resistivity, 2))"))
+    any(>(1e15), model.resistivity) && throw(ArgumentError("1D models hold no air"))
+    Float64.(model.z_cell_sizes), Float64.(model.resistivity[:, 1])
+end
+
+"""
+    WriteFrechet1D(path, h, ρ, site::DataFile2D; mode=:XYYX) -> path
+
+G = ∂d/∂log10 ρ of a one-site survey's impedances: two rows (Re, Im) per period and fitted
+component, one column per layer, in [mV/km]/[nT].
+"""
+function WriteFrechet1D(path::AbstractString, h::AbstractVector{<:Real}, ρ::AbstractVector{<:Real}, site::DataFile2D;
+                        mode::Symbol = :XYYX)
+    G = mt1d_frechet(site.frequencies, ρ, h) ./ (μ₀_1D * 1000)
+    comps = [(k, s, k == :z_xy ? (mode == :DET ? "DET" : "ZXY") : "ZYX") for (k, _, s) in _mt1d_components(mode)]
+    rows = [(k, s, c, i) for i in eachindex(site.frequencies) for (k, s, c) in comps if isfinite(getproperty(site, k)[i, 1])]
+    mkpath(dirname(abspath(path)))
+    open(path, "w") do io
+        println(io, "# MTGeophysics 1D Fréchet derivative G = ∂d/∂m")
+        println(io, "# d: impedance in [mV/km]/[nT], two rows (Re, Im) per data line, exp(+iωt)")
+        println(io, "# m: log10 resistivity of the layers, from the surface down")
+        println(io, "# > rows layers, then: period site component part g_1 ... g_layers")
+        @printf(io, "> %d %d\n", 2 * length(rows), length(ρ))
+        for (k, s, c, i) in rows, (part, v) in (("Re", real.(s .* G[i, :])), ("Im", imag.(s .* G[i, :])))
+            print(io, @sprintf("%.8e %s %s %s", site.periods[i], site.site_names[1], c, part))
+            foreach(x -> print(io, @sprintf(" %.6e", x)), v)
+            println(io)
+        end
+    end
+    String(path)
 end
 
 """
@@ -227,23 +234,13 @@ function ForwardSolve1D(model_path::AbstractString, data_path::AbstractString; m
                         add_noise::Bool = false, rng_seed::Integer = 20260308)
     mode = _ctrl_mode1d(string(mode))
     template = load_data2d(data_path)
-    mesh, ρ = Mesh1DFromInputs(ReadModel2D(model_path), template)
-    one, _ = _mt1d_forward_cache(mesh, ρ; mode = :TETM, cache_fields = false)
-    ns = length(template.receivers)
-    rep(a) = repeat(a, 1, ns)
-    response = MT2DResponse(frequencies = one.frequencies, periods = one.periods, receivers = template.receivers,
-                            rho_xy = rep(one.rho_xy), phase_xy = rep(one.phase_xy), z_xy = rep(one.z_xy),
-                            rho_yx = rep(one.rho_yx), phase_yx = rep(one.phase_yx), z_yx = rep(one.z_yx))
-    errors = _resolve_forwardsolve2d_errors(template, response)
-    predicted = data_from_response2d(response; errors...,
-        site_names = template.site_names, x_positions = template.x_positions, z_positions = template.z_positions,
-        latitudes = template.latitudes, longitudes = template.longitudes, origin = template.origin)
+    h, ρ = _mt1d_read_model(model_path)
+    Z = mt1d_impedance(template.frequencies, ρ, h)
+    predicted = _mt1d_predicted(template, repeat(Z, 1, length(template.site_names)))
+    add_noise && (predicted = _mt1d_add_noise(predicted, rng_seed))
     mode == :XY && (predicted.z_yx .= NaN)
     mode == :YX && (predicted.z_xy .= NaN)
-    written = write_data2d(output_path, add_noise ? _apply_mt2d_noise(predicted; rng_seed) : predicted)
-    if write_frechet
-        site = mt1d_site_data(predicted, 1; mode)
-        WriteFrechet2D(splitext(written)[1] * ".frechet", mesh, ρ, site; mode = _mt1d_driver_mode(mode))
-    end
+    written = write_data2d(output_path, predicted)
+    write_frechet && WriteFrechet1D(splitext(written)[1] * ".frechet", h, ρ, mt1d_site_data(predicted, 1; mode); mode)
     written
 end

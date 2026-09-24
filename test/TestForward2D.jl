@@ -76,7 +76,7 @@ mktempdir() do temp_dir
     @test readdir(r.case_dir) == ["cov.ctrl", "data.dat", "mask.ctrl", "model.prior", "model.start", "model.true"]   # controls ship in examples/ctrl/2D
     @test !occursin('#', read(r.cov_path, String))
     observed = load_data2d(r.data_path)
-    @test observed.site_names[1] == "JYV001" && issorted(observed.longitudes)
+    @test observed.site_names[1] == "Fin001" && issorted(observed.longitudes)
     @test all(isapprox.(observed.latitudes, 62.25; atol = 0.01)) && observed.origin == [62.25, 25.75]
     @test size(ReadModel2D(r.start_model_path).resistivity) == size(ReadCov2D(r.cov_path).mask)
     @test length(ReadModel2D(r.true_model_path).resistivity) > length(ReadModel2D(r.start_model_path).resistivity)

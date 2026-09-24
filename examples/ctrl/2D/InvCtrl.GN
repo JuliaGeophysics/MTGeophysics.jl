@@ -3,7 +3,6 @@ Initial damping factor lambda     : 1
 Exit search when rms is less than : 1
 Maximum number of iterations      : 20
 Mode                              : TETM
-Log10 resistivity bounds          : 0 4
 Max log10 step                    : 0.5
 Max line search steps             : 12
 Smallness weight                  : 0.01

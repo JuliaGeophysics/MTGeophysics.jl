@@ -12,10 +12,14 @@ using Test
             fwd = FwdCtrl2D(mode = :TE, air_layers = 7, air_thickness = 30_000.0, air_growth = 1.5,
                             air_resistivity = 1e8, write_frechet = true)
             @test ReadFwdCtrl2D(WriteFwdCtrl2D(joinpath(dir, "fwd.ctrl"), fwd)) == fwd
-            inv = InvCtrl2D(algorithm = :nlcg, lambda = 3.0, target_rms = 1.2, max_iter = 40, log_bounds = (-1.0, 4.5),
+            inv = InvCtrl2D(algorithm = :nlcg, lambda = 3.0, target_rms = 1.2, max_iter = 40,
                             smooth_y = 2.0, nlcg_precondition = false)
             @test ReadInvCtrl2D(WriteInvCtrl2D(joinpath(dir, "inv.ctrl"), inv)) == inv
-            vfsa = VFSACtrl2D(target_rms = 1.1, max_iter = 9, seed = 7, chains = 3, rbf_y = 1.5, log_bounds = (0.5, 3.5))
+            # bounds are a VFSA setting: GN and NLCG are unbounded and reject the key
+            @test !occursin("bounds", read(joinpath(dir, "inv.ctrl"), String))
+            write(joinpath(dir, "bounded.ctrl"), read(joinpath(dir, "inv.ctrl"), String) * "Log10 resistivity bounds : 0 4\n")
+            @test_throws ErrorException ReadInvCtrl2D(joinpath(dir, "bounded.ctrl"))
+            vfsa = VFSACtrl2D(target_rms = 1.1, max_iter = 9, seed = 7, chains = 3, rbf_top = 1.5, core_expansion = 2, log_bounds = (0.5, 3.5))
             @test ReadVFSACtrl2D(WriteVFSACtrl2D(joinpath(dir, "vfsa.ctrl"), vfsa)) == vfsa
             mask = [1 1 0 1; 1 9 9 1; 1 1 1 0]
             @test ReadMask2D(WriteMask2D(joinpath(dir, "mask.ctrl"), mask)) == mask

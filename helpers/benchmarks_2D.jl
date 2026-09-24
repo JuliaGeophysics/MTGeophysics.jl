@@ -3,8 +3,9 @@
 # Writes each case as a ModEM-style input set in examples/data/<case>: noisy synthetic data from a
 # fine mesh, and start/prior models, cov.ctrl (GN, NLCG) and mask.ctrl (VFSA) on a coarser inversion mesh
 # The control files are shipped in examples/ctrl/2D; FwdCtrl there also sets the air of both meshes
-# 2D-IV is 2D-III under synthetic Finnish relief with a lake in the padding, written with its topo.dat; its data
-# mesh splits every inversion cell, so both meshes share one topography staircase and differ only below the ground
+# 2D-IV is 2D-III under synthetic Finnish relief with a lake and its bathymetry among the stations, written with its
+# topo.dat; its data mesh splits every inversion cell, so both meshes share one topography staircase and differ only
+# below the ground
 # Usage: julia --project=. helpers/benchmarks_2D.jl [2D-I] [2D-II] [2D-III] [2D-IV]      (default below)
 
 using MTGeophysics
@@ -23,12 +24,13 @@ const BENCHMARK_CASES = Dict(
 const TOPOGRAPHY_CASES = ["2D-IV"]
 const DEFAULT_CASES = ["2D-IV"]
 
-# E-W profile near Jyväskylä, central Finland; local x north, y east, sites on the flat surface
+# E-W profile near Jyväskylä, central Finland; local x north, y east; sites every km at inversion cell centres,
+# and the topographic cases leave out those on the lake
 const SURVEY = (
     origin         = (62.25, 25.75),                  # WGS84 lat, lon of local (0, 0)
     crs            = "EPSG:3067",                     # ETRS-TM35FIN, metric grid for the site positions
-    site_prefix    = "JYV",
-    receivers      = collect(-8000.0:1600.0:8000.0),
+    site_prefix    = "Fin",
+    receivers      = collect(-8250.0:1000.0:8250.0),
     frequencies    = 10 .^ range(-1, 3, length = 17), # 0.1-1000 Hz, 4 per decade
     error_fraction = 0.05,                            # impedance error, fraction of |Z|
     rng_seed       = 20260308,
@@ -49,15 +51,25 @@ const INVERSION_MESH = (
 # inherited from the parent cell; independent staircases leave a TM modelling floor near rms 100
 const SHARED_SURFACE_SPLIT = (y = 2, z = 2)
 
-# smooth relief of central Finland: rolling till with a ridge and a valley over the stations,
-# 100-200 m relief, and a lake (level 95 m a.s.l.) in the western padding; elevations m a.s.l.
+# smooth relief of central Finland, 100-225 m a.s.l.: rolling till with a ridge, and a 3 km lake at 100 m a.s.l.
+# over the buried conductor, with a steep western shore and two basins (58 and 36 m deep) split by a shoal;
+# fresh humic lake water, 5 mS/m; elevations m a.s.l., the lake bottom from its bathymetry
 const TOPOGRAPHY = (
     y = collect(-60_000.0:100.0:60_000.0),
-    lake = (y_range = (-30_000.0, -18_000.0), level = 95.0),
-    water_resistivity = 100.0,
+    lake = (y_range = (-5500.0, -2500.0), level = 100.0),
+    water_resistivity = 200.0,
 )
-relief(y) = 140 + 50 * sin(2π * y / 11_000) + 45 * exp(-((y - 3000) / 1600)^2) -
-            35 * exp(-((y + 5200) / 1400)^2) - 80 * exp(-((y + 24_000) / 5000)^2)
+land(y) = 140 + 40 * sin(2π * y / 11_000) + 45 * exp(-((y - 3000) / 1600)^2)
+function bathymetry(y)
+    a, b = TOPOGRAPHY.lake.y_range
+    a < y < b || return 0.0
+    sin(π * (y - a) / (b - a))^(1 / 3) * (8 + 50 * exp(-((y + 4700) / 600)^2) + 30 * exp(-((y + 3300) / 450)^2))
+end
+relief(y) = bathymetry(y) > 0 ? TOPOGRAPHY.lake.level - bathymetry(y) : land(y)
+
+# stations of a case: none over the lake in the topographic ones
+stations(topographic::Bool) = topographic ?
+    filter(y -> !(TOPOGRAPHY.lake.y_range[1] <= y <= TOPOGRAPHY.lake.y_range[2]), SURVEY.receivers) : SURVEY.receivers
 
 const CTRL_DIR = joinpath(dirname(@__DIR__), "examples", "ctrl", "2D")
 const FWD_PATH = joinpath(CTRL_DIR, "FwdCtrl")
@@ -74,15 +86,15 @@ function survey_coordinates(y::AbstractVector{<:Real})
     (latitudes = [p[2] for p in lonlat], longitudes = [p[1] for p in lonlat])
 end
 
-# zero impedances with fractional errors, the template ForwardSolve2D fills in
-function survey_template()
+# zero impedances with fractional errors at stations y, the template ForwardSolve2D fills in
+function survey_template(y::AbstractVector{<:Real} = SURVEY.receivers)
     f = collect(Float64, SURVEY.frequencies)
-    nf, ns = length(f), length(SURVEY.receivers)
-    coords = survey_coordinates(SURVEY.receivers)
+    nf, ns = length(f), length(y)
+    coords = survey_coordinates(y)
     nan = fill(NaN, nf, ns)
     DataFile2D(title = "2D survey template", periods = 1 ./ f, frequencies = f,
                site_names = [@sprintf("%s%03d", SURVEY.site_prefix, i) for i in 1:ns],
-               receivers = SURVEY.receivers, x_positions = zeros(ns), z_positions = zeros(ns),
+               receivers = collect(Float64, y), x_positions = zeros(ns), z_positions = zeros(ns),
                z_xy = zeros(ComplexF64, nf, ns), z_xy_error = fill(SURVEY.error_fraction, nf, ns),
                z_yx = zeros(ComplexF64, nf, ns), z_yx_error = fill(SURVEY.error_fraction, nf, ns),
                z_xx = complex.(nan), z_xx_error = copy(nan), z_yy = complex.(nan), z_yy_error = copy(nan),
@@ -90,11 +102,11 @@ function survey_template()
                latitudes = coords.latitudes, longitudes = coords.longitudes, origin = collect(SURVEY.origin))
 end
 
-function survey_mesh(m)
+function survey_mesh(m, y = SURVEY.receivers)
     layers = mt2d_geometric_layers(SURVEY.frequencies; m.background_resistivity, m.first_layer_div,
                                    m.vertical_factor, m.depth_mult)
     BuildMesh2D(; m.y_core_range, m.y_core_cell, m.y_padding, m.pad_factor, frequencies = SURVEY.frequencies,
-                receiver_positions = SURVEY.receivers, ground_layers = layers, air_top = -FWD.air_thickness,
+                receiver_positions = collect(Float64, y), ground_layers = layers, air_top = -FWD.air_thickness,
                 air_cells = FWD.air_layers)
 end
 
@@ -144,7 +156,7 @@ Write each COMEMI case (`"2D-I"`, `"2D-II"`, `"2D-III"`, `"2D-IV"`) into `output
 
 With topography (2D-IV) the models hold the topographic air (1e17 ohm m) and the lake
 water, `cov.ctrl` and `mask.ctrl` give them mask 0 and 9, data Z is the depth below the
-model top (the highest station), and `topo.dat` holds the relief in WGS84 lat, lon,
+model top (the highest station), and `topo.dat` holds the relief with the lake bottom in WGS84 lat, lon,
 elevation. Its data mesh splits every inversion cell `SHARED_SURFACE_SPLIT` and takes the
 air and water of the parent cell, so the two meshes share one topography staircase.
 The forward and inversion controls come from `examples/ctrl/2D`.
@@ -174,7 +186,7 @@ function SaveBenchmarks2D(;
             cov_path = WriteCov2D(joinpath(dir, "cov.ctrl"), Cov2D(nz, ny)),
             mask_path = WriteMask2D(joinpath(dir, "mask.ctrl"), ones(Int, nz, ny)),
         )
-        template = survey_template()
+        template = survey_template(stations(topographic))
         if topographic
             topo = survey_topography()
             WriteTopo2D(joinpath(dir, "topo.dat"), topo)
@@ -187,7 +199,7 @@ function SaveBenchmarks2D(;
             fine = ReadModel2D(paths.true_model_path)
             WriteModel2D(paths.true_model_path, fine.y_cell_sizes, fine.z_cell_sizes,
                          inherit_surface(fine.resistivity, t.mask, ky, kz))
-            e = relief.(SURVEY.receivers)
+            e = relief.(stations(true))
             @printf("%s: datum %.1f m a.s.l., station relief %.1f m, %d air and %d water cells in the inversion model\n",
                     case, t.datum, maximum(e) - minimum(e), count(==(0), t.mask), count(==(9), t.mask))
         end

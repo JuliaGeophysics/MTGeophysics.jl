@@ -76,7 +76,7 @@ julia --project=. helpers/benchmarks_2D.jl
 ```
 
 This creates `examples/data/1D-I` (a five-layer sounding) and `examples/data/2D-IV` (COMEMI
-2D-III under topography with a lake). `helpers/benchmarks_2D.jl 2D-I 2D-II 2D-III` adds the
+2D-III under topography, with a lake and its bathymetry among the stations). `helpers/benchmarks_2D.jl 2D-I 2D-II 2D-III` adds the
 flat COMEMI cases. Each 2D folder holds `model.true`, `data.dat`, `model.start`,
 `model.prior`, `cov.ctrl` (GN, NLCG) and `mask.ctrl` (VFSA), and 2D-IV also `topo.dat`.
 1D-I holds only `data.dat` and `model.true`, since the 1D inversion lays out its own mesh.

@@ -50,7 +50,6 @@ Initial damping factor lambda     : 1
 Exit search when rms is less than : 1
 Maximum number of iterations      : 20
 Mode                              : TETM
-Log10 resistivity bounds          : 0 4
 Max log10 step                    : 0.5
 Max line search steps             : 12
 Smallness weight                  : 0.01
@@ -59,7 +58,8 @@ Smoothing weight z                : 1
 GN damping                        : 0.01
 ```
 
-lambda is β, fixed through the run. NLCG replaces `GN damping` with `NLCG restart` and
+lambda is β, fixed through the run. GN and NLCG are unbounded: `Log10 resistivity bounds`
+belongs to VFSA and is an error in `inv.ctrl`. NLCG replaces `GN damping` with `NLCG restart` and
 `NLCG precondition`.
 
 The in-memory form is `Invert2D(mesh, initial, observed; algorithm, options,
@@ -85,15 +85,15 @@ the reference model, which defaults to the start model.
 - `mode`
 - `max_iter`
 - `beta`, `smallness`, `smooth_y`, `smooth_z`
-- `log_bounds`
 - `max_step`
 - `max_linesearch`
 - `target_rms`
 - the gradient, step, and objective tolerances
 - `verbose`
 
-The driver caps each step at `max_step` (in log₁₀ units), projects it onto
-`log_bounds`, and accepts it by Armijo backtracking on the total objective.
+The driver caps each step at `max_step` (in log₁₀ units) and accepts it by Armijo
+backtracking on the total objective. There are no bounds; the regularization and the
+step cap keep the model in range.
 Termination reasons are:
 
 - `:target_rms`

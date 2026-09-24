@@ -541,10 +541,14 @@ function _mt2d_station_plan(mesh::MT2DMesh, t::TensorMesh2D, locations::Matrix{F
     (; groups, stations)
 end
 
-# impedance at every receiver from the nodal surface fields of each group
+# impedance at every receiver from the surface fields of each group: H and TE Ex from the nodes; TM Ey
+# from the tread-centre Ey of the cells, each from its own ρ, between the cell centres on flat ground,
+# since a nodal Ey averages the ρ of both cells beside the node and a station next to a lateral contrast
+# (a lake shore) then reads the neighbour's ρ; the dipole window next to a step
 function _mt2d_station_impedance(pol, plan, surface, locations, y_nodes)
     T = promote_type(eltype(surface[1][1]), eltype(surface[1][2]))
     Z = zeros(T, length(plan.stations))
+    yc = (y_nodes[1:end-1] .+ y_nodes[2:end]) ./ 2
     for (i, p) in enumerate(plan.stations)
         Es, Hs = surface[p.group]
         y = locations[i, 1]
@@ -556,6 +560,11 @@ function _mt2d_station_impedance(pol, plan, surface, locations, y_nodes)
         if pol == :TM && p.window !== nothing
             Ew = sum(w.width * surface[w.group][3][w.column] for w in p.window)
             E = (Δy1 + Δy2) * Ew / sum(w.width for w in p.window)
+        elseif pol == :TM
+            Ec, k = surface[p.group][3], node - 1
+            j = clamp(y < yc[k] ? k - 1 : k + 1, 1, length(yc))
+            t = j == k ? 0.0 : (y - yc[k]) / (yc[j] - yc[k])
+            E = (Δy1 + Δy2) * (Ec[k] + (Ec[j] - Ec[k]) * t)
         end
         Z[i] = E / H
     end
@@ -611,7 +620,6 @@ end
 
 # response plus, with cache_fields, the per-frequency states for Fréchet derivatives
 function _mt2d_forward_cache(mesh, resistivity; mode = :TETM, cache_fields::Bool = true)
-    mesh.dimension == 1 && return _mt1d_forward_cache(mesh, resistivity; mode, cache_fields)
     mode in (:TE, :TM, :TETM) || throw(ArgumentError("mode must be :TE, :TM, or :TETM"))
     size(resistivity) == (length(mesh.z_cell_sizes), length(mesh.y_cell_sizes)) ||
         throw(DimensionMismatch("resistivity must have shape (nz, ny)"))

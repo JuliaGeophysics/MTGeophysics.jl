@@ -62,8 +62,8 @@ down to `depth_mult` δ(f_min)).
 
 `helpers/benchmarks_2D.jl` writes each case into `examples/data/<case>`. The data come from a
 fine mesh, while the start and prior models, `cov.ctrl` and `mask.ctrl` sit on a coarser
-inversion mesh, so there is no inverse crime. Stations `JYV001…` run E–W near Jyväskylä
-(62.25°N, 25.75°E). 2D-IV is the default.
+inversion mesh, so there is no inverse crime. Stations `Fin001…` run E–W near Jyväskylä
+(62.25°N, 25.75°E), one every km. 2D-IV is the default.
 
 For 2D-IV the data mesh is the inversion mesh with every cell split 2 × 2, and each fine
 cell takes its parent's air or water. The two meshes therefore share one topography
@@ -77,7 +77,7 @@ inversion can fit.
 | 2D-I | Thin vertical conductive dyke in a two-layer background |
 | 2D-II | Two resistive blocks in a two-layer background |
 | 2D-III | Mixed conductors and resistors in a three-layer background |
-| 2D-IV | 2D-III under 100–200 m of smooth relief, with a lake in the padding and `topo.dat` |
+| 2D-IV | 2D-III under 100–200 m of smooth relief and a 3 km lake (200 Ω·m, up to 58 m deep) among the stations, with `topo.dat` |
 
 ```bash
 julia --project=. helpers/benchmarks_2D.jl 2D-I 2D-II 2D-III 2D-IV

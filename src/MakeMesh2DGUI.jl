@@ -1,10 +1,11 @@
 # 2D mesh tool window
 # Author: @pankajkmishra
-# GLMakie front end of MakeMesh2D: one slider per setting, a live mesh preview with the topography, stations and
-# skin depths, the mesh summary and advice, and Save to write the inputs
+# Front end of MakeMesh2D: one slider per setting, a live mesh preview with the topography, stations and
+# skin depths, the mesh summary and advice, and Save to write the inputs. The window is built on any Makie
+# backend, so CairoMakie can drive it headless; _make_mesh2D_gui shows it with GLMakie
 
-function _make_mesh2D_gui(data, topo, water, p0, out_dir, ctrls)
-    GLMakie.activate!()
+# the window and its widgets; refresh! rebuilds the preview, the sliders and Save are wired up
+function _makemesh2d_window(data, topo, water, p0, out_dir, ctrls)
     specs = [
         (:cell_width_frac, "Cell width / station spacing", 0.1:0.05:1.0),
         (:core_margin_cells, "Core margin (cells)", 0:1:20),
@@ -17,14 +18,18 @@ function _make_mesh2D_gui(data, topo, water, p0, out_dir, ctrls)
         (:cov_smoothing, "Covariance smoothing", 0.0:0.05:0.9),
     ]
     fig = Figure(size = (1500, 900))
-    controls = fig[1, 1] = GridLayout()
+    controls = fig[1:2, 1] = GridLayout()
     grid = SliderGrid(controls[1, 1], [(label = l, range = r, startvalue = getproperty(p0, k)) for (k, l, r) in specs]...;
                       width = 380)
     save_button = Button(controls[2, 1], label = "Save inputs", tellwidth = false)
     info = Label(controls[3, 1], "", tellwidth = false, justification = :left, word_wrap = true, width = 380)
     axis = Axis(fig[1, 2]; xlabel = "Offset (km)", ylabel = "Depth (km)", yreversed = true,
                 xgridvisible = false, ygridvisible = false)
+    # the ground, water and stations near the surface, where the whole-mesh view is too coarse
+    surface = Axis(fig[2, 2]; xlabel = "Offset (km)", ylabel = "Depth (m)", yreversed = true,
+                   xgridvisible = false, ygridvisible = false)
     colsize!(fig.layout, 1, Fixed(400))
+    rowsize!(fig.layout, 2, Relative(0.35))
 
     params() = merge(p0, NamedTuple{Tuple(first.(specs))}(Tuple(s.value[] for s in grid.sliders)))
     built = Ref{Any}(nothing)
@@ -48,6 +53,21 @@ function _make_mesh2D_gui(data, topo, water, p0, out_dir, ctrls)
         core = _core_range(m.y_cell_sizes)
         xlims!(axis, 1.5 .* (ys[first(core)], ys[last(core)+1])...)
         ylims!(axis, 1.2 * b.δmax / 1000, -0.02 * b.δmax / 1000)
+
+        empty!(surface)
+        na, zm = m.n_air_cells, 1000 .* zs
+        wet = findall(==(MT2D_MASK_WATER), b.mask)
+        isempty(wet) || poly!(surface, [Rect2(ys[i[2]], zm[na+i[1]], ys[i[2]+1] - ys[i[2]], zm[na+i[1]+1] - zm[na+i[1]])
+                                        for i in wet]; color = :lightskyblue)
+        vlines!(surface, ys, color = (:black, 0.25), linewidth = 0.5)
+        hlines!(surface, zm[na+1:end], color = (:black, 0.25), linewidth = 0.5)
+        ground = zm[na .+ 1 .+ mt2d_topo_air(m)]
+        stairs!(surface, ys, vcat(ground, ground[end]); step = :post, color = :black, linewidth = 1.2)
+        scatter!(surface, m.receiver_positions ./ 1000, mt2d_receiver_depths(m); marker = :dtriangle,
+                 color = :black, markersize = 10)
+        xlims!(surface, ys[first(core)], ys[last(core)+1])
+        deepest = maximum(ground[core])
+        ylims!(surface, deepest + 3 * (zm[na+2] - zm[na+1]) + 1, -1)
         info.text[] = b.summary * "\n" * (isempty(b.notes) ? "✓ mesh looks well sized" : join("• " .* b.notes, "\n"))
     end
     for s in grid.sliders
@@ -60,6 +80,12 @@ function _make_mesh2D_gui(data, topo, water, p0, out_dir, ctrls)
         foreach(println, values(paths))
     end
     refresh!()
-    display(fig)
-    fig
+    (; fig, grid, save_button, info, built, params, axis, surface)
+end
+
+function _make_mesh2D_gui(data, topo, water, p0, out_dir, ctrls)
+    GLMakie.activate!()
+    w = _makemesh2d_window(data, topo, water, p0, out_dir, ctrls)
+    display(w.fig)
+    w.fig
 end

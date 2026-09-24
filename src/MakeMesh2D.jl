@@ -120,7 +120,7 @@ function MakeMesh2D(data_path::AbstractString; out_dir::AbstractString = dirname
     ReadInvCtrl2D(inv_ctrl); ReadVFSACtrl2D(vfsa_ctrl)
     ctrls = (inv = inv_ctrl, vfsa = vfsa_ctrl)
     if mode == :gui
-        isdefined(@__MODULE__, :_make_mesh2D_gui) || error("the MakeMesh2D window needs GLMakie and a display; use mode = :batch")
+        isdefined(@__MODULE__, :GLMakie) || error("the MakeMesh2D window needs GLMakie and a display; use mode = :batch")
         return _make_mesh2D_gui(data, topo, water, p, out_dir, ctrls)
     end
     mode == :batch || throw(ArgumentError("mode must be :batch or :gui"))

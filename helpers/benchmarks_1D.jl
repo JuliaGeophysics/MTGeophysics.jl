@@ -14,7 +14,7 @@ const CASES_1D = Dict(
     "1D-I" => (thicknesses = [120.0, 280.0, 650.0, 1400.0], resistivities = [100.0, 20.0, 350.0, 40.0, 800.0]),
 )
 const SURVEY_1D = (
-    site = "JYV1D", latitude = 62.25, longitude = 25.75,
+    site = "Fin001", latitude = 62.25, longitude = 25.75,
     frequencies = 10 .^ range(-2.5, 3, length = 23),   # 0.003-1000 Hz, 4 per decade
     error_fraction = 0.05, rng_seed = 20260308,
 )

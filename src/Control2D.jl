@@ -59,6 +59,7 @@ _ctrl_algorithm(s) = (a = Symbol(lowercase(strip(s))); a in (:gn, :nlcg) ? a :
                       throw(ArgumentError(a == :vfsa ? "VFSA runs through VFSA2D with its own control and mask.ctrl" :
                                           "algorithm must be GN or NLCG")))
 _ctrl_yesno(b::Bool) = b ? "yes" : "no"
+_ctrl_vfsa_only(s) = throw(ArgumentError("log10 resistivity bounds apply to VFSA only; GN and NLCG are unbounded"))
 
 #---------- fwd.ctrl ----------
 
@@ -143,7 +144,7 @@ VFSA has its own control, `VFSACtrl2D`.
 - `algorithm`: `:gn` or `:nlcg`
 - `lambda`: regularization weight β, fixed through the run
 - `target_rms`, `max_iter`: stopping controls
-- `mode`, `log_bounds`, `max_step`, `max_linesearch`: shared driver controls
+- `mode`, `max_step`, `max_linesearch`: shared driver controls (no bounds: they belong to VFSA)
 - `smallness`, `smooth_y`, `smooth_z`: weights of the gradient regularizer
 - `gn_damping`, `nlcg_restart`, `nlcg_precondition`: per-algorithm settings
 """
@@ -153,7 +154,6 @@ Base.@kwdef struct InvCtrl2D
     target_rms::Float64
     max_iter::Int
     mode::Symbol = :TETM
-    log_bounds::Tuple{Float64, Float64} = (0.0, 5.0)
     max_step::Float64 = 0.5
     max_linesearch::Int = 12
     smallness::Float64 = 0.01
@@ -173,7 +173,7 @@ const _INV_CTRL_SPEC = (
     "Exit search when rms is less than"  => (:target_rms, _ctrl_float, true),
     "Maximum number of iterations"       => (:max_iter, _ctrl_int, true),
     "Mode"                               => (:mode, _ctrl_mode, false),
-    "Log10 resistivity bounds"           => (:log_bounds, _ctrl_parse_pair, false),
+    "Log10 resistivity bounds"           => (:log_bounds, _ctrl_vfsa_only, false),
     "Max log10 step"                     => (:max_step, _ctrl_float, false),
     "Max line search steps"              => (:max_linesearch, _ctrl_int, false),
     "Smallness weight"                   => (:smallness, _ctrl_float, false),
@@ -188,7 +188,6 @@ function _validate_ctrl(c::InvCtrl2D)
     c.algorithm in (:gn, :nlcg) || throw(ArgumentError("algorithm must be GN or NLCG"))
     c.lambda >= 0 || throw(ArgumentError("lambda must be nonnegative"))
     c.max_iter >= 0 || throw(ArgumentError("maximum number of iterations must be nonnegative"))
-    c.log_bounds[1] < c.log_bounds[2] || throw(ArgumentError("log10 bounds must be increasing"))
     c
 end
 
@@ -215,7 +214,6 @@ function WriteInvCtrl2D(path::AbstractString, c::InvCtrl2D)
         ("Exit search when rms is less than", g(c.target_rms)),
         ("Maximum number of iterations", string(c.max_iter)),
         ("Mode", string(c.mode)),
-        ("Log10 resistivity bounds", "$(g(c.log_bounds[1])) $(g(c.log_bounds[2]))"),
         ("Max log10 step", g(c.max_step)),
         ("Max line search steps", string(c.max_linesearch)),
         ("Smallness weight", g(c.smallness)),
@@ -240,10 +238,18 @@ is the centre of the search and `mask.ctrl` says which cells move.
 - `mode`, `log_bounds`: data mode and the log10 ρ box
 - `chains`, `control_points`, `trials`: independent chains, RBF control points per chain,
   proposals per iteration
-- `step_scale`, `temperature`, `cooling`: proposal width as a share of the box, starting
-  temperature and its ratio at `max_iter`
-- `rbf_y`, `rbf_z`: RBF widths in cells
+- `share_moved`, `step_scale`, `temperature`, `cooling`: share of the controls moved per
+  proposal, proposal width as a share of the box, starting temperature and its ratio at
+  `max_iter`
+- `rbf_top`, `rbf_bottom`: RBF widths in cells at the top and the bottom of the core
+- `depth_power`: control placement weight (depth + z₁)^(-p), 0 = uniform
+- `core_skin_depths`, `core_layers`: core depth in skin depths of the data, or the top
+  `core_layers` layers when positive
+- `core_expansion`: cells added to each side of the lateral core
+- `padding_decay`: e-fold, in core cells, of the blend from the core edge to the start model
 - `seed`, `snapshots`: random seed, best-model snapshot interval (0 = off)
+
+The keys follow `VFSA3DMTConfig`, see `VFSA2DConfig`.
 """
 Base.@kwdef struct VFSACtrl2D
     target_rms::Float64
@@ -253,11 +259,17 @@ Base.@kwdef struct VFSACtrl2D
     chains::Int = 2
     control_points::Int = 400
     trials::Int = 1
-    step_scale::Float64 = 0.11
+    share_moved::Float64 = 0.2
+    step_scale::Float64 = 0.2
     temperature::Float64 = 1.0
     cooling::Float64 = 1e-3
-    rbf_y::Float64 = 2.0
-    rbf_z::Float64 = 2.5
+    rbf_top::Float64 = 2.0
+    rbf_bottom::Float64 = 2.0
+    depth_power::Float64 = 0.0
+    core_skin_depths::Float64 = 1.0
+    core_layers::Int = 0
+    core_expansion::Int = 0
+    padding_decay::Float64 = 8.0
     seed::Int = 20260308
     snapshots::Int = 0
 end
@@ -270,11 +282,17 @@ const _VFSA_CTRL_SPEC = (
     "Number of chains"                  => (:chains, _ctrl_int, false),
     "Control points"                    => (:control_points, _ctrl_int, false),
     "Trials per iteration"              => (:trials, _ctrl_int, false),
+    "Share of controls moved"           => (:share_moved, _ctrl_float, false),
     "Step scale"                        => (:step_scale, _ctrl_float, false),
     "Starting temperature"              => (:temperature, _ctrl_float, false),
     "Cooling ratio"                     => (:cooling, _ctrl_float, false),
-    "RBF width y (cells)"               => (:rbf_y, _ctrl_float, false),
-    "RBF width z (cells)"               => (:rbf_z, _ctrl_float, false),
+    "RBF width top (cells)"             => (:rbf_top, _ctrl_float, false),
+    "RBF width bottom (cells)"          => (:rbf_bottom, _ctrl_float, false),
+    "Control depth power"               => (:depth_power, _ctrl_float, false),
+    "Core depth (skin depths)"          => (:core_skin_depths, _ctrl_float, false),
+    "Core depth (layers)"               => (:core_layers, _ctrl_int, false),
+    "Core expansion (cells)"            => (:core_expansion, _ctrl_int, false),
+    "Padding decay (core cells)"        => (:padding_decay, _ctrl_float, false),
     "Random seed"                       => (:seed, _ctrl_int, false),
     "Snapshot interval"                 => (:snapshots, _ctrl_int, false),
 )
@@ -285,6 +303,11 @@ function _validate_ctrl(c::VFSACtrl2D)
     c.chains >= 1 && c.control_points >= 1 && c.trials >= 1 ||
         throw(ArgumentError("chains, control points and trials must be at least 1"))
     c.temperature > 0 && 0 < c.cooling <= 1 || throw(ArgumentError("need temperature > 0 and 0 < cooling ratio ≤ 1"))
+    0 < c.share_moved <= 1 || throw(ArgumentError("the share of controls moved must lie in (0, 1]"))
+    c.rbf_top > 0 && c.rbf_bottom > 0 && c.depth_power >= 0 && c.padding_decay > 0 ||
+        throw(ArgumentError("need positive RBF widths and padding decay, and control depth power ≥ 0"))
+    c.core_skin_depths > 0 && c.core_layers >= 0 && c.core_expansion >= 0 ||
+        throw(ArgumentError("need core depth > 0 skin depths, core layers ≥ 0 and core expansion ≥ 0"))
     c
 end
 
@@ -312,11 +335,17 @@ function WriteVFSACtrl2D(path::AbstractString, c::VFSACtrl2D)
         ("Number of chains", string(c.chains)),
         ("Control points", string(c.control_points)),
         ("Trials per iteration", string(c.trials)),
+        ("Share of controls moved", g(c.share_moved)),
         ("Step scale", g(c.step_scale)),
         ("Starting temperature", g(c.temperature)),
         ("Cooling ratio", g(c.cooling)),
-        ("RBF width y (cells)", g(c.rbf_y)),
-        ("RBF width z (cells)", g(c.rbf_z)),
+        ("RBF width top (cells)", g(c.rbf_top)),
+        ("RBF width bottom (cells)", g(c.rbf_bottom)),
+        ("Control depth power", g(c.depth_power)),
+        ("Core depth (skin depths)", g(c.core_skin_depths)),
+        ("Core depth (layers)", string(c.core_layers)),
+        ("Core expansion (cells)", string(c.core_expansion)),
+        ("Padding decay (core cells)", g(c.padding_decay)),
         ("Random seed", string(c.seed)),
         ("Snapshot interval", string(c.snapshots)),
     ]

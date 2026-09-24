@@ -113,10 +113,6 @@ end
               norm(log10.(result.resistivity[mask] ./ initial[mask]))/10
         @test all(diff([h.objective for h in regularized.history]) .< 0)
         @test regularized.resistivity[.!mask] == initial[.!mask]
-        bounded = GaussNewton2D(mesh,initial,observed;active_cells=mask,
-            options=Inv2DOptions(beta=0.,max_iter=5,target_rms=0.,log_bounds=(log10(70.),3.),verbose=false))
-        @test minimum(bounded.resistivity[mask]) >= 70-1e-10
-        @test bounded.fit.rms < bounded.history[1].rms
 
         masked = deepcopy(observed)
         masked.z_xy[1,1] = complex(NaN,NaN)

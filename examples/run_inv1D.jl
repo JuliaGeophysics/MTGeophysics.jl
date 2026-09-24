@@ -33,7 +33,8 @@ elapsed = @elapsed run = Invert1D(data_path, inv_path, meshes)
 plots = PlotInversion1D(run; true_model_path = isfile(true_model) ? true_model : nothing)
 
 @printf("Algorithm : %s\n", uppercase(string(run.algorithm)))
-foreach(r -> @printf("%-10s RMS %.3f  %s\n", r.site, r.rms, r.reason), run.sites)
+foreach(r -> @printf("%-10s RMS %.3f  %s%s\n", r.site, r.rms, r.reason,
+                     r.vfsa === nothing ? "" : @sprintf("  (ensemble mean; best chain RMS %.3f)", r.vfsa.best_rms)), run.sites)
 @printf("RMS       : %.3f, %.1f s\n", run.rms, elapsed)
 println("Outputs   : ", run.run_dir)
 foreach(p -> println("  ", relpath(p, run.run_dir)), plots)

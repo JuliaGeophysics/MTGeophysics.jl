@@ -12,7 +12,7 @@ julia --project=. examples/make_mesh2D.jl data.dat topo.dat out_dir batch    # n
 
 ```julia
 MakeMesh2D("data.dat"; out_dir = "mesh", topo_path = "topo.dat",
-           water = [(y_range = (-30e3, -18e3), level = 95.0)], mode = :batch)
+           water = [(y_range = (-5500.0, -2500.0), level = 100.0)], mode = :batch)
 ```
 
 | Setting | Default | Meaning |

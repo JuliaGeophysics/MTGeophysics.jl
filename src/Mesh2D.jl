@@ -11,9 +11,8 @@ using Printf
 Profile mesh and survey: y (along the profile) and z (down) nodes and cell sizes, air
 rows first, receiver positions and frequencies. `topo_air` holds the topographic air
 cells at the top of each earth column (empty = flat); every receiver sits on the ground
-surface of its column; next to a topographic step TM Ey is averaged over
-`dipole_length` metres (at least one column each side). `dimension = 1` marks a
-one-column layered earth (`Mesh1D`), solved exactly instead of by finite differences.
+surface of its column; next to a topographic step TM Ey is averaged over the columns
+within half of `dipole_length` metres each side.
 """
 Base.@kwdef struct MT2DMesh
     y_nodes::Vector{Float64}
@@ -26,7 +25,6 @@ Base.@kwdef struct MT2DMesh
     air_resistivity::Float64 = 1e9
     topo_air::Vector{Int} = Int[]
     dipole_length::Float64 = 100.0
-    dimension::Int = 2
 end
 
 """

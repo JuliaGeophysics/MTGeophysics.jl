@@ -153,7 +153,7 @@ function Topography2D(model::ModelFile2D, data, topo::Topo2D;
         level = datum - Float64(w.level)
         for iy in eachindex(yc)
             w.y_range[1] <= yc[iy] <= w.y_range[2] || continue
-            iy in columns && throw(ArgumentError("water at y = $(yc[iy]) m lies under a station; water belongs in the padding"))
+            iy in columns && throw(ArgumentError("water at y = $(yc[iy]) m lies under a station; place stations on land"))
             top[iy] = min(top[iy], count(<(level), zc))
         end
     end

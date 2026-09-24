@@ -10,8 +10,9 @@ topo_file = get(ARGS, 2, joinpath(dirname(data_file), "topo.dat"))
 out_dir   = get(ARGS, 3, joinpath(dirname(data_file), "mesh"))
 mode      = Symbol(lowercase(get(ARGS, 4, get(ENV, "MTGEO_MESH_MODE", "gui"))))
 
-# lakes and sea in the padding: profile range (m, the data's local y) and water level (m a.s.l.)
-water = [(y_range = (-30_000.0, -18_000.0), level = 95.0)]
+# lakes and sea: profile range (m, the data's local y) and water level (m a.s.l.); the depth comes from the
+# lake bottom in topo.dat, and no station may stand on the water
+water = [(y_range = (-5500.0, -2500.0), level = 100.0)]
 
 MakeMesh2D(data_file;
     out_dir,
@@ -31,5 +32,5 @@ MakeMesh2D(data_file;
     air_growth        = 2.0,
     dipole_length     = 100.0,
     cov_smoothing     = 0.3,
-    water_resistivity = 100.0,
+    water_resistivity = 200.0,    # fresh lake water, 5 mS/m
 )

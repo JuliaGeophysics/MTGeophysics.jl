@@ -4,7 +4,7 @@
 
 | Type | Description |
 |:-----|:------------|
-| `MT2DMesh` | 2D tensor mesh (nodes, cells, receivers, frequencies, topographic air); `dimension = 1` for a 1D layered earth |
+| `MT2DMesh` | 2D tensor mesh (nodes, cells, receivers, frequencies, topographic air) |
 | `FwdCtrl2D`, `InvCtrl2D`, `Cov2D` | `fwd.ctrl`, `inv.ctrl` (GN, NLCG) and covariance file contents |
 | `VFSACtrl2D` | VFSA control file contents |
 | `InvCtrl1D` | 1D inversion control (GN or VFSA) |
@@ -31,8 +31,8 @@
 | Function | Description |
 |:---------|:------------|
 | `mt1d_impedance(f, ρ, h)` | Layered-earth surface impedance by the recursion |
-| `Mesh1D(h, f)` | One-column mesh (`MT2DMesh`, `dimension = 1`) |
-| `Mesh1DFromInputs(model, data)` | 1D mesh and resistivity from a one-column model file |
+| `mt1d_layers(f; ...)`, `mt1d_skin_depth(ρ, f)` | Skin-depth layering, skin depth |
+| `mt1d_frechet(f, ρ, h)`, `WriteFrechet1D(path, h, ρ, site)` | G = ∂Z/∂log10 ρ, and its file |
 | `MakeMesh1D(data; ...)` | Skin-depth layering and background resistivity of every site |
 | `mt1d_site_data(data, i; mode)` | One site as a 1D survey; `:DET` gives √det Z |
 | `ReadInvCtrl1D`, `WriteInvCtrl1D` | 1D inversion control |
@@ -40,6 +40,7 @@
 | `Invert1D(data, inv, meshes)` | 1D GN or VFSA inversion, every site on its own |
 | `PlotInversion1D(run)` | Model, data fit and convergence plots per site |
 | `PlotModel1D(model)`, `plot_mt1d_model(h, models)` | Resistivity-depth steps |
+| `plot_mt1d_convergence(histories)` | GN or VFSA convergence |
 
 ## 2D Functions
 
@@ -51,17 +52,23 @@
 | `ReadVFSACtrl2D`, `WriteVFSACtrl2D`, `ReadMask2D`, `WriteMask2D` | VFSA control and `mask.ctrl` |
 | `Mesh2DFromInputs(model, data, fwd)` | Solver mesh and resistivity, air from `fwd.ctrl`, stations snapped to the ground |
 | `BuildMesh2D(; ...)` | Padded profile mesh |
+| `build_default_mt2d_mesh()` | Small benchmark mesh of the tests |
+| `build_mt2d_halfspace_model(mesh)` | Uniform earth with the mesh's air |
 | `mt2d_geometric_layers(f; ...)` | MakeMesh3D-style layers from skin depths |
+| `mt2d_skin_depth_layers(f; ...)` | Skin-depth core layers with geometric padding below |
+| `mt2d_air_layers(n, thickness, growth)` | Air layer thicknesses of `fwd.ctrl` |
 | `mt2d_skin_depth(ρ, f)` | Skin depth in metres |
 | `mt2d_air_mask(mesh)`, `mt2d_topo_air(mesh)` | Air cells, topographic air per column |
-| `mt2d_receiver_depths(mesh)`, `mt2d_station_offsets(mesh, data)` | Station ground depths and snapping |
+| `mt2d_receiver_depths(mesh)`, `mt2d_receiver_columns(mesh)`, `mt2d_station_offsets(mesh, data)` | Station ground depths, columns and snapping |
 | `ReadTopo2D`, `WriteTopo2D` | `topo.dat` |
 | `mt2d_profile_topography(topo, data)` | Topography projected onto the profile |
 | `Topography2D(model, data, topo; water)` | Model with topography and water, mask, data Z |
 | `Mask2D(model; water, fixed_below_m, fixed)` | Mask of `cov.ctrl` and `mask.ctrl` |
 | `mt2d_ground(model)` | Ground depth of each column |
 | `MakeMesh2D(data; ...)` | Inversion inputs from a data file (batch or GUI) |
-| `run_mt2d_forward(mesh, ρ)` | TE/TM forward solve |
+| `run_mt2d_forward(mesh, ρ)`, `Forward2D(mesh, ρ)` | TE/TM forward solve |
+| `data_from_response2d(response; ...)` | `DataFile2D` of a forward response, with errors |
+| `build_mt2d_data_template(mesh; ...)`, `write_mt2d_data_template(path, mesh; ...)` | Empty data file of a mesh's stations and frequencies |
 | `ForwardSolve2D(model, data, fwd)` | File forward run, writes `data.pred` |
 | `chi2_rms2d(obs, pred)` | Misfit |
 | `Invert2D(start, data, fwd, inv, cov, prior)` | Six-file GN or NLCG inversion |
@@ -75,7 +82,7 @@
 | `WriteFrechet2D(path, mesh, ρ, data)` | G of a data file's impedances |
 | `PlotInversion2D(run)` | Standard plots of a run |
 | `PlotData2D(data)`, `PlotModel2D(model)` | Plots of files |
-| `plot_mt2d_model`, `plot_mt2d_mesh`, `plot_mt2d_data_fit`, `plot_inv2d_convergence`, `plot_vfsa2d_convergence` | Plot building blocks |
+| `plot_mt2d_model`, `plot_mt2d_mesh`, `plot_mt2d_data_fit`, `plot_mt2d_site_curves`, `plot_inv2d_convergence`, `plot_vfsa2d_convergence` | Plot building blocks |
 
 ## VFSA Inversion
 

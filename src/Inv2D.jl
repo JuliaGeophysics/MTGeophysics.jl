@@ -21,7 +21,7 @@ using Statistics
 #   inv2d_tag(alg)                                     -> short label for the log, e.g. "gn"
 #   inv2d_validate(alg)                                -> throws on bad settings
 #
-# the driver owns stopping tests, step capping, bounds, and the Armijo line search,
+# the driver owns stopping tests, step capping and the Armijo line search,
 # so a new algorithm only decides which direction to take
 
 """
@@ -46,7 +46,6 @@ Algorithm-independent inversion controls.
 - `max_iter`: maximum accepted iterations; 0 evaluates the start model only
 - `beta`: regularization weight about the reference model
 - `smallness`, `smooth_y`, `smooth_z`: weights of the regularization terms
-- `log_bounds`: box bounds on active log10 resistivity
 - `max_step`: cap on the largest log10 change per iteration
 - `max_linesearch`: backtracking halvings per direction
 - `target_rms`: stop at this rms; 0 = off
@@ -60,7 +59,6 @@ Base.@kwdef struct Inv2DOptions
     smallness::Float64 = 0.01
     smooth_y::Float64 = 1.0
     smooth_z::Float64 = 1.0
-    log_bounds::Tuple{Float64, Float64} = (0.0, 5.0)
     max_step::Float64 = 0.5
     max_linesearch::Int = 12
     target_rms::Float64 = 1.0
@@ -119,8 +117,6 @@ function _inv2d_validate(opt::Inv2DOptions)
         throw(ArgumentError("regularization and stopping controls must be finite and nonnegative"))
     isfinite(opt.max_step) && opt.max_step > 0 || throw(ArgumentError("max_step must be finite and positive"))
     opt.max_linesearch > 0 || throw(ArgumentError("max_linesearch must be positive"))
-    lo, hi = opt.log_bounds
-    isfinite(lo) && isfinite(hi) && -300 < lo < hi < 300 || throw(ArgumentError("invalid log_bounds"))
     nothing
 end
 
@@ -284,14 +280,14 @@ end
 
 #---------- line search ----------
 
-# projected armijo backtracking along a capped direction; nothing when no step is accepted
+# armijo backtracking along a capped direction, unbounded (bounds are a VFSA setting); nothing when
+# no step is accepted
 function _inv2d_linesearch(problem::Inv2DProblem, state, direction, gradient)
     opt = problem.options
-    lo, hi = opt.log_bounds
     d = direction .* min(1.0, opt.max_step / max(norm(direction, Inf), eps()))
     for ls in 0:opt.max_linesearch-1
         alpha = 0.5^ls
-        candidate = clamp.(state.m + alpha .* d, lo, hi)
+        candidate = state.m + alpha .* d
         delta = candidate - state.m
         slope = dot(gradient, delta)
         slope < 0 || continue
@@ -359,9 +355,7 @@ function Invert2D(mesh::MT2DMesh, initial_resistivity::AbstractMatrix{<:Real}, o
     R_active = R[:, LinearIndices(rho0)[cells]]
     problem = Inv2DProblem(mesh, rows, cells, R, R_active, log10.(reference), opt)
 
-    lo, hi = opt.log_bounds
     m0 = log10.(rho0[cells])
-    all(x -> lo <= x <= hi, m0) || throw(ArgumentError("active starting resistivities are outside log_bounds"))
     state = _inv2d_evaluate(problem, rho0, m0)
     all(isfinite, state.r) || error("initial forward response is not finite")
     work = inv2d_init(algorithm, problem, state)
@@ -387,7 +381,7 @@ function Invert2D(mesh::MT2DMesh, initial_resistivity::AbstractMatrix{<:Real}, o
             break
         end
         gradient = inv2d_prepare!(algorithm, work, problem, state)
-        if norm(state.m - clamp.(state.m - gradient, lo, hi), Inf) <= opt.gradient_tolerance
+        if norm(gradient, Inf) <= opt.gradient_tolerance
             reason = :gradient_tolerance
             break
         end
@@ -433,7 +427,7 @@ end
 # shared options and the algorithm config from inv.ctrl
 function _inv2d_from_ctrl(c::InvCtrl2D; mode::Symbol = c.mode)
     options = Inv2DOptions(mode = mode, max_iter = c.max_iter, beta = c.lambda, smallness = c.smallness,
-                           smooth_y = c.smooth_y, smooth_z = c.smooth_z, log_bounds = c.log_bounds,
+                           smooth_y = c.smooth_y, smooth_z = c.smooth_z,
                            max_step = c.max_step, max_linesearch = c.max_linesearch, target_rms = c.target_rms)
     algorithm = c.algorithm == :gn ? GaussNewton2DConfig(damping = c.gn_damping) :
                 NLCG2DConfig(restart = c.nlcg_restart, precondition = c.nlcg_precondition)
@@ -478,7 +472,7 @@ function _inv2d_file_setup(start::ModelFile2D, observed::DataFile2D, fwd::FwdCtr
     water = falses(size(ρ0))
     water[na+1:end, :] .= mask .== MT2D_MASK_WATER
     wet = intersect(mt2d_receiver_columns(mesh), findall(vec(any(water; dims = 1))))
-    isempty(wet) || error("stations stand over water (mask $(MT2D_MASK_WATER)) in model column(s) $wet; water belongs in the padding")
+    isempty(wet) || error("stations stand over water (mask $(MT2D_MASK_WATER)) in model column(s) $wet; place stations on land")
     active = falses(size(ρ0))
     active[na+1:end, :] .= (mask .!= 0) .& (mask .!= MT2D_MASK_WATER)
     active .&= .!air

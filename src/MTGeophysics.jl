@@ -51,7 +51,6 @@ try
     include("PlotModel3D.jl")
     include("EditModel3D.jl")
     include("MakeMesh3DGUI.jl")
-    include("MakeMesh2DGUI.jl")
     include("PlotData3D.jl")
     export compute_colorrange, prepare_model_arrays
     export PlotModelXY, PlotModelXZ, PlotModelYZ, PlotModelXYZ
@@ -77,6 +76,7 @@ include("Inv2D_VFSA.jl")
 include("Inv1D.jl")
 include("Mask2D.jl")
 include("MakeMesh2D.jl")
+include("MakeMesh2DGUI.jl")
 
 #----- 3-D VFSA inversion and ensemble statistics -------------------------#
 
@@ -145,7 +145,7 @@ export VFSA2D, mt2d_ensemble
 export BuildMesh2D
 
 export Forward2D
-export ForwardSolve1D, MakeMesh1D, Mesh1D, Mesh1DFromInputs, mt1d_impedance, mt1d_site_data
+export ForwardSolve1D, MakeMesh1D, mt1d_layers, mt1d_skin_depth, mt1d_impedance, mt1d_frechet, mt1d_site_data, WriteFrechet1D
 export Invert1D, InvCtrl1D, ReadInvCtrl1D, WriteInvCtrl1D, PlotInversion1D
 export Mask2D, mt2d_ground, MakeMesh2D
 export ForwardSolve2D
@@ -175,7 +175,7 @@ export WriteFrechet2D
 export Topo2D, ReadTopo2D, WriteTopo2D, Topography2D, mt2d_profile_topography
 export mt2d_air_mask, mt2d_station_offsets, mt2d_receiver_depths, mt2d_receiver_columns, mt2d_topo_air
 
-export plot_mt1d_model
+export plot_mt1d_model, plot_mt1d_convergence
 export plot_mt2d_site_curves
 export plot_mt2d_model
 export plot_mt2d_mesh

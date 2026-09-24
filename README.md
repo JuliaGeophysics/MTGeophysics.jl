@@ -75,7 +75,7 @@ The `julia --project=.` prefix used throughout the examples below activates that
 ## Getting started
 
 Generate the 2D-IV benchmark. It is COMEMI 2D-III under 100–200 m of Finnish-style relief, with a
-lake in the padding. Its noisy data come from a fine mesh, while the start and prior models, the
+lake and its bathymetry among the stations. Its noisy data come from a fine mesh, while the start and prior models, the
 covariance and the mask sit on a coarser inversion mesh with the same topography. Then invert it with
 Gauss–Newton or NLCG (six ModEM-style files), or with VFSA (five files: a mask, no covariance or prior):
 
