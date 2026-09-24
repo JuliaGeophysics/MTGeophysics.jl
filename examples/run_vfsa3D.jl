@@ -2,11 +2,12 @@
 using MTGeophysics
 using Dates
 
-const BASE_DIR = @__DIR__
+# inputs in examples/cascadia (not tracked), absolute paths so the job runs from any directory
+const DATA_DIR = joinpath(@__DIR__, "cascadia")
 const MODEM_EXECUTABLE = "/projappl/project_2011796/ModEM-GPU/bin/Mod3DMT_CPU"
 
-start_model = joinpath(BASE_DIR, "cascad_half_prior.ws")
-observed_data = joinpath(BASE_DIR, "cascad_errfl5.dat")
+start_model = joinpath(DATA_DIR, "cascad_half_prior.ws")
+observed_data = joinpath(DATA_DIR, "cascad_errfl5.dat")
 
 # seed from the 1st CLI arg (e.g. SLURM job ID), fixed fallback for reproducibility
 seed = length(ARGS) >= 1 ? parse(Int, ARGS[1]) : 1911
@@ -18,8 +19,8 @@ cfg = VFSA3DMTConfig(
     modem_exe             = MODEM_EXECUTABLE,
     # pins BICG: this binary's compiled-in default is QMR (the maintained
     # ModEM tree defaults to BICG), and QMR is slower here
-    fwd_ctrl              = joinpath(BASE_DIR, "F.dat"),
-    out_root              = joinpath(BASE_DIR, "run"),
+    fwd_ctrl              = joinpath(DATA_DIR, "F.dat"),
+    out_root              = joinpath(DATA_DIR, "run"),
     n_ctrl                = 2500,        # RBF control points
     frac_update_controls  = 0.2,        # controls perturbed per trial
     log_bounds            = (0.0, 4.0), # log10(Ω·m) model bounds, symmetric about the 2.0 prior; ocean is frozen and exempt from the clamp
@@ -42,7 +43,7 @@ cfg = VFSA3DMTConfig(
     trunc_sigmas          = 3.0,        # kernel zeroed beyond this many σ; keeps the control-to-cell weight map sparse, 3σ drops only ~1% tail
     ctrl_depth_power      = 0.2,       # shallow bias in control placement; 0.5 starved the 130 km layer to ~5 controls (92% covered, blocky), 0.25 gives ~17 at 100%
     water_log10           = 0.3,        # only used for the written file header when a bathymetry file is given
-    bathymetry_file       = "cascad_bathymetry.dat",         # frozen ocean columns; relative path, so submit from this directory
+    bathymetry_file       = joinpath(DATA_DIR, "cascad_bathymetry.dat"),   # frozen ocean columns
     distortion_mode       = :off,        # per-site 2x2 galvanic C each misfit eval; :off = plain
     distortion_damping    = 1.0,        # pull of per-site C toward identity: 0 = free fit, larger = weaker correction, Inf = correction off
 )

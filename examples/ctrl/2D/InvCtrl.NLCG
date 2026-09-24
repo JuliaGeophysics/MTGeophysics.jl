@@ -1,0 +1,12 @@
+Algorithm                         : NLCG
+Initial damping factor lambda     : 1
+Exit search when rms is less than : 1
+Maximum number of iterations      : 200
+Mode                              : TETM
+Max log10 step                    : 0.5
+Max line search steps             : 12
+Smallness weight                  : 0.01
+Smoothing weight y                : 1
+Smoothing weight z                : 1
+NLCG restart                      : 30
+NLCG precondition                 : yes

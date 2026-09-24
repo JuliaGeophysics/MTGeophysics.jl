@@ -1,3 +1,8 @@
+# 3D ModEM data files
+# Author: @pankajkmishra
+# Ensures the Data container starts empty and write_data_modem round-trips impedances and tippers, NaN entries,
+# impedance-only files, and the sign and unit conventions of the source file or the ones asked for
+
 @testset "3D ModEM I/O" begin
 
     @testset "Data structures" begin
@@ -12,7 +17,7 @@
         d.T = [0.01, 1.0, 100.0]
         d.f = 1.0 ./ d.T
         d.nf = 3
-        d.site = ["S01", "S02"]
+        d.site = ["JK01", "JK02"]
         d.ns = 2
         d.loc = [60.0 24.0 100.0; 61.0 25.0 200.0]
         d.x = [1000.0, 2000.0]

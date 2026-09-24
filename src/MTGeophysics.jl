@@ -16,6 +16,7 @@ using Proj
 #----- 3-D ModEM I/O and misfit (existing code) ---------------------------#
 
 include("Data.jl")
+include("Rotate.jl")
 include("Model.jl")
 include("Chi2RMS.jl")
 include("Distortion.jl")
@@ -60,11 +61,24 @@ catch LoadError
     @warn "GLMakie not available, interactive visualization functionality disabled"
 end
 
-#----- 1-D / 2-D forward, I/O, plotting, and inversion (patch) -----------#
+#----- 1-D / 2-D forward, I/O, plotting, and inversion ---------------------#
 
-include("MTGeophysics1D.jl")
-include("MTGeophysics2D.jl")
-include("VFSA2DMT.jl")
+include("Control2D.jl")
+include("Mesh2D.jl")
+include("Fwd2D.jl")
+include("Strike2D.jl")
+include("Topo2D.jl")
+include("Fwd1D.jl")
+include("PlotModel2D.jl")
+include("PlotData2D.jl")
+include("Inv2D.jl")
+include("Inv2D_GN.jl")
+include("Inv2D_NLCG.jl")
+include("Inv2D_VFSA.jl")
+include("Inv1D.jl")
+include("Mask2D.jl")
+include("MakeMesh2D.jl")
+include("MakeMesh2DGUI.jl")
 
 #----- 3-D VFSA inversion and ensemble statistics -------------------------#
 
@@ -74,6 +88,7 @@ include("VFSA3DMT.jl")
 
 export Data, Model, ModEMData, ModEMModel
 export load_data_modem, write_data_modem, make_nan_data, calc_rho_pha
+export rotate_data, RotationStep
 export read_mackie3d_model, load_model_modem, write_model_modem
 export chi2_and_rms
 export chi2_and_rms_distorted, DistortionFit, write_distortion_file
@@ -122,62 +137,59 @@ export RBFMap, build_rbf_map, apply_rbf_map!
 
 #----- Exports: 1-D / 2-D ------------------------------------------------#
 
-export MT1DMesh
 export MT2DMesh
-export MT1DDataSpec
-export MT1DResponse
 export MT2DResponse
 export ModelFile2D
 export DataFile2D
 export FitSummary2D
-export VFSA2DMTConfig
-export VFSA2DMTParams
+export VFSA2DConfig
+export VFSA2D, mt2d_ensemble
 
-export BuildMesh1D
 export BuildMesh2D
-export MakeMesh1D
-export MakeMesh2D
 
-export Forward1D
 export Forward2D
-export ForwardSolve1D
+export ForwardSolve1D, MakeMesh1D, mt1d_layers, mt1d_skin_depth, mt1d_impedance, mt1d_frechet, mt1d_site_data, WriteFrechet1D
+export Invert1D, InvCtrl1D, ReadInvCtrl1D, WriteInvCtrl1D, PlotInversion1D
+export Mask2D, mt2d_ground, MakeMesh2D
 export ForwardSolve2D
+export EstimateStrike2D, RotateData2D, StrikeData2D, RotateToStrike2D
 
-export load_mt1d_model
-export write_mt1d_model
-export load_mt1d_data_spec
-export write_mt1d_data_template
-export load_mt1d_observed_data
-export write_mt1d_observed_data
-export mt1d_layered_model
-export solve_mt1d_analytical
-export solve_mt1d_fd
 
-export load_model2d
-export write_model2d
-export build_mesh_from_model2d
 export build_default_mt2d_mesh
+export mt2d_skin_depth, mt2d_skin_depth_layers
 export build_mt2d_halfspace_model
 export build_mt2d_data_template
 export write_mt2d_data_template
 export load_data2d
 export write_data2d
 export data_from_response2d
-export data_to_response2d
 export chi2_rms2d
+export FrechetDerivative2D, ApplyFrechet2D, ApplyFrechetTranspose2D
+export Invert2D, Inv2DOptions, Inv2DResult, AbstractInversion2D
+export inv2d_frechet, inv2d_gradient
+export inv2d_tag, inv2d_init, inv2d_prepare!, inv2d_direction, inv2d_reject!, inv2d_accept!, inv2d_info, inv2d_validate
+export GaussNewton2D, GaussNewton2DConfig, GaussNewton2DResult
+export NLCG2D, NLCG2DConfig, NLCG2DResult
 export run_mt2d_forward
+export FwdCtrl2D, InvCtrl2D, VFSACtrl2D, Cov2D
+export ReadFwdCtrl2D, WriteFwdCtrl2D, ReadInvCtrl2D, WriteInvCtrl2D, ReadVFSACtrl2D, WriteVFSACtrl2D
+export ReadCov2D, WriteCov2D, ReadMask2D, WriteMask2D
+export ReadModel2D, WriteModel2D, Mesh2DFromInputs, mt2d_air_layers, mt2d_geometric_layers
+export WriteFrechet2D
+export Topo2D, ReadTopo2D, WriteTopo2D, Topography2D, mt2d_profile_topography
+export mt2d_air_mask, mt2d_station_offsets, mt2d_receiver_depths, mt2d_receiver_columns, mt2d_topo_air
 
-export plot_mt1d_data
-export plot_mt1d_model
-export plot_mt2d_data_maps
+export plot_mt1d_model, plot_mt1d_convergence
 export plot_mt2d_site_curves
 export plot_mt2d_model
-export PlotData1D
+export plot_mt2d_mesh
+export plot_mt2d_data_fit
+export plot_inv2d_convergence, plot_vfsa2d_convergence
+export PlotInversion2D
 export PlotModel1D
 export PlotData2D
 export PlotModel2D
 
 export AnalyseEnsemble2D
-export VFSA2DMT
 
 end

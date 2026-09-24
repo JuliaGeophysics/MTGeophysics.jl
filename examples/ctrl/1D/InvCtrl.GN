@@ -1,0 +1,5 @@
+Algorithm                         : GN
+Mode                              : XYYX
+Exit search when rms is less than : 1
+Maximum number of iterations      : 20
+Initial damping factor lambda     : 1

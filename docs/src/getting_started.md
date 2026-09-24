@@ -75,10 +75,12 @@ julia --project=. helpers/benchmarks_1D.jl
 julia --project=. helpers/benchmarks_2D.jl
 ```
 
-This creates:
-
-- `examples/0Layered1D/` — 1D layered benchmark
-- `examples/0COMEMI2D-I/`, `0COMEMI2D-II/`, `0COMEMI2D-III/` — 2D COMEMI benchmarks
+This creates `examples/data/1D-I` (a five-layer sounding) and `examples/data/2D-IV` (COMEMI
+2D-III under topography, with a lake and its bathymetry among the stations). `helpers/benchmarks_2D.jl 2D-I 2D-II 2D-III` adds the
+flat COMEMI cases. Each 2D folder holds `model.true`, `data.dat`, `model.start`,
+`model.prior`, `cov.ctrl` (GN, NLCG) and `mask.ctrl` (VFSA), and 2D-IV also `topo.dat`.
+1D-I holds only `data.dat` and `model.true`, since the 1D inversion lays out its own mesh.
+The control files ship in `examples/ctrl/1D` and `examples/ctrl/2D`.
 
 ## First session
 
@@ -86,6 +88,9 @@ This creates:
 julia --project=. helpers/benchmarks_1D.jl
 julia --project=. helpers/benchmarks_2D.jl
 julia --project=. examples/run_fwd1D.jl
+julia --project=. examples/run_inv1D.jl GN
+julia --project=. examples/run_inv1D.jl VFSA
 julia --project=. examples/run_fwd2D.jl
-julia --project=. examples/run_vfsa2D.jl
+julia --project=. examples/run_inv2D.jl GN
+julia --project=. -t 10 examples/run_vfsa2D.jl
 ```

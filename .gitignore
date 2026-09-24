@@ -18,12 +18,6 @@ Manifest.toml
 *.median
 *.std
 
-
-# Cascadia example data: models, data files, and GIS overlays (not distributed)
-examples/cascadia/
-examples/MT3DINV4/
-examples/geoenergialoikka/
-
 # GIS / shapefile sidecars, anywhere in the tree
 *.shp
 *.shx
@@ -61,5 +55,9 @@ coverage/
 tmp/
 logs/
 
+# generated benchmark inputs and inversion runs (helpers/benchmarks_*.jl)
+examples/data/
+example/cascadia/
 
-
+# local progress notes
+TODO.md

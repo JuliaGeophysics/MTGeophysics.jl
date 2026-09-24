@@ -1,0 +1,8 @@
+Mode                     : TETM
+Strike (deg)             : auto
+Air layers               : 10
+Air thickness (m)        : 50000
+Air growth factor        : 2
+Air resistivity (ohm m)  : 1e+09
+Write Frechet derivative : no
+Dipole length (m)        : 100

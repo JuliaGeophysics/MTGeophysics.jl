@@ -51,9 +51,10 @@ as the *most common* cell width (mode). This recovers the fine-cell plateau no
 matter where it sits or how small a fraction of the axis it occupies — unlike a
 central-window median, which is polluted by padding when the core is narrow.
 """
-function core_indices(c::AbstractVector; tol::Real = 0.2)
-    e = edges_from_centers(c)
-    w = abs.(diff(e))
+core_indices(c::AbstractVector; tol::Real = 0.2) = _core_range(abs.(diff(edges_from_centers(c))); tol)
+
+# core_indices on cell widths, shared with the 2D code, which has the widths exactly
+function _core_range(w::AbstractVector; tol::Real = 0.2)
     n = length(w)
     n <= 4 && return 1:n
     w_ref = _mode_width(w)
@@ -80,14 +81,15 @@ end
 
 Return `1:k` where cumulative depth best matches `max_depth`.
 """
-function z_indices_for_max_depth(zc::AbstractVector, max_depth::Real)
-    e = edges_from_centers(zc)
-    dz = abs.(diff(e))
+z_indices_for_max_depth(zc::AbstractVector, max_depth::Real) = _depth_range(abs.(diff(edges_from_centers(zc))), max_depth)
+
+# z_indices_for_max_depth on layer thicknesses, shared with the 2D code
+function _depth_range(dz::AbstractVector, max_depth::Real)
     cum = cumsum(dz)
     if max_depth <= cum[1]
         return 1:1
     elseif max_depth >= cum[end]
-        return 1:length(zc)
+        return 1:length(dz)
     else
         k = findfirst(>=(max_depth), cum)::Int
         if k > 1 && (max_depth - cum[k-1]) < (cum[k] - max_depth)

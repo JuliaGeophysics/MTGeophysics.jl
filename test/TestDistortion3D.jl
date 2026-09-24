@@ -1,3 +1,8 @@
+# 3D galvanic distortion
+# Author: @pankajkmishra
+# Ensures the variable-projection distortion fit recovers a known C, reduces to chi2_and_rms at damping = Inf,
+# lowers the misfit with finite damping, writes its diagnostics sorted by distortion, and skips NaN data
+
 @testset "3D galvanic distortion" begin
 
     # small synthetic dataset, 3 periods x 2 sites, full impedance + tipper
@@ -6,7 +11,7 @@
         d.T = [0.01, 1.0, 100.0]
         d.f = 1.0 ./ d.T
         d.nf = 3
-        d.site = ["S01", "S02"]
+        d.site = ["JK01", "JK02"]
         d.ns = 2
         d.loc = [60.0 24.0 100.0; 61.0 25.0 200.0]
         d.x = [1000.0, 2000.0]
@@ -102,7 +107,7 @@
             body = filter(l -> !startswith(l, "#"), lines)
             @test length(body) == 2
             # sorted by ||C-I||_F descending: site 1 (C further from I) first
-            @test startswith(body[1], "S01")
+            @test startswith(body[1], "JK01")
         end
     end
 

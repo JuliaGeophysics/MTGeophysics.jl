@@ -1,8 +1,8 @@
-# Core/padding detection regression tests (headless, no solver).
+# 3D core and padding detection
 # Author: @pankajkmishra
-# Guards against the narrow-core misdetection bug: when the uniform fine-cell
-# survey area is a minority of cells along an axis, core_indices must still
-# return the full uniform plateau, not a sliver at the padding boundary.
+# Ensures core_indices returns the whole uniform plateau even when the fine survey cells are a minority along an
+# axis (narrow, wide and offset cores), lateral_core_ranges honours npad, and core expansion grows by whole cells
+# clamped to the grid; headless, no solver
 
 @testset "Core detection (CoreUtils3D)" begin
 

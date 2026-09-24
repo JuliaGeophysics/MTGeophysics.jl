@@ -6,9 +6,11 @@ MTGeophysics.jl is part of the [JuliaGeophysics ecosystem](https://github.com/Ju
 
 ## Features
 
-- **1-D forward modelling** — analytical (recursive impedance) and finite-difference solvers for layered-earth models, with mesh building, model/data I/O, and plotting.
-- **2-D forward modelling** — TE/TM finite-volume solver on tensor meshes, file-driven workflows, model/data I/O, misfit metrics, and pseudo-section/curve plotting.
-- **2-D VFSA inversion** — Very Fast Simulated Annealing with Gaussian-RBF parameterisation, multi-chain ensemble sampling, and automatic ensemble statistics (mean, median, std).
+- **1-D modelling and inversion** — exact layered-earth responses and Fréchet derivatives; each site of a data file inverted on its own (Gauss–Newton or VFSA) on a skin-depth mesh from `MakeMesh1D`, with one small control file. See [1D](forward1d.md).
+- **2-D forward modelling** — TE/TM finite-difference (box integration) solver with topography and water, ModEM model and data files, `fwd.ctrl`, Fréchet derivatives and their transpose. See [2D forward](forward2d.md) and [topography](topography2d.md).
+- **2-D deterministic inversion** — Gauss–Newton and NLCG from six ModEM-style files, with covariance masks, fixed air and water, and a standard run folder. See [deterministic inversion](gaussnewton2d.md).
+- **2-D VFSA inversion** — very fast simulated annealing from five files (a mask, no covariance or prior), threaded chains and ensemble uncertainty (mean, median, std, 5–95 %). See [VFSA](inversion2d.md).
+- **2-D mesh tool** — inversion inputs from a data file and `topo.dat`, batch or GLMakie window. See [mesh tool](mesh2d.md).
 - **3-D ModEM data & model I/O** — full impedance-tensor + tipper reader/writer for ModEM and WS3D formats, apparent-resistivity/phase derivation, and χ²/RMS misfit evaluation.
 - **3-D VFSA inversion** — 3-D VFSA engine using ModEM as the external MPI-parallel forward solver, with RBF control-point parameterisation, padding decay, and multi-chain ensemble analysis.
 - **3-D model utilities** — headless core/padding detection, depth truncation, and core sub-array extraction (no GLMakie required).
@@ -28,14 +30,15 @@ julia --project=. -e 'using Pkg; Pkg.instantiate()'
 julia --project=. helpers/benchmarks_1D.jl
 julia --project=. helpers/benchmarks_2D.jl
 
-# 1-D forward response
+# 1-D forward response and inversion
 julia --project=. examples/run_fwd1D.jl
+julia --project=. examples/run_inv1D.jl GN
+julia --project=. examples/run_inv1D.jl VFSA
 
-# 2-D forward response
+# 2-D forward response, deterministic and VFSA inversion
 julia --project=. examples/run_fwd2D.jl
-
-# 2-D VFSA inversion
-julia --project=. examples/run_vfsa2D.jl
+julia --project=. examples/run_inv2D.jl GN
+julia --project=. -t 10 examples/run_vfsa2D.jl
 
 # 3-D VFSA inversion (requires ModEM + MPI on PATH)
 julia --project=. examples/run_vfsa3D.jl

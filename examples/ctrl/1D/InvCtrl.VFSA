@@ -1,0 +1,6 @@
+Algorithm                         : VFSA
+Mode                              : XYYX
+Exit search when rms is less than : 1
+Maximum number of iterations      : 2000
+Log10 resistivity bounds          : 0 4
+Number of chains                  : 10
