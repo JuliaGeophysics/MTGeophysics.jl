@@ -453,7 +453,8 @@ _same_grid(a::ModelFile2D, b::ModelFile2D) =
 function _inv2d_predicted(response::MT2DResponse, observed::DataFile2D, mode::Symbol)
     predicted = data_from_response2d(response; z_xy_error = observed.z_xy_error, z_yx_error = observed.z_yx_error,
         site_names = observed.site_names, x_positions = observed.x_positions, z_positions = observed.z_positions,
-        latitudes = observed.latitudes, longitudes = observed.longitudes, origin = observed.origin)
+        latitudes = observed.latitudes, longitudes = observed.longitudes, origin = observed.origin,
+        rotation = observed.rotation, rotations = observed.rotations)
     mode == :TE && (predicted.z_yx .= NaN)
     mode == :TM && (predicted.z_xy .= NaN)
     predicted
@@ -510,6 +511,17 @@ function _inv2d_summary_cells(io, s)
     end
 end
 
+# observed data in the fwd.ctrl strike frame
+function _inv2d_strike(data_path, fwd::FwdCtrl2D)
+    s = StrikeData2D(load_data2d(data_path), fwd.strike)
+    println("Strike: ", s.note)
+    s
+end
+
+# the rotated observed data as <stem>-r<ext> in the run folder, when rotated
+_inv2d_write_rotated(dir, data_path, s) =
+    s.rotation == 0 || write_data2d(_rotated_path(data_path, dir), s.data; full_tensor = true)
+
 _inv2d_components(mode) = mode == :TETM ? ["ZXY", "ZYX"] : mode == :TE ? ["ZXY"] : ["ZYX"]
 
 """
@@ -521,24 +533,28 @@ algorithm comes from `inv.ctrl`, the air from `fwd.ctrl`, and the inverted cells
 covariance mask (0 = air or fixed, 9 = water, fixed and unregularized, others free).
 Topographic air (model cells above 1e15 ohm m) must carry mask 0, and no station may
 stand over water. The prior is the reference model of the regularization. VFSA has its
-own five-file entry, `VFSA2D`.
+own five-file entry, `VFSA2D`. The data are first rotated to the `fwd.ctrl` strike
+(`Strike (deg)`, `auto` by default, see `StrikeData2D`).
 
 Everything is written to `run_dir`, by default `run_YYYYmmdd_HHMMSS/` next to the data:
-`model.rho` (ModEM layout, restartable), `data.pred`, `History.csv`, `Summary.txt`, and
-copies of the inputs in `inputs/`. Returns a named tuple with the run directory, mesh,
+`model.rho` (ModEM layout, restartable), `data.pred` (in the strike frame), `History.csv`,
+`Summary.txt`, copies of the inputs in `inputs/`, and when rotated the observed data in
+the strike frame as `<stem>-r<ext>` (`data.obs` gives `data-r.obs`). Returns a named tuple with the run directory, mesh,
 models, data, history, rms and termination reason.
 """
 function Invert2D(start_path::AbstractString, data_path::AbstractString, fwd_path::AbstractString,
                   inv_path::AbstractString, cov_path::AbstractString, prior_path::AbstractString;
                   run_dir::Union{Nothing, AbstractString} = nothing)
-    observed = load_data2d(data_path)
     fwd, ctrl, cov = ReadFwdCtrl2D(fwd_path), ReadInvCtrl2D(inv_path), ReadCov2D(cov_path)
+    strike = _inv2d_strike(data_path, fwd)
+    observed = strike.data
     start, prior = ReadModel2D(start_path), ReadModel2D(prior_path)
     _same_grid(start, prior) || error("the prior model must be on the start model's grid")
     s = _inv2d_file_setup(start, observed, fwd, cov.mask, "covariance mask")
     priormesh, ρref = Mesh2DFromInputs(prior, observed, fwd; warn = false)
     mt2d_topo_air(priormesh) == mt2d_topo_air(s.mesh) || error("the prior model's topography differs from the start model's")
     dir = _inv2d_open_run(run_dir, data_path, (start_path, data_path, fwd_path, inv_path, cov_path, prior_path))
+    _inv2d_write_rotated(dir, data_path, strike)
 
     options, algorithm = _inv2d_from_ctrl(ctrl)
     result = Invert2D(s.mesh, s.ρ0, observed; algorithm, options, active_cells = s.active, reference_resistivity = ρref,
@@ -551,6 +567,7 @@ function Invert2D(start_path::AbstractString, data_path::AbstractString, fwd_pat
     _inv2d_write_history(joinpath(dir, "History.csv"), result.history)
     open(joinpath(dir, "Summary.txt"), "w") do io
         println(io, "Algorithm: ", uppercase(string(ctrl.algorithm)))
+        println(io, "Strike: ", strike.note)
         println(io, "Termination: ", result.reason)
         println(io, "Converged: ", result.converged)
         @printf(io, "RMS: %.6f\n", fit.rms)
@@ -558,7 +575,7 @@ function Invert2D(start_path::AbstractString, data_path::AbstractString, fwd_pat
         println(io, "Accepted iterations: ", length(result.history) - 1)
         _inv2d_summary_cells(io, s)
     end
-    (; run_dir = dir, algorithm = ctrl.algorithm, ctrl, fwd, mesh = s.mesh, observed, predicted, start = s.ρ0,
+    (; run_dir = dir, algorithm = ctrl.algorithm, ctrl, fwd, strike = strike.strike, mesh = s.mesh, observed, predicted, start = s.ρ0,
        prior = ρref, final = result.resistivity, active = s.active, water = s.water, history = result.history,
        vfsa = nothing, rms = fit.rms, reason = result.reason, converged = result.converged)
 end

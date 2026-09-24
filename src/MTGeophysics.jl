@@ -16,6 +16,7 @@ using Proj
 #----- 3-D ModEM I/O and misfit (existing code) ---------------------------#
 
 include("Data.jl")
+include("Rotate.jl")
 include("Model.jl")
 include("Chi2RMS.jl")
 include("Distortion.jl")
@@ -65,6 +66,7 @@ end
 include("Control2D.jl")
 include("Mesh2D.jl")
 include("Fwd2D.jl")
+include("Strike2D.jl")
 include("Topo2D.jl")
 include("Fwd1D.jl")
 include("PlotModel2D.jl")
@@ -86,6 +88,7 @@ include("VFSA3DMT.jl")
 
 export Data, Model, ModEMData, ModEMModel
 export load_data_modem, write_data_modem, make_nan_data, calc_rho_pha
+export rotate_data, RotationStep
 export read_mackie3d_model, load_model_modem, write_model_modem
 export chi2_and_rms
 export chi2_and_rms_distorted, DistortionFit, write_distortion_file
@@ -149,6 +152,7 @@ export ForwardSolve1D, MakeMesh1D, mt1d_layers, mt1d_skin_depth, mt1d_impedance,
 export Invert1D, InvCtrl1D, ReadInvCtrl1D, WriteInvCtrl1D, PlotInversion1D
 export Mask2D, mt2d_ground, MakeMesh2D
 export ForwardSolve2D
+export EstimateStrike2D, RotateData2D, StrikeData2D, RotateToStrike2D
 
 
 export build_default_mt2d_mesh

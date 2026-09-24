@@ -2,6 +2,50 @@
 # Author: @pankajkmishra
 # This file loads MT data/response files, normalizes units and conventions, and computes derived fields.
 # It is the main place for Data structure creation plus resistivity/phase calculations.
+# Impedance units: the code expects [mV/km]/[nT] (the ModEM and EDI practical unit), converted to Ohm on read;
+# any other header unit is read unscaled, as Ohm, with a warning. Every file the package writes uses [mV/km]/[nT].
+# Rotation: the header angle is the azimuth of the data's x axis, degrees clockwise from geographic north; the steps
+# that led there (rotate_data) are kept on the block's first # line as "rotated: declination +9.50; mesh +30.00"
+
+"""
+    RotationStep
+
+One step of a data file's rotation history, see `rotate_data`.
+- `kind`: `:declination`, `:mesh` or `:strike`
+- `angle`: degrees clockwise, one value, or one per site in `sites`
+- `sites`: the site of each angle, empty for one angle for all sites
+"""
+struct RotationStep
+    kind::Symbol
+    angle::Vector{Float64}
+    sites::Vector{String}
+end
+
+RotationStep(kind::Symbol, angle::Real) = RotationStep(kind, [Float64(angle)], String[])
+
+Base.:(==)(a::RotationStep, b::RotationStep) = a.kind == b.kind && a.angle == b.angle && a.sites == b.sites
+
+# history text of the # line, and back
+function _rotation_text(steps::AbstractVector{RotationStep})
+    one(r) = isempty(r.sites) ? @sprintf("%s %+.2f", r.kind, r.angle[1]) :
+             string(r.kind, " [", join([@sprintf("%s %+.2f", s, a) for (s, a) in zip(r.sites, r.angle)], ", "), "]")
+    "rotated: " * join(one.(steps), "; ")
+end
+
+function _parse_rotations(line::AbstractString)
+    m = match(r"rotated:\s*(.*)$", line)
+    m === nothing && return RotationStep[]
+    map(split(m.captures[1], ';')) do entry
+        kind, rest = split(strip(entry); limit = 2)
+        rest = strip(rest)
+        if startswith(rest, "[")
+            pairs = split.(strip.(split(strip(rest, ['[', ']']), ',')))
+            RotationStep(Symbol(kind), [parse(Float64, p[2]) for p in pairs], [String(p[1]) for p in pairs])
+        else
+            RotationStep(Symbol(kind), parse(Float64, rest))
+        end
+    end
+end
 
 mutable struct Data
     T::Vector{Float64}
@@ -28,6 +72,7 @@ mutable struct Data
     origin::Vector{Float64}
     niter::String
     name::String
+    rotations::Vector{RotationStep}
 end
 
 function make_nan_data()
@@ -38,7 +83,7 @@ function make_nan_data()
         Array{Float64}(undef, 0, 0, 0), Array{Float64}(undef, 0, 0, 0),
         Array{Float64}(undef, 0, 0, 0), Array{Float64}(undef, 0, 0, 0),
         Array{ComplexF64}(undef, 0, 0, 0), Array{ComplexF64}(undef, 0, 0, 0),
-        Float64[], Float64[], Float64[], Float64[], "", ""
+        Float64[], Float64[], Float64[], Float64[], "", "", RotationStep[]
     )
 end
 
@@ -59,7 +104,14 @@ is_dataline(line::AbstractString) = begin
     occursin(r"^[\s\+\-\.0-9]", t)
 end
 
-function load_data_modem(path::AbstractString)
+"""
+    load_data_modem(path; warn_rotation=true) -> Data
+
+Read a ModEM data file. Impedances are expected in [mV/km]/[nT] and come out in Ohm,
+exp(+iωt); any other header unit is read unscaled, as Ohm, with a warning. A nonzero
+header rotation is kept in `zrot` and warned about unless `warn_rotation = false`.
+"""
+function load_data_modem(path::AbstractString; warn_rotation::Bool = true)
     println("Loading ModEM Data File: $path")
 
     μ0 = 4π * 1e-7
@@ -86,6 +138,7 @@ function load_data_modem(path::AbstractString)
     origins      = Vector{NTuple{2,Float64}}()
 
     hb = 0
+    rotations = nothing
 
     open(path, "r") do io
         while !eof(io)
@@ -95,6 +148,7 @@ function load_data_modem(path::AbstractString)
                 continue
             end
             if startswith(t, "#")
+                rotations === nothing && occursin("rotated:", t) && (rotations = _parse_rotations(t))
                 continue
             elseif startswith(t, ">")
                 hb += 1
@@ -180,13 +234,15 @@ function load_data_modem(path::AbstractString)
         end
     end
 
+    # [mV/km]/[nT] is the expected unit; anything else is taken as Ohm ("[]" is the tipper's)
     for u in header_units
         lu = lowercase(replace(strip(u), " " => ""))
         if lu == "[mv/km]/[nt]"
             d.Z    .*= (μ0 * 1000)
             d.Zerr .*= (μ0 * 1000)
             break
-        elseif lu == "[v/m]/[t]" || lu == "[]"
+        elseif lu != "[]"
+            @warn "impedance units '$(strip(u))' in $path read as Ohm without scaling; MTGeophysics expects [mV/km]/[nT]"
             break
         end
     end
@@ -206,7 +262,7 @@ function load_data_modem(path::AbstractString)
     end
 
     if !isempty(rotation)
-        if rotation[1] != 0
+        if rotation[1] != 0 && warn_rotation
             @warn "Caution: non-zero rotation in ModEM data file may cause issues." rotation=rotation[1]
         end
         d.zrot = fill(rotation[1], d.nf, d.ns)
@@ -243,6 +299,7 @@ function load_data_modem(path::AbstractString)
     end
 
     d.ρ, d.φ, d.ρerr, d.φerr = calc_rho_pha(d.Z, d.Zerr, d.T)
+    d.rotations = something(rotations, RotationStep[])
     return d
 end
 
@@ -409,6 +466,7 @@ function write_data_modem(outputfile::AbstractString, d::Data;
     units_val = conv.units
     impedance_scale = _impedance_output_scale(units_val)
 
+    isempty(d.rotations) || (description = string(description, " | ", _rotation_text(d.rotations)))
     origin_lat = length(d.origin) >= 1 ? d.origin[1] : 0.0
     origin_lon = length(d.origin) >= 2 ? d.origin[2] : 0.0
     w = maximum(length, d.site)

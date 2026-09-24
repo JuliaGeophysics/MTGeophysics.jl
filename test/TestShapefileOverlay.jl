@@ -1,3 +1,8 @@
+# Shapefile overlays
+# Author: @pankajkmishra
+# Ensures the .prj sidecar is found and its CRS detected, coordinate transforms fall back sensibly, geographic
+# shapes project correctly, and prepare_shapefiles skips bad entries
+
 @testset "Shapefile overlay utilities" begin
 
     @testset "prj sidecar and CRS detection" begin

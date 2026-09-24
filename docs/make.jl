@@ -11,6 +11,7 @@ makedocs(;
     pages = [
         "Home" => "index.md",
         "Getting Started"       => "getting_started.md",
+        "Data Rotation"         => "rotation.md",
         "1D Modelling and Inversion" => "forward1d.md",
         "2D Forward Modelling"  => "forward2d.md",
         "2D Topography"         => "topography2d.md",

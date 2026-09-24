@@ -402,20 +402,23 @@ end
 VFSA inversion from five files: the start model, the observed data, `fwd.ctrl`, the VFSA
 control (`InvCtrl.VFSA`) and `mask.ctrl` (0 = air or fixed, 9 = water, others free).
 There is no covariance and no prior: the start model is the centre of the search.
-Topographic air must carry mask 0, and no station may stand over water.
+Topographic air must carry mask 0, and no station may stand over water. The data are
+first rotated to the `fwd.ctrl` strike, as in `Invert2D`.
 
 Writes into `run_dir` (default `run_YYYYmmdd_HHMMSS/` next to the data) the ensemble
 mean as `model.rho` and its prediction as `data.pred`, the chains and ensemble in
 `vfsa/` (see the in-memory method) with the best chain's prediction as
-`vfsa/data.best.pred`, `Summary.txt` and the inputs. Returns a named tuple like the
+`vfsa/data.best.pred`, `Summary.txt`, the inputs and, when rotated, `<stem>-r<ext>`. Returns a named tuple like the
 six-file `Invert2D`, with the VFSA result in `vfsa`.
 """
 function VFSA2D(start_path::AbstractString, data_path::AbstractString, fwd_path::AbstractString,
                 vfsa_path::AbstractString, mask_path::AbstractString; run_dir::Union{Nothing, AbstractString} = nothing)
-    observed = load_data2d(data_path)
     fwd, ctrl, mask = ReadFwdCtrl2D(fwd_path), ReadVFSACtrl2D(vfsa_path), ReadMask2D(mask_path)
+    strike = _inv2d_strike(data_path, fwd)
+    observed = strike.data
     s = _inv2d_file_setup(ReadModel2D(start_path), observed, fwd, mask, "mask")
     dir = _inv2d_open_run(run_dir, data_path, (start_path, data_path, fwd_path, vfsa_path, mask_path))
+    _inv2d_write_rotated(dir, data_path, strike)
 
     vfsa = VFSA2D(s.mesh, s.ρ0, observed; config = VFSA2DConfig(ctrl), active_cells = s.active,
                   water_cells = any(s.water) ? s.water : nothing, run_dir = dir)
@@ -429,6 +432,7 @@ function VFSA2D(start_path::AbstractString, data_path::AbstractString, fwd_path:
     write_data2d(joinpath(dir, "vfsa", "data.best.pred"), _inv2d_predicted(vfsa.best_response, observed, ctrl.mode))
     open(joinpath(dir, "Summary.txt"), "w") do io
         println(io, "Algorithm: VFSA")
+        println(io, "Strike: ", strike.note)
         println(io, "Termination: ", reason)
         println(io, "Converged: ", converged)
         @printf(io, "RMS: %.6f\n", fit.rms)
@@ -441,7 +445,7 @@ function VFSA2D(start_path::AbstractString, data_path::AbstractString, fwd_path:
         end
         _inv2d_summary_cells(io, s)
     end
-    (; run_dir = dir, algorithm = :vfsa, ctrl, fwd, mesh = s.mesh, observed, predicted, start = s.ρ0, prior = nothing,
+    (; run_dir = dir, algorithm = :vfsa, ctrl, fwd, strike = strike.strike, mesh = s.mesh, observed, predicted, start = s.ρ0, prior = nothing,
        final = vfsa.resistivity, active = s.active, water = s.water, history = nothing, vfsa, rms = fit.rms, reason,
        converged)
 end

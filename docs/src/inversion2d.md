@@ -52,14 +52,14 @@ Control points                    : 400
 Trials per iteration              : 1
 Share of controls moved           : 0.2
 Step scale                        : 0.2
-Starting temperature              : 0.03
+Starting temperature              : 0.01
 Cooling ratio                     : 0.001
 RBF width top (cells)             : 2
 RBF width bottom (cells)          : 3
 Control depth power               : 0.2
-Core depth (skin depths)          : 1
+Core depth (skin depths)          : 2
 Core depth (layers)               : 0
-Core expansion (cells)            : 0
+Core expansion (cells)            : 4
 Padding decay (core cells)        : 8
 Random seed                       : 20260308
 Snapshot interval                 : 0

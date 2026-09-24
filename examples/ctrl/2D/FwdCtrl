@@ -1,4 +1,5 @@
 Mode                     : TETM
+Strike (deg)             : auto
 Air layers               : 10
 Air thickness (m)        : 50000
 Air growth factor        : 2

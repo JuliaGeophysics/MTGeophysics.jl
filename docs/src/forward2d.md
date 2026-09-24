@@ -12,11 +12,13 @@ a model, a data file and a forward control file in, `data.pred` out.
   (see [Topography](topography2d.md)).
 - **Data** (`data.dat`): ModEM Full_Impedance, ZXY = TE and ZYX = TM, `exp(+iωt)`,
   `[mV/km]/[nT]`, the same file 1D and 3D read. Y is the position along the profile,
-  Z the depth below the model top (0 on flat ground).
+  Z the depth below the model top (0 on flat ground). Impedances are expected in
+  `[mV/km]/[nT]`; a file in other units is read unscaled, as Ohm, with a warning.
 - **`fwd.ctrl`** (`examples/ctrl/2D/FwdCtrl`), required, it defines the air:
 
   ```text
   Mode                     : TETM
+  Strike (deg)             : auto
   Air layers               : 10
   Air thickness (m)        : 50000
   Air growth factor        : 2
@@ -26,7 +28,35 @@ a model, a data file and a forward control file in, `data.pred` out.
   ```
 
   `Write Frechet derivative : yes` also writes G = ∂d/∂m as `data.frechet`.
-  `Dipole length` only matters next to topographic steps.
+  `Dipole length` only matters next to topographic steps. `Strike (deg)` is described
+  below.
+
+## Strike
+
+The 2D codes put x along strike and y along the profile, so TE = ZXY and TM = ZYX only
+in the strike frame. Every 2D workflow (`ForwardSolve2D`, `Invert2D`, `VFSA2D`,
+`MakeMesh2D`) first rotates the data to the `fwd.ctrl` strike:
+
+- `Strike (deg) : auto` (the default, also when the key is absent) estimates it from the
+  data: the phase tensor strike α − β of every site and period with a full tensor,
+  averaged over 4θ (strike is defined modulo 90°) and weighted by the phase tensor
+  ellipticity, so 1D-like tensors count little. Of the two axes, the one closest to
+  perpendicular to the station line is the strike. Data without ZXX and ZYY, or 1D data,
+  keep the file frame.
+- `Strike (deg) : 32.5` sets it, in degrees clockwise from north, taken as given.
+
+The impedances are rotated as Z' = R Z Rᵀ with R = [cos θ sin θ; −sin θ cos θ], their
+errors propagated as independent variances, and the local station x, y rotated, so Y
+becomes the position across strike. Lat/lon and Z are unchanged. The angle is written
+to the rotation line of the ModEM header (`> 32.50`), the one ModEM itself uses for
+rotated data, and the turn is added to the file's history as a `strike` step (see
+[Data Rotation](rotation.md)). A file that is already rotated is turned by the difference, so passing
+the rotated file back in changes nothing.
+
+Inversions write the rotated observed data as `<stem>-r<ext>` in the run folder
+(`data.obs` gives `data-r.obs`) and the strike to `Summary.txt`; `data.pred` is in the
+same frame. `RotateToStrike2D("data.obs")` writes `data-r.obs` on its own. The mesh
+depends on the station positions, so rerun `MakeMesh2D` after changing the strike.
 
 ## Running
 
@@ -62,7 +92,7 @@ down to `depth_mult` δ(f_min)).
 
 `helpers/benchmarks_2D.jl` writes each case into `examples/data/<case>`. The data come from a
 fine mesh, while the start and prior models, `cov.ctrl` and `mask.ctrl` sit on a coarser
-inversion mesh, so there is no inverse crime. Stations `Fin001…` run E–W near Jyväskylä
+inversion mesh, so there is no inverse crime. Stations `TK01…` run E–W near Jyväskylä
 (62.25°N, 25.75°E), one every km. 2D-IV is the default.
 
 For 2D-IV the data mesh is the inversion mesh with every cell split 2 × 2, and each fine

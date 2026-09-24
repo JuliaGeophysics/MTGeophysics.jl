@@ -12,7 +12,7 @@ const _MAKEMESH2D_DEFAULTS = (
     cell_width_frac = 0.5, core_margin_cells = 4, n_pad = 12, pad_factor = 1.3,
     first_layer_div = 5.0, vertical_factor = 1.1, depth_mult = 4.0, background_resistivity = 0.0,
     air_layers = 10, air_thickness = 50_000.0, air_growth = 2.0, air_resistivity = 1e9, dipole_length = 100.0,
-    cov_smoothing = 0.3, n_smooth = 1, fixed_below_m = Inf, water_resistivity = 100.0,
+    cov_smoothing = 0.3, n_smooth = 1, fixed_below_m = Inf, water_resistivity = 100.0, strike = nothing,
 )
 
 # median apparent resistivity of the off-diagonal data, the default background
@@ -43,7 +43,8 @@ function _makemesh2d_build(data, topo, water, p)
     end
     mask = Mask2D(model; water = wet, fixed_below_m = p.fixed_below_m)
     fwd = FwdCtrl2D(mode = :TETM, air_layers = p.air_layers, air_thickness = p.air_thickness, air_growth = p.air_growth,
-                    air_resistivity = p.air_resistivity, dipole_length = p.dipole_length)
+                    air_resistivity = p.air_resistivity, dipole_length = p.dipole_length,
+                    strike = p.strike === nothing ? nothing : Float64(p.strike))
     mesh, _ = Mesh2DFromInputs(model, data, fwd; warn = false)
 
     # checks, as MakeMesh3D advises
@@ -77,9 +78,12 @@ function _makemesh2d_write(b, out_dir, p, ctrls, topo_given)
         fwd_path = WriteFwdCtrl2D(path("fwd.ctrl"), b.fwd),
         inv_path = (cp(ctrls.inv, path("inv.ctrl"); force = true); path("inv.ctrl")),
         vfsa_path = (cp(ctrls.vfsa, path("vfsa.ctrl"); force = true); path("vfsa.ctrl")),
-        data_path = topo_given ? write_data2d(path("data.dat"), b.data) : "",
+        data_path = !isempty(ctrls.rotated) ? write_data2d(ctrls.rotated, b.data; full_tensor = true) :
+                    topo_given ? write_data2d(path("data.dat"), b.data) : "",
     )
-    plot_mt2d_mesh(b.mesh; output_path = path("Mesh.png"), background_resistivity = b.ρbg)
+    water = b.mask .== MT2D_MASK_WATER
+    plot_mt2d_mesh(b.mesh; output_path = path("Mesh.png"), background_resistivity = b.ρbg, water)
+    plot_mt2d_mesh(b.mesh; output_path = path("MeshCore.png"), region = :core, background_resistivity = b.ρbg, water)
     paths
 end
 
@@ -100,11 +104,14 @@ Inversion inputs for a 2D data file, as `MakeMesh3D` does in 3D:
   with Z = depth below the model top;
 - `cov.ctrl` (GN, NLCG) from `Mask2D` (air 0, water 9, `fixed_below_m`), smoothing
   `cov_smoothing`, and the same mask as `mask.ctrl` (VFSA);
+- `strike`: `nothing` (auto) or degrees clockwise from north; the mesh is built on the
+  data rotated to it (`StrikeData2D`), and `fwd.ctrl` carries it as `Strike (deg)`;
 - `fwd.ctrl` with the air (`air_layers`, `air_thickness`, `air_growth`, `air_resistivity`)
   and `dipole_length`; `inv.ctrl` copied from `inv_ctrl`, `vfsa.ctrl` from `vfsa_ctrl`.
 
 Writes `model.start`, `model.prior` (the background), `cov.ctrl`, `mask.ctrl`, `fwd.ctrl`,
-`inv.ctrl`, `vfsa.ctrl`, `data.dat` (with topography) and `Mesh.png` into `out_dir`, and prints the mesh summary
+`inv.ctrl`, `vfsa.ctrl`, the data (`<stem>-r<ext>` when rotated, else `data.dat` with
+topography), `Mesh.png` and `MeshCore.png` into `out_dir`, and prints the mesh summary
 and advice. `mode = :gui` opens an interactive window (needs GLMakie and a display).
 """
 function MakeMesh2D(data_path::AbstractString; out_dir::AbstractString = dirname(abspath(data_path)),
@@ -115,10 +122,12 @@ function MakeMesh2D(data_path::AbstractString; out_dir::AbstractString = dirname
     p = merge(_MAKEMESH2D_DEFAULTS, values(kwargs))
     unknown = setdiff(keys(p), keys(_MAKEMESH2D_DEFAULTS))
     isempty(unknown) || throw(ArgumentError("unknown MakeMesh2D settings $unknown"))
-    data = load_data2d(data_path)
+    rotated = StrikeData2D(load_data2d(data_path), p.strike)
+    println("Strike: ", rotated.note)
+    data = rotated.data
     topo = isempty(topo_path) ? nothing : ReadTopo2D(topo_path)
     ReadInvCtrl2D(inv_ctrl); ReadVFSACtrl2D(vfsa_ctrl)
-    ctrls = (inv = inv_ctrl, vfsa = vfsa_ctrl)
+    ctrls = (inv = inv_ctrl, vfsa = vfsa_ctrl, rotated = rotated.rotation == 0 ? "" : _rotated_path(data_path, out_dir))
     if mode == :gui
         isdefined(@__MODULE__, :GLMakie) || error("the MakeMesh2D window needs GLMakie and a display; use mode = :batch")
         return _make_mesh2D_gui(data, topo, water, p, out_dir, ctrls)

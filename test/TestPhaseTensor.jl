@@ -1,3 +1,9 @@
+# Phase tensors and induction vectors
+# Author: @pankajkmishra
+# Ensures the phase tensor invariants are right for 1D, 2D and 3D impedances and singular or NaN input, induction
+# arrows follow the Parkinson and Wiese conventions, whole data sets convert, map symbols have the right geometry,
+# and the GIS export writes a PT and an IV shapefile per period
+
 @testset "Phase tensors and induction vectors" begin
 
     @testset "invariants" begin
@@ -49,7 +55,7 @@
         d.T = [1.0, 10.0]
         d.f = 1.0 ./ d.T
         d.nf = 2
-        d.site = ["S01", "S02", "S03"]
+        d.site = ["JK01", "JK02", "JK03"]
         d.ns = 3
         d.loc = [60.0 24.0 0.0; 60.1 24.2 0.0; 60.2 24.1 0.0]
         d.Z = Array{ComplexF64,3}(undef, d.nf, 4, d.ns)
@@ -116,7 +122,7 @@
         d.T = [1.0, 10.0]
         d.f = 1.0 ./ d.T
         d.nf = 2
-        d.site = ["S01", "S02"]
+        d.site = ["JK01", "JK02"]
         d.ns = 2
         d.loc = [60.0 24.0 0.0; 60.1 24.2 0.0]
         d.x = [0.0, 10000.0]

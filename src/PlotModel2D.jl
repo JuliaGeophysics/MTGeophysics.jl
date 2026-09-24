@@ -91,6 +91,26 @@ function _mt2d_ground_line!(axis, mesh, columns = eachindex(mesh.y_cell_sizes))
     nothing
 end
 
+# water cells of an earth-cell mask filled blue with their bed (bathymetry) outlined; offset and depth below
+# the model top in metres divided by `yunit` and `zunit` (1000 = km)
+function _mt2d_water!(axis, mesh, water; yunit = 1000, zunit = 1000)
+    (water === nothing || !any(water)) && return nothing
+    na = mesh.n_air_cells
+    y, z = mesh.y_nodes ./ yunit, (mesh.z_nodes .- mesh.z_nodes[na+1]) ./ zunit
+    wet = findall(water)
+    poly!(axis, [Rect2(y[i[2]], z[na+i[1]], y[i[2]+1] - y[i[2]], z[na+i[1]+1] - z[na+i[1]]) for i in wet];
+          color = :lightskyblue)
+    bed = [any(water[:, iy]) ? z[na+findlast(water[:, iy])+1] : NaN for iy in axes(water, 2)]
+    seg = Point2f[]
+    for iy in eachindex(bed)
+        isnan(bed[iy]) && continue
+        append!(seg, [Point2f(y[iy], bed[iy]), Point2f(y[iy+1], bed[iy])])
+        iy < length(bed) && !isnan(bed[iy+1]) && append!(seg, [Point2f(y[iy+1], bed[iy]), Point2f(y[iy+1], bed[iy+1])])
+    end
+    linesegments!(axis, seg; color = :steelblue4, linewidth = 1.2)
+    nothing
+end
+
 """
     PlotModel2D(model_path; output_path, show_grid=false, show_padding=true, maximum_depth_km=Inf,
                 resistivity_log10_range=(0.0, 4.0)) -> path
@@ -121,10 +141,11 @@ end
 #---------- mesh ----------
 
 """
-    plot_mt2d_mesh(mesh; output_path, region=:full, background_resistivity=100.0) -> path
+    plot_mt2d_mesh(mesh; output_path, region=:full, background_resistivity=100.0, water=nothing) -> path
 
 Cell edges with the air shaded, the core outlined and the skin depths of the lowest and
-highest frequency in `background_resistivity` marked. The core is found as in 3D:
+highest frequency in `background_resistivity` marked. `water` is a model-shaped mask of
+water cells (lakes, sea), filled blue with the bed line. The core is found as in 3D:
 laterally `core_indices` on the cell widths, and down to the layer boundary nearest the
 skin depth of the lowest frequency, as `z_indices_for_max_depth`; `region = :core` shows
 it only.
@@ -134,6 +155,7 @@ function plot_mt2d_mesh(
     output_path::AbstractString,
     region::Symbol = :full,
     background_resistivity::Real = 100.0,
+    water::Union{Nothing, AbstractMatrix{Bool}} = nothing,
 )
     region in (:full, :core) || error("region must be :full or :core")
     CairoMakie.activate!()
@@ -158,6 +180,7 @@ function plot_mt2d_mesh(
     axis = _mt_axis(figure[1, 1]; xlabel = "Offset (km)", ylabel = "Depth (km)", yreversed = true)
 
     region == :full && poly!(axis, Rect(ys[1], zs[1], ys[end] - ys[1], -zs[1]), color = :aliceblue)
+    _mt2d_water!(axis, mesh, water)
     vlines!(axis, ys, color = (:black, 0.35), linewidth = 0.6)
     hlines!(axis, zs, color = (:black, 0.35), linewidth = 0.6)
     region == :full && lines!(axis, [y_core[1], y_core[2], y_core[2], y_core[1], y_core[1]],

@@ -59,6 +59,7 @@ _ctrl_algorithm(s) = (a = Symbol(lowercase(strip(s))); a in (:gn, :nlcg) ? a :
                       throw(ArgumentError(a == :vfsa ? "VFSA runs through VFSA2D with its own control and mask.ctrl" :
                                           "algorithm must be GN or NLCG")))
 _ctrl_yesno(b::Bool) = b ? "yes" : "no"
+_ctrl_strike(s) = lowercase(strip(s)) == "auto" ? nothing : parse(Float64, s)
 _ctrl_vfsa_only(s) = throw(ArgumentError("log10 resistivity bounds apply to VFSA only; GN and NLCG are unbounded"))
 
 #---------- fwd.ctrl ----------
@@ -68,6 +69,9 @@ _ctrl_vfsa_only(s) = throw(ArgumentError("log10 resistivity bounds apply to VFSA
 
 Forward control, read from `fwd.ctrl`. There are no built-in defaults for the air.
 - `mode`: `:TE`, `:TM` or `:TETM`
+- `strike`: strike in degrees clockwise from north, the x axis of the 2D frame the data
+  are rotated into; `nothing` (`auto`, the default) estimates it from the data, see
+  `StrikeData2D`
 - `air_layers`, `air_thickness`: number and total thickness (m) of the air layers
 - `air_growth`: thickness ratio between successive air layers going up, 1 = uniform
 - `air_resistivity`: ohm metres
@@ -83,10 +87,12 @@ Base.@kwdef struct FwdCtrl2D
     air_resistivity::Float64
     write_frechet::Bool = false
     dipole_length::Float64 = 100.0
+    strike::Union{Nothing, Float64} = nothing
 end
 
 const _FWD_CTRL_SPEC = (
     "Mode"                     => (:mode, _ctrl_mode, true),
+    "Strike (deg)"             => (:strike, _ctrl_strike, false),
     "Air layers"               => (:air_layers, s -> parse(Int, s), true),
     "Air thickness (m)"        => (:air_thickness, s -> parse(Float64, s), true),
     "Air growth factor"        => (:air_growth, s -> parse(Float64, s), true),
@@ -101,13 +107,15 @@ function _validate_ctrl(c::FwdCtrl2D)
     c.air_growth >= 1 || throw(ArgumentError("air growth factor must be at least 1"))
     c.air_resistivity > 0 || throw(ArgumentError("air resistivity must be positive"))
     c.dipole_length >= 0 || throw(ArgumentError("dipole length must be nonnegative"))
+    c.strike === nothing || isfinite(c.strike) || throw(ArgumentError("strike must be auto or a finite angle"))
     c
 end
 
 """
     ReadFwdCtrl2D(path) -> FwdCtrl2D
 
-Read a 2D forward control file. Every air key is required.
+Read a 2D forward control file. Every air key is required; `Strike (deg)` is `auto`
+(the default) or an angle.
 """
 ReadFwdCtrl2D(path::AbstractString) = _validate_ctrl(FwdCtrl2D(; _read_ctrl(path, _FWD_CTRL_SPEC, "fwd.ctrl")...))
 
@@ -122,6 +130,7 @@ function WriteFwdCtrl2D(path::AbstractString, c::FwdCtrl2D)
     open(path, "w") do io
         _write_ctrl(io, [
             ("Mode", string(c.mode)),
+            ("Strike (deg)", c.strike === nothing ? "auto" : @sprintf("%.6g", c.strike)),
             ("Air layers", string(c.air_layers)),
             ("Air thickness (m)", @sprintf("%.6g", c.air_thickness)),
             ("Air growth factor", @sprintf("%.6g", c.air_growth)),

@@ -1,28 +1,10 @@
-# 2D topography: forward, Fréchet derivatives, model files, station snapping, regularization,
-# the topography builder and the six-file inversion with air and water
+# 2D topography
 # Author: @pankajkmishra
+# Ensures stations sit on the surface rows of a staircase ground, uniform topography equals a flat surface one row down,
+# models with topographic air round-trip and snap stations, Topography2D cuts in air, water and station columns (up or
+# down), and the trapezoidal hill of Wannamaker, Stodt & Rijo (1986) is reproduced
 
-using Test, LinearAlgebra, Random, SparseArrays
-
-# a small hill: no topographic air in the middle, one cell on the flanks, two outside;
-# the receivers sit on three surface rows, which share node rows
-function _hill_mesh()
-    base = BuildMesh2D(frequencies = [0.3, 3.0], y_core_range = (-750.0, 750.0), y_core_cell = 250.0,
-                       y_padding = 600.0, air_cells = 2, air_top = -1000.0, ground_layers = [50.0, 50.0, 100.0, 300.0, 900.0],
-                       receiver_positions = [-625.0, -375.0, -125.0, 125.0, 400.0, 600.0])
-    yc = (base.y_nodes[1:end-1] .+ base.y_nodes[2:end]) ./ 2
-    topo = [abs(y) < 300 ? 0 : abs(y) < 600 ? 1 : 2 for y in yc]
-    _remesh(base; topo_air = topo)
-end
-
-_remesh(m; kw...) = MT2DMesh(; (k => getfield(m, k) for k in fieldnames(MT2DMesh) if !haskey(kw, k))..., kw...)
-
-# E-W stations near Jyväskylä at profile positions y
-function _wgs(y)
-    trans = MTGeophysics.Proj.Transformation(MTGeophysics._local_tm_proj_string(62.25, 25.75), "EPSG:4326"; always_xy = true)
-    p = [trans(500_000.0 + yi, 0.0) for yi in y]
-    (latitudes = [q[2] for q in p], longitudes = [q[1] for q in p])
-end
+using Test, LinearAlgebra, Random
 
 @testset "2D topography" begin
     mesh = _hill_mesh()
@@ -52,34 +34,6 @@ end
         @test ApplyFrechetTranspose2D(shifted, ρ, w) ≈ ApplyFrechetTranspose2D(flat, ρ, w)
     end
 
-    # TM surface fields next to air involve tiny currents times ρ_air, so the finite-difference
-    # check uses 1e6 ohm m air to keep its noise below the tolerance
-    @testset "Fréchet derivatives with topography" begin
-        mesh = _remesh(mesh; air_resistivity = 1e6)
-        response = run_mt2d_forward(mesh, ρ)
-        @test all(k -> all(isfinite, getproperty(response, k)), fields)
-        direction = randn(rng, size(ρ))
-        h = 1e-4
-        for mode in (:TE, :TM, :TETM)
-            tangent = ApplyFrechet2D(mesh, ρ, direction; mode, parameterization = :log_resistivity)
-            rp = run_mt2d_forward(mesh, ρ .* exp.(h * direction); mode)
-            rm = run_mt2d_forward(mesh, ρ .* exp.(-h * direction); mode)
-            for key in fields
-                fd = (getproperty(rp, key) - getproperty(rm, key)) / (2h)
-                @test getproperty(tangent, key) ≈ fd rtol = 2e-5 atol = 1e-10
-            end
-            weights = NamedTuple{fields}((randn(rng, 2, 6), randn(rng, 2, 6), randn(rng, ComplexF64, 2, 6),
-                                          randn(rng, 2, 6), randn(rng, 2, 6), randn(rng, ComplexF64, 2, 6)))
-            gradient = ApplyFrechetTranspose2D(mesh, ρ, weights; mode, parameterization = :log_resistivity)
-            @test dot(gradient, direction) ≈ sum(real(dot(getproperty(weights, k), getproperty(tangent, k))) for k in fields) rtol = 1e-8
-            @test all(iszero, gradient[air])
-        end
-        hilltop_air = CartesianIndex(3, findfirst(>(0), mesh.topo_air))
-        G = FrechetDerivative2D(mesh, ρ; active_cells = [hilltop_air, CartesianIndex(6, 4)])
-        @test all(iszero, G.z_xy[:, 1]) && all(iszero, G.z_yx[:, 1]) && any(!iszero, G.z_xy[:, 2])
-        @test FrechetDerivative2D(mesh, ρ; active_cells = findall(.!air)[1:2]).cells == findall(.!air)[1:2]
-    end
-
     @testset "model files and station snapping" begin
         mktempdir() do dir
             path = WriteModel2D(joinpath(dir, "topo.rho"), mesh, ρ)
@@ -87,7 +41,7 @@ end
             @test count(>(1e15), model.resistivity) == sum(mesh.topo_air)
             fwd = FwdCtrl2D(mode = :TETM, air_layers = 2, air_thickness = 1000.0, air_growth = 1.0, air_resistivity = 1e9)
             data = (receivers = mesh.receiver_positions, frequencies = mesh.frequencies,
-                    z_positions = mt2d_receiver_depths(mesh), site_names = ["S$i" for i in 1:6])
+                    z_positions = mt2d_receiver_depths(mesh), site_names = ["TK" * lpad(i, 2, '0') for i in 1:6])
             m2, r2 = @test_logs Mesh2DFromInputs(model, data, fwd)
             @test m2.topo_air == mesh.topo_air && all(r2[mt2d_air_mask(m2)] .== 1e9)
             @test run_mt2d_forward(m2, r2).z_xy ≈ run_mt2d_forward(mesh, ρ).z_xy rtol = 1e-4
@@ -97,22 +51,6 @@ end
             stray.resistivity[end, 1] = 1e17
             @test_throws ArgumentError Mesh2DFromInputs(stray, data, fwd)
         end
-    end
-
-    @testset "regularization skips air and water" begin
-        water = falses(size(ρ)); water[5:6, 1] .= true
-        excluded = air .| water
-        R = MTGeophysics._inv2d_regularizer(mesh, ρ, Inv2DOptions(); excluded)
-        @test nnz(R[:, findall(vec(excluded))]) == 0
-        @test nnz(R[:, findall(vec(.!excluded))]) > 0
-
-        observed = data_from_response2d(run_mt2d_forward(mesh, ρ))
-        start = build_mt2d_halfspace_model(mesh)
-        result = Invert2D(mesh, start, observed; algorithm = GaussNewton2DConfig(),
-                          options = Inv2DOptions(max_iter = 2, target_rms = 0.0, verbose = false), water_cells = water)
-        @test all(c -> !air[c] && !water[c], result.active_cells)
-        @test result.resistivity[water] == start[water]
-        @test result.history[end].rms < result.history[1].rms
     end
 
     # published behaviour of the trapezoidal hill of Wannamaker, Stodt & Rijo (1986): 450 m high, 2 km base,
@@ -145,19 +83,8 @@ end
         @test maximum(abs.(r.rho_xy[1, :] ./ reverse(r.rho_xy[1, :]) .- 1)) < 0.02
     end
 
-    @testset "topography builder and six-file inversion" begin
-        stations = collect(-400.0:200.0:400.0)
-        elevation(y) = 100 + 60exp(-(y / 300)^2) - 40exp(-((y + 800) / 100)^2)
-        ty = collect(-1500.0:50.0:1500.0)
-        topo = Topo2D(; _wgs(ty)..., elevations = elevation.(ty))
-        data = (; receivers = stations, frequencies = [1.0, 10.0], z_positions = zeros(5), site_names = ["JYV$i" for i in 1:5],
-                  _wgs(stations)..., origin = [62.25, 25.75])
-        model = ModelFile2D(title = "", x_cell_sizes = [1.0], y_cell_sizes = fill(100.0, 20),
-                            z_cell_sizes = vcat(fill(20.0, 10), [50.0, 100.0, 200.0, 400.0, 800.0]),
-                            resistivity = fill(100.0, 15, 20), n_air_cells = 0, origin = [0.0, -1000.0, 0.0],
-                            rotation = 0.0, format = "LOGE")
-        lake = (y_range = (-950.0, -700.0), level = 105.0)
-
+    @testset "topography builder" begin
+        (; stations, elevation, ty, topo, data, model, lake) = _topo_case()
         mktempdir() do dir
             topopath = WriteTopo2D(joinpath(dir, "topo.dat"), topo)
             back = ReadTopo2D(topopath)
@@ -178,43 +105,16 @@ end
             m, r = @test_logs Mesh2DFromInputs(t.model, t.data, fwd)
             @test all(o -> abs(o.offset) <= o.tolerance, mt2d_station_offsets(m, t.data))
 
-            # six-file run: water and air fixed, bad masks refused
-            observed = data_from_response2d(run_mt2d_forward(m, r); site_names = t.data.site_names,
-                                            z_positions = t.data.z_positions, latitudes = data.latitudes,
-                                            longitudes = data.longitudes, origin = data.origin)
-            paths = (start = WriteModel2D(joinpath(dir, "model.start"), model.y_cell_sizes, model.z_cell_sizes, t.model.resistivity),
-                     data = write_data2d(joinpath(dir, "data.dat"), observed),
-                     fwd = WriteFwdCtrl2D(joinpath(dir, "fwd.ctrl"), fwd),
-                     inv = WriteInvCtrl2D(joinpath(dir, "inv.ctrl"), InvCtrl2D(algorithm = :gn, lambda = 1.0, target_rms = 0.0, max_iter = 1)),
-                     cov = WriteCov2D(joinpath(dir, "cov.ctrl"), Cov2D(sy = fill(0.3, 15), sz = 0.3, n_smooth = 1, mask = t.mask)))
-            run = Invert2D(paths.start, paths.data, paths.fwd, paths.inv, paths.cov, paths.start; run_dir = joinpath(dir, "run"))
-            @test count(run.water) == 4 && !any(run.active .& (run.water .| mt2d_air_mask(run.mesh)))
-            @test run.final[run.water] == run.start[run.water]
-            summary = read(joinpath(dir, "run", "Summary.txt"), String)
-            @test occursin("Water cells: 4", summary) && occursin("Station snapping", summary)
-            @test count(>(1e15), ReadModel2D(joinpath(dir, "run", "model.rho")).resistivity) == count(==(0), t.mask)
-
-            # vfsa from five files with mask.ctrl: air, water and fixed cells stay, the ensemble is written
-            vctrl = WriteVFSACtrl2D(joinpath(dir, "vfsa.ctrl"), VFSACtrl2D(target_rms = 0.0, max_iter = 3, chains = 2,
-                                                                          control_points = 10))
-            mpath = WriteMask2D(joinpath(dir, "mask.ctrl"), t.mask)
-            vrun = VFSA2D(paths.start, paths.data, paths.fwd, vctrl, mpath; run_dir = joinpath(dir, "vrun"))
-            fixed = .!vrun.active
-            @test vrun.final[fixed] ≈ vrun.start[fixed]
-            @test count(vrun.water) == 4 && occursin("Water cells: 4", read(joinpath(dir, "vrun", "Summary.txt"), String))
-            @test length(vrun.vfsa.chains) == 2 && all(isfinite, vrun.vfsa.ensemble.std)
-            @test all(isfile, joinpath.(dir, "vrun", "vfsa", ["model.mean.rho", "Uncertainty.csv", "chain_01/best.rho", "data.best.pred"]))
-            @test count(>(1e15), ReadModel2D(joinpath(dir, "vrun", "model.rho")).resistivity) == count(==(0), t.mask)
-            WriteMask2D(mpath, ones(Int, 15, 20))
-            @test_throws ErrorException VFSA2D(paths.start, paths.data, paths.fwd, vctrl, mpath; run_dir = joinpath(dir, "bad0"))
-
-            WriteCov2D(paths.cov, Cov2D(sy = fill(0.3, 15), sz = 0.3, n_smooth = 1, mask = ones(Int, 15, 20)))
-            @test_throws ErrorException Invert2D(paths.start, paths.data, paths.fwd, paths.inv, paths.cov, paths.start;
-                                                 run_dir = joinpath(dir, "bad1"))
-            wet = copy(t.mask); wet[end, 11] = 9       # under the station at y = 0
-            WriteCov2D(paths.cov, Cov2D(sy = fill(0.3, 15), sz = 0.3, n_smooth = 1, mask = wet))
-            @test_throws ErrorException Invert2D(paths.start, paths.data, paths.fwd, paths.inv, paths.cov, paths.start;
-                                                 run_dir = joinpath(dir, "bad2"))
+            # a station in a dip narrower than its column lowers that column's ground, not only raises it
+            dip(y) = 100 - 60exp(-((y + 90) / 15)^2)
+            fine = collect(-1500.0:5.0:1500.0)
+            sy = [-400.0, -90.0, 300.0]
+            ddata = (; receivers = sy, frequencies = [1.0, 10.0], z_positions = zeros(3), site_names = ["TK01", "TK02", "TK03"],
+                       _wgs(sy)..., origin = [62.25, 25.75])
+            dt = Topography2D(model, ddata, Topo2D(; _wgs(fine)..., elevations = dip.(fine)))
+            @test all(dt.mask[1:3, 10] .== 0) && dt.mask[4, 10] == 1 && all(dt.mask[1, [9, 11]] .== 1)
+            dm, _ = @test_logs Mesh2DFromInputs(dt.model, dt.data, fwd)
+            @test all(o -> abs(o.offset) <= o.tolerance, mt2d_station_offsets(dm, dt.data))
         end
     end
 end

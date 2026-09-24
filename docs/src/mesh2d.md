@@ -2,8 +2,10 @@
 
 `MakeMesh2D` writes the inversion inputs for a 2D data file, as `MakeMesh3D` does in 3D:
 `model.start`, `model.prior`, `cov.ctrl` and `inv.ctrl` (GN, NLCG), `mask.ctrl` and
-`vfsa.ctrl` (VFSA), `fwd.ctrl`, `Mesh.png`, and, with topography, `data.dat` with the
-station depths.
+`vfsa.ctrl` (VFSA), `fwd.ctrl`, `Mesh.png` (full mesh) and `MeshCore.png` (core), and
+the data: rotated to the strike as `<stem>-r<ext>`, or, with topography only, `data.dat`
+with the station depths. The mesh is built on the data rotated to the strike (see
+[Strike](forward2d.md#strike)), and `fwd.ctrl` carries the `strike` setting.
 
 ```bash
 julia --project=. examples/make_mesh2D.jl data.dat topo.dat out_dir          # GLMakie window
@@ -29,16 +31,22 @@ MakeMesh2D("data.dat"; out_dir = "mesh", topo_path = "topo.dat",
 | `cov_smoothing`, `n_smooth` | 0.3, 1 | smoothing values kept in the ModEM covariance layout |
 | `fixed_below_m` | Inf | fix cells below this depth (mask 0) |
 | `water_resistivity` | 100 | lakes and sea |
+| `strike` | `nothing` | `nothing` = auto from the data, or degrees clockwise from north; written to `fwd.ctrl` |
 | `inv_ctrl` | `examples/ctrl/2D/InvCtrl.GN` | copied as `inv.ctrl` |
 | `vfsa_ctrl` | `examples/ctrl/2D/InvCtrl.VFSA` | copied as `vfsa.ctrl` |
 
 The core is centred on y = 0 (the data's origin), as ModEM expects. The tool prints the
 mesh summary and advice: more than one station per cell, padding shorter than δ(f_min),
 a first layer thicker than δ(f_max)/3, a model shallower than δ(f_min), stations snapping
-by more than half a cell.
+by more than half a cell. With topography, each station column takes the layer boundary
+nearest its station, up or down, so a station in a narrow dip lowers its column's ground
+(see [Topography](topography2d.md)). Lakes and sea are drawn in the mesh plots, filled
+blue with their bed (bathymetry) outlined.
 
 In `mode = :gui` (GLMakie with a display) each setting is a slider with a live preview of
-the mesh, the ground, the stations and δ(f_min); **Save inputs** writes the files.
+the mesh, the ground, the water, the stations and δ(f_min). **Show full** / **Show core**
+switches the preview between the whole mesh and the core, as in `MakeMesh3D`, and
+**Save inputs** writes the files.
 
 ## Masks
 

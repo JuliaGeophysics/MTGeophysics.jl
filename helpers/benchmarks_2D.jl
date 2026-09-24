@@ -29,7 +29,7 @@ const DEFAULT_CASES = ["2D-IV"]
 const SURVEY = (
     origin         = (62.25, 25.75),                  # WGS84 lat, lon of local (0, 0)
     crs            = "EPSG:3067",                     # ETRS-TM35FIN, metric grid for the site positions
-    site_prefix    = "Fin",
+    site_prefix    = "TK",
     receivers      = collect(-8250.0:1000.0:8250.0),
     frequencies    = 10 .^ range(-1, 3, length = 17), # 0.1-1000 Hz, 4 per decade
     error_fraction = 0.05,                            # impedance error, fraction of |Z|
@@ -93,7 +93,7 @@ function survey_template(y::AbstractVector{<:Real} = SURVEY.receivers)
     coords = survey_coordinates(y)
     nan = fill(NaN, nf, ns)
     DataFile2D(title = "2D survey template", periods = 1 ./ f, frequencies = f,
-               site_names = [@sprintf("%s%03d", SURVEY.site_prefix, i) for i in 1:ns],
+               site_names = [@sprintf("%s%02d", SURVEY.site_prefix, i) for i in 1:ns],
                receivers = collect(Float64, y), x_positions = zeros(ns), z_positions = zeros(ns),
                z_xy = zeros(ComplexF64, nf, ns), z_xy_error = fill(SURVEY.error_fraction, nf, ns),
                z_yx = zeros(ComplexF64, nf, ns), z_yx_error = fill(SURVEY.error_fraction, nf, ns),

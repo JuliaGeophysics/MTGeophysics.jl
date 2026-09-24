@@ -1,89 +1,21 @@
-using Test, LinearAlgebra, Random
+# 2D deterministic inversion
+# Author: @pankajkmishra
+# Ensures Gauss-Newton and NLCG recover a buried conductor with a falling objective, honour fixed cells, modes,
+# regularization and masked data, refuse bad settings, share one driver whose adjoint Jacobian and gradient match
+# the explicit ones, and keep topographic air and water out of the model and its regularization
 
-@testset "2D skin-depth mesh" begin
-    f = [0.1, 1.0, 10.0]
-    δ = mt2d_skin_depth(100.0, 0.1)
-    @test δ ≈ 503.29*sqrt(100/0.1) rtol=1e-4
-    layers = mt2d_skin_depth_layers(f; background_resistivity=100.0, z_core_cell=250.0)
-    core = findall(==(250.0), layers)
-    @test core == 1:length(core)
-    @test sum(layers[core]) >= δ && sum(layers[core]) < δ + 250
-    @test sum(layers) >= 4δ
-    @test all(diff(layers[length(core):end]) .> 0)
-    mesh = BuildMesh2D(frequencies=f)
-    @test mesh.z_cell_sizes[mesh.n_air_cells+1:end] ≈ mt2d_skin_depth_layers(f)
-end
+using Test, LinearAlgebra, Random, SparseArrays
 
-@testset "2D Fréchet derivatives and Gauss-Newton" begin
+@testset "2D deterministic inversion" begin
     mesh = BuildMesh2D(frequencies=[0.3, 3.0], y_core_range=(-500.,500.),
         y_core_cell=250., y_padding=500., air_cells=2, air_top=-1000.,
         ground_layers=[100.,300.,900.], receiver_positions=[-375.,125.,400.])
-    rho = build_mt2d_halfspace_model(mesh)
-    rng = MersenneTwister(127)
-    rho[3:end,:] .*= exp.(0.3randn(rng, size(rho,1)-2, size(rho,2)))
-    direction = randn(rng, size(rho))
-    fields = (:rho_xy, :phase_xy, :z_xy, :rho_yx, :phase_yx, :z_yx)
-    h = 1e-4
-
-    @testset "Directional derivatives, all response fields and modes" begin
-        for mode in (:TE, :TM, :TETM)
-            tangent = ApplyFrechet2D(mesh, rho, direction; mode, parameterization=:log_resistivity)
-            rp = run_mt2d_forward(mesh, rho .* exp.(h*direction); mode)
-            rm = run_mt2d_forward(mesh, rho .* exp.(-h*direction); mode)
-            for key in fields
-                fd = (getproperty(rp,key) - getproperty(rm,key))/(2h)
-                @test getproperty(tangent,key) ≈ fd rtol=2e-5 atol=1e-10
-            end
-            weights = (rho_xy=randn(rng,2,3), phase_xy=randn(rng,2,3),
-                z_xy=randn(rng,ComplexF64,2,3), rho_yx=randn(rng,2,3),
-                phase_yx=randn(rng,2,3), z_yx=randn(rng,ComplexF64,2,3))
-            gradient = ApplyFrechetTranspose2D(mesh, rho, weights; mode, parameterization=:log_resistivity)
-            @test dot(gradient,direction) ≈ sum(real(dot(getproperty(weights,k),getproperty(tangent,k))) for k in fields) rtol=1e-8
-            @test all(iszero,gradient[1:mesh.n_air_cells,:])
-        end
-    end
-
-    @testset "Fréchet ordering, boundaries, parameterizations and fixed air" begin
-        cells = [CartesianIndex(3,1), CartesianIndex(5,size(rho,2)),
-                 CartesianIndex(3,4), CartesianIndex(4,5), CartesianIndex(1,2)]
-        for parameterization in (:resistivity,:log_resistivity,:log10_resistivity)
-            sens = FrechetDerivative2D(mesh,rho;active_cells=cells,parameterization)
-            @test sens.cells == cells
-            @test size(sens.z_xy) == (6,5)
-            for (j,cell) in enumerate(cells)
-                plus, minus = copy(rho), copy(rho)
-                if parameterization == :resistivity
-                    plus[cell] += h; minus[cell] -= h
-                elseif parameterization == :log_resistivity
-                    plus[cell] *= exp(h); minus[cell] *= exp(-h)
-                else
-                    plus[cell] *= 10.0^h; minus[cell] *= 10.0^-h
-                end
-                rp,rm = run_mt2d_forward(mesh,plus),run_mt2d_forward(mesh,minus)
-                for key in (:z_xy,:z_yx)
-                    fd = vec(getproperty(rp,key)-getproperty(rm,key))/(2h)
-                    @test getproperty(sens,key)[:,j] ≈ fd rtol=2e-4 atol=1e-10
-                end
-            end
-            @test all(iszero,sens.z_xy[:,end])
-            @test all(iszero,sens.z_yx[:,end])
-        end
-        air = zeros(size(rho)); air[1:2,:] .= 1
-        @test all(k -> all(iszero,getproperty(ApplyFrechet2D(mesh,rho,air),k)),fields)
-        @test all(iszero,ApplyFrechetTranspose2D(mesh,rho,(;)))
-        @test_throws ArgumentError run_mt2d_forward(mesh,rho;mode=:bad)
-        @test_throws ArgumentError ApplyFrechet2D(mesh,rho,direction;parameterization=:bad)
-        @test_throws DimensionMismatch ApplyFrechet2D(mesh,rho,zeros(2,2))
-        @test_throws DimensionMismatch FrechetDerivative2D(mesh,rho;active_cells=falses(2,2))
-        bad = copy(rho); bad[3,2] = -1
-        @test_throws ArgumentError run_mt2d_forward(mesh,bad)
-    end
 
     @testset "Synthetic recovery, objective descent, bounds and fixed cells" begin
         initial = build_mt2d_halfspace_model(mesh)
         truth = copy(initial); truth[3:4,4:5] .= 40
         observed = data_from_response2d(run_mt2d_forward(mesh,truth);impedance_error_fraction=0.03)
-        mask = falses(size(rho)); mask[3:4,4:5] .= true
+        mask = falses(size(initial)); mask[3:4,4:5] .= true
         opts = Inv2DOptions(beta=0.001,max_iter=10,target_rms=0.01,verbose=false)
         result = GaussNewton2D(mesh,initial,observed;options=opts,active_cells=mask)
         @test result.converged
@@ -162,4 +94,25 @@ end
             @test_throws ArgumentError NLCG2D(mesh,initial,observed;config=NLCG2DConfig(restart=0))
         end
     end
+end
+
+@testset "2D inversion with topographic air and water" begin
+    mesh = _hill_mesh()
+    air = mt2d_air_mask(mesh)
+    rng = MersenneTwister(4)
+    ρ = build_mt2d_halfspace_model(mesh)
+    ρ[3:end, :] .*= exp.(0.3randn(rng, size(ρ, 1) - 2, size(ρ, 2)))
+    water = falses(size(ρ)); water[5:6, 1] .= true
+    excluded = air .| water
+    R = MTGeophysics._inv2d_regularizer(mesh, ρ, Inv2DOptions(); excluded)
+    @test nnz(R[:, findall(vec(excluded))]) == 0
+    @test nnz(R[:, findall(vec(.!excluded))]) > 0
+
+    observed = data_from_response2d(run_mt2d_forward(mesh, ρ))
+    start = build_mt2d_halfspace_model(mesh)
+    result = Invert2D(mesh, start, observed; algorithm = GaussNewton2DConfig(),
+                      options = Inv2DOptions(max_iter = 2, target_rms = 0.0, verbose = false), water_cells = water)
+    @test all(c -> !air[c] && !water[c], result.active_cells)
+    @test result.resistivity[water] == start[water]
+    @test result.history[end].rms < result.history[1].rms
 end

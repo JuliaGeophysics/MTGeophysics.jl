@@ -323,7 +323,8 @@ function Invert1D(data_path::AbstractString, inv_path::AbstractString, meshes = 
                         rho_xy = zeros(size(Z)), phase_xy = zeros(size(Z)), rho_yx = zeros(size(Z)), phase_yx = zeros(size(Z)),
                         latitudes = isempty(observed.latitudes) ? Float64[] : observed.latitudes[picked],
                         longitudes = isempty(observed.longitudes) ? Float64[] : observed.longitudes[picked],
-                        origin = observed.origin)
+                        origin = observed.origin, rotation = observed.rotation,
+                        rotations = observed.rotations)
     predicted = _mt1d_predicted(survey, reduce(hcat, [mt1d_impedance(f, r.final, r.thicknesses) for r in results]); fractional = false)
     ctrl.mode in (:XY, :DET) && (predicted.z_yx .= NaN)
     ctrl.mode == :YX && (predicted.z_xy .= NaN)

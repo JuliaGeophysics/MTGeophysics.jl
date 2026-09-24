@@ -72,7 +72,9 @@ end
 2D impedance data, each field `(frequency, site)`: TE = ZXY and TM = ZYX with their
 errors (ohm, exp(+iωt)), derived apparent resistivity and phase, site names, local
 positions (`receivers` along the profile, `x_positions`, `z_positions`), WGS84
-`latitudes`/`longitudes` and the survey `origin` (lat, lon).
+`latitudes`/`longitudes`, the survey `origin` (lat, lon) and the `rotation` of the
+x axis, degrees clockwise from north (the ModEM header's; the strike, see `StrikeData2D`),
+and the `rotations` that led there (`RotationStep`s, see `rotate_data`).
 """
 Base.@kwdef struct DataFile2D
     title::String
@@ -98,6 +100,8 @@ Base.@kwdef struct DataFile2D
     latitudes::Vector{Float64} = Float64[]
     longitudes::Vector{Float64} = Float64[]
     origin::Vector{Float64} = [0.0, 0.0]
+    rotation::Float64 = 0.0
+    rotations::Vector{RotationStep} = RotationStep[]
 end
 
 # chi2 over real data (Re and Im count separately), rms = sqrt(chi2 / count)
@@ -686,7 +690,7 @@ end
 """
     data_from_response2d(response; z_xy_error, z_yx_error, z_xx_error, z_yy_error,
                          impedance_error_fraction=0.05, title, site_names, x_positions,
-                         z_positions, latitudes, longitudes, origin) -> DataFile2D
+                         z_positions, latitudes, longitudes, origin, rotation, rotations) -> DataFile2D
 
 Data from a forward response. Missing errors default to `impedance_error_fraction`
 of |Z|, missing sites to `Site001`… at x = z = 0.
@@ -705,6 +709,8 @@ function data_from_response2d(
     latitudes::AbstractVector{<:Real} = Float64[],
     longitudes::AbstractVector{<:Real} = Float64[],
     origin::AbstractVector{<:Real} = [0.0, 0.0],
+    rotation::Real = 0.0,
+    rotations::AbstractVector{RotationStep} = RotationStep[],
 )
     n_f, n_r = size(response.z_xy)
     sites = site_names === nothing ? [@sprintf("Site%03d", i) for i in 1:n_r] : String.(site_names)
@@ -739,6 +745,8 @@ function data_from_response2d(
         latitudes = Float64.(latitudes),
         longitudes = Float64.(longitudes),
         origin = Float64.(origin),
+        rotation = Float64(rotation),
+        rotations = collect(rotations),
     )
     size(data.z_xy_error) == size(data.z_xy) || error("z_xy_error does not match z_xy size")
     size(data.z_yx_error) == size(data.z_yx) || error("z_yx_error does not match z_yx size")
@@ -765,17 +773,19 @@ function _resolve_forwardsolve2d_errors(template::DataFile2D, response::MT2DResp
 end
 
 """
-    write_data2d(path, data_or_response; impedance_error_fraction=0.05) -> path
+    write_data2d(path, data_or_response; impedance_error_fraction=0.05, full_tensor=false) -> path
 
-Write 2D impedances as a ModEM Full_Impedance file, ZXY (TE) and ZYX (TM) only,
-exp(+iωt), [mV/km]/[nT], through `write_data_modem`, so 1D, 2D and 3D codes read
-the same file. Sites keep their lat/lon, local x, y (profile) and z (depth).
+Write 2D impedances as a ModEM Full_Impedance file, ZXY (TE) and ZYX (TM), exp(+iωt),
+[mV/km]/[nT], through `write_data_modem`, so 1D, 2D and 3D codes read the same file.
+`full_tensor` also writes the finite ZXX and ZYY. Sites keep their lat/lon, local x,
+y (profile) and z (depth); the header rotation is the data's.
 """
 function write_data2d(
     path::AbstractString,
     response_or_data;
     impedance_error_fraction::Real = 0.05,
     title::AbstractString = "MTGeophysics.jl 2D profile data",
+    full_tensor::Bool = false,
 )
     data = response_or_data isa DataFile2D ?
         response_or_data :
@@ -787,23 +797,30 @@ function write_data2d(
     Z[:, 3, :] .= data.z_yx
     Zerr[:, 2, :] .= data.z_xy_error
     Zerr[:, 3, :] .= data.z_yx_error
+    if full_tensor
+        Z[:, 1, :], Z[:, 4, :] = data.z_xx, data.z_yy
+        Zerr[:, 1, :], Zerr[:, 4, :] = data.z_xx_error, data.z_yy_error
+    end
     coord(v) = isempty(v) ? zeros(ns) : Float64.(v)
     d = make_nan_data()
     d.T, d.f = Float64.(data.periods), Float64.(data.frequencies)
     d.site, d.ns, d.nf = String.(data.site_names), ns, nf
-    d.responses, d.nr = ["ZXY", "ZYX"], 2
+    d.responses = full_tensor ? ["ZXX", "ZXY", "ZYX", "ZYY"] : ["ZXY", "ZYX"]
+    d.nr = length(d.responses)
     d.loc = hcat(coord(data.latitudes), coord(data.longitudes), Float64.(data.z_positions))
     d.x, d.y, d.z = Float64.(data.x_positions), Float64.(data.receivers), Float64.(data.z_positions)
     d.Z, d.Zerr = Z, Zerr
     d.tip = fill(ComplexF64(NaN, NaN), nf, 2, ns)
     d.tiperr = copy(d.tip)
-    d.zrot = zeros(nf, ns)
+    d.zrot = fill(data.rotation, nf, ns)
     d.trot = d.zrot
+    d.rotations = data.rotations
     d.origin = [coord(data.origin)[1:2]; 0.0]
     mkpath(dirname(abspath(path)))
     redirect_stdout(devnull) do
         write_data_modem(path, d; sign = 1, units = "[mV/km]/[nT]", include_tipper = false,
-                         description = "2D MT data written by MTGeophysics.jl, ZXY = TE, ZYX = TM")
+                         description = data.rotation == 0 ? "2D MT data written by MTGeophysics.jl, ZXY = TE, ZYX = TM" :
+                             @sprintf("2D MT data written by MTGeophysics.jl, ZXY = TE, ZYX = TM, rotated to strike %.2f deg", data.rotation))
     end
     String(path)
 end
@@ -813,11 +830,12 @@ end
 
 Read ZXY (TE) and ZYX (TM) from a ModEM impedance file through `load_data_modem`,
 which converts units and time convention to Ohm and exp(+iωt). Frequencies come out
-ascending. Local y is the position along the profile.
+ascending. Local y is the position along the profile; the header rotation is kept as
+`rotation`.
 """
 function load_data2d(path::AbstractString)
     isfile(path) || error("data file not found: $path")
-    d = redirect_stdout(() -> load_data_modem(path), devnull)
+    d = redirect_stdout(() -> load_data_modem(path; warn_rotation = false), devnull)
     any(isfinite, d.Z[:, 2:3, :]) || error("no ZXY or ZYX impedances in $path")
     order = sortperm(d.f)
     frequencies = d.f[order]
@@ -844,6 +862,8 @@ function load_data2d(path::AbstractString)
         latitudes = Float64.(d.loc[:, 1]),
         longitudes = Float64.(d.loc[:, 2]),
         origin = Float64.(d.origin[1:2]),
+        rotation = isempty(d.zrot) ? 0.0 : Float64(d.zrot[1]),
+        rotations = d.rotations,
     )
 end
 
@@ -953,7 +973,8 @@ ModEM-style forward run: a ModEM-layout model, a data file giving the sites, per
 and errors, and `fwd.ctrl` giving the mode and the air. Writes the predicted data,
 by default `data.pred` next to the data file, and with `Write Frechet derivative : yes`
 also G as `<output>.frechet`. A data file whose impedances are all zero is a template:
-its errors are then fractions of the predicted |Z|.
+its errors are then fractions of the predicted |Z|. The sites are first rotated to the
+fwd.ctrl `Strike (deg)` (see `StrikeData2D`), and the prediction is in that frame.
 """
 function ForwardSolve2D(
     model_path::AbstractString,
@@ -963,14 +984,17 @@ function ForwardSolve2D(
     add_noise::Bool = false,
     rng_seed::Integer = 20260308,
 )
-    template = load_data2d(data_path)
     fwd = ReadFwdCtrl2D(fwd_path)
+    strike = StrikeData2D(load_data2d(data_path), fwd.strike)
+    println("Strike: ", strike.note)
+    template = strike.data
     mesh, ρ = Mesh2DFromInputs(ReadModel2D(model_path), template, fwd)
     response = run_mt2d_forward(mesh, ρ; mode = fwd.mode)
     errors = _resolve_forwardsolve2d_errors(template, response)
     predicted = data_from_response2d(response; errors...,
         site_names = template.site_names, x_positions = template.x_positions, z_positions = template.z_positions,
-        latitudes = template.latitudes, longitudes = template.longitudes, origin = template.origin)
+        latitudes = template.latitudes, longitudes = template.longitudes, origin = template.origin,
+        rotation = template.rotation, rotations = template.rotations)
     fwd.mode == :TE && (predicted.z_yx .= NaN)
     fwd.mode == :TM && (predicted.z_xy .= NaN)
     written = write_data2d(output_path, add_noise ? _apply_mt2d_noise(predicted; rng_seed) : predicted)

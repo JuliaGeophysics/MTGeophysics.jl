@@ -151,7 +151,8 @@ function mt1d_site_data(data::DataFile2D, i::Integer; mode::Symbol = :XYYX)
                rho_xy = first.(rp), phase_xy = last.(rp),
                rho_yx = copy(pick(data.rho_yx)), phase_yx = copy(pick(data.phase_yx)), path = data.path,
                latitudes = isempty(data.latitudes) ? Float64[] : data.latitudes[i:i],
-               longitudes = isempty(data.longitudes) ? Float64[] : data.longitudes[i:i], origin = data.origin)
+               longitudes = isempty(data.longitudes) ? Float64[] : data.longitudes[i:i], origin = data.origin, rotation = data.rotation,
+               rotations = data.rotations)
 end
 
 # the survey of `data` with Z at every site from one impedance column per site (nf × ns) and the errors of
@@ -168,7 +169,8 @@ function _mt1d_predicted(data::DataFile2D, Z::AbstractMatrix;
                z_xx = fill(complex(NaN), size(Z)), z_xx_error = fill(NaN, size(Z)),
                z_yy = fill(complex(NaN), size(Z)), z_yy_error = fill(NaN, size(Z)),
                rho_xy = first.(xy), phase_xy = last.(xy), rho_yx = first.(yx), phase_yx = last.(yx),
-               latitudes = data.latitudes, longitudes = data.longitudes, origin = data.origin)
+               latitudes = data.latitudes, longitudes = data.longitudes, origin = data.origin, rotation = data.rotation,
+               rotations = data.rotations)
 end
 
 # complex gaussian noise of each datum's error

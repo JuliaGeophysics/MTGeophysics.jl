@@ -50,7 +50,7 @@ julia --project=. examples/run_inv1D.jl data.dat InvCtrl
 ```
 
 1D-I is a five-layer earth (100, 20, 350, 40, 800 Ω·m; 120, 280, 650, 1400 m) under one
-site (`Fin001`) near Jyväskylä, 23 frequencies from 0.003 to 1000 Hz, 5 % noise. The mesh settings
+site (`UA01`) near Jyväskylä, 23 frequencies from 0.003 to 1000 Hz, 5 % noise. The mesh settings
 (first layer δ(f_max)/5, growth 1.1, depth 4 δ(f_min)) are constants at the top of
 `examples/run_inv1D.jl`.
 

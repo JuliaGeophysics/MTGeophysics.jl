@@ -115,8 +115,9 @@ Cut topography into a ModEM-layout earth model, as `MakeMesh3D` does in 3D.
 - The model top becomes the datum: the highest station elevation, read from `topo` at
   the stations. Ground higher than the datum is flattened to the model top.
 - Cells whose centre lies above the ground are air, written as 1e17 ohm m with mask 0.
-- In each station column the ground moves to the cell boundary nearest the station,
-  so every station snaps to within half a surface cell.
+- In each station column the ground moves, up or down, to the cell boundary nearest
+  the station (the shallowest station's when several share a column), so every station
+  sits on its column's ground within half a cell.
 - `water`: lakes or sea as `(y_range = (y1, y2), level = m a.s.l.)`. Cells between the
   level and the ground are water, `water_resistivity`, mask 9. No station may stand
   over water.
@@ -138,13 +139,18 @@ function Topography2D(model::ModelFile2D, data, topo::Topo2D;
     zn = vcat(0.0, cumsum(model.z_cell_sizes))
     zc = (zn[1:end-1] .+ zn[2:end]) ./ 2
 
-    # earth cells start below the ground; stations pull their column to the nearest boundary
+    # earth cells start below the ground; a station column takes the boundary nearest its station, up or
+    # down, so a station in a dip narrower than a column is not left under the ground (the shallowest wins
+    # when stations share a column)
     ground = [count(<(datum - elevation(y)), zc) for y in yc]
     columns = [searchsortedlast(y_nodes, y) for y in data.receivers]
+    snapped = Dict{Int, Int}()
     for (i, iy) in enumerate(columns)
         1 <= iy <= ny || throw(ArgumentError("station $(data.site_names[i]) lies outside the model"))
-        ground[iy] = min(ground[iy], argmin(abs.(zn .- (datum - station_elevation[i]))) - 1)
+        k = argmin(abs.(zn .- (datum - station_elevation[i]))) - 1
+        snapped[iy] = min(get(snapped, iy, k), k)
     end
+    foreach(((iy, k),) -> ground[iy] = k, snapped)
     ground = min.(ground, nz - 1)
 
     # water between its level and the ground; air above

@@ -30,7 +30,8 @@ run = Invert2D("model.start", "data.dat", "FwdCtrl", "InvCtrl.GN", "cov.ctrl", "
 PlotInversion2D(run; true_model_path = "model.true")
 ```
 
-The inputs are the start model, the observed data, `fwd.ctrl` (mode and air), `inv.ctrl`
+The inputs are the start model, the observed data, `fwd.ctrl` (mode, [strike](forward2d.md#strike)
+and air), `inv.ctrl`
 (`Algorithm : GN` or `NLCG`, and settings), the covariance file and the prior (the
 reference model of the regularization). The regularizer is the gradient one below, with
 its weights in `inv.ctrl`. The covariance file keeps the ModEM layout, but only its mask
@@ -39,7 +40,8 @@ The controls ship in `examples/ctrl/2D`; `MakeMesh2D` ([mesh tool](mesh2d.md)) w
 all of them for a new data file.
 
 Everything goes to `run_YYYYmmdd_HHMMSS/` next to the data: `model.rho` (restartable),
-`data.pred`, `History.csv`, `Summary.txt`, the inputs in `inputs/`, and the plots of
+`data.pred`, `History.csv`, `Summary.txt`, the inputs in `inputs/`, the observed data
+rotated to the strike as `<stem>-r<ext>` when a rotation was applied, and the plots of
 `PlotInversion2D` in `plots/` (mesh, start, final and true models, data fit, convergence).
 
 `inv.ctrl` (`examples/ctrl/2D/InvCtrl.GN`):

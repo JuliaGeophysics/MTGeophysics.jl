@@ -1,8 +1,10 @@
-# Topography / bathymetry extraction, air and water masks, and depth-weighted
-# RBF placement tests (headless, no solver). Builds tiny synthetic WS3D models
-# through the file round-trip so grid conventions match load_ws3d_model exactly.
+# 3D air and water masks
+# Author: @pankajkmishra
+# Ensures bathymetry and topography are extracted from tagged WS3D models, round-trip through their files and rebuild
+# the same masks, that RBF placement avoids masked cells, and that padding blends leave tagged cells alone
+# Tiny synthetic WS3D models go through the file round trip, so grid conventions match load_ws3d_model exactly
 
-using Random
+using Test, Random
 
 @testset "Bathymetry and water masks (Mask3D)" begin
 
@@ -127,133 +129,4 @@ end
     MTGeophysics.smooth_padding_decay_xy!(m1, ix, iy, 2.0, 10.0)
     MTGeophysics.smooth_padding_decay_xy!(m2, ix, iy, 2.0, 10.0, falses(nx, ny, nz))
     @test m1.A == m2.A
-end
-
-@testset "Padding blends: frozen sources and below-core thirding" begin
-
-    nx, ny, nz = 6, 5, 6
-    dx = fill(1000.0, nx); dy = fill(1000.0, ny)
-    dz = [100.0, 200.0, 400.0, 3000.0, 9000.0, 27000.0]   # steep grading below the core
-    A = fill(0.0, nx, ny, nz)
-    A[:, :, 1] .= -0.5                       # a conductive sheet over the whole top layer
-    path = joinpath(mktempdir(), "blend.ws")
-    write_ws3d_model(path, dx, dy, dz, A)
-    m = load_ws3d_model(path)
-
-    ix, iy, kz = 3:4, 2:4, 1:3
-    bg = 2.0
-    protected = falses(nx, ny, nz)
-    protected[:, :, 1] .= true               # the sheet is frozen everywhere
-
-    #---------- a frozen source must not bleed into the padding ----------
-    # seawater is finite, so isfinite alone lets the ocean edge paint a
-    # conductive halo across dry padding cells the bathymetry never covered
-    m2 = load_ws3d_model(path)
-    m2.A[1, 1, 1] = bg                       # a dry padding cell next to the sheet
-    protected[1, 1, 1] = false
-    MTGeophysics.smooth_padding_decay_xy!(m2, ix, iy, bg, 10.0, protected)
-    @test m2.A[1, 1, 1] ≈ bg
-    protected[1, 1, 1] = true
-
-    # an unprotected source still blends as before
-    m3 = load_ws3d_model(path)
-    MTGeophysics.smooth_padding_decay_xy!(m3, ix, iy, bg, 10.0)
-    @test m3.A[1, 1, 1] < bg
-
-    #---------- below-core carry-down keeps a third per layer, to the model base ----------
-    # the schedule is in layers, not metres: dz grades 400 -> 27000 m here, so a
-    # physical e-fold would spend itself entirely on the first layer
-    m4 = load_ws3d_model(path)
-    m4.A[:, :, 3] .= 0.0
-    MTGeophysics.smooth_padding_decay_z!(m4, ix, iy, kz, bg)
-    for (k, w) in zip(4:6, (1/3, 1/9, 1/27))
-        @test m4.A[3, 2, k] ≈ bg * (1 - w)
-    end
-
-    # target: the deepest layers relax to the prior, not to the flat background
-    m7 = load_ws3d_model(path)
-    m7.A[:, :, 3] .= 0.0
-    tgt = fill(1.0, nx, ny, nz)
-    MTGeophysics.smooth_padding_decay_z!(m7, ix, iy, kz, bg; target=tgt)
-    for (k, w) in zip(4:6, (1/3, 1/9, 1/27))
-        @test m7.A[3, 2, k] ≈ 1.0 * (1 - w)
-    end
-    @test m7.A[3, 2, 6] ≈ 1.0 atol=0.04
-
-    # a frozen column is left to the background rather than carried down
-    m5 = load_ws3d_model(path)
-    m5.A[:, :, 3] .= 0.0
-    p5 = falses(nx, ny, nz)
-    p5[3, 2, 3] = true
-    MTGeophysics.smooth_padding_decay_z!(m5, ix, iy, kz, bg, p5)
-    @test all(k -> m5.A[3, 2, k] ≈ bg, 4:6)
-    @test m5.A[4, 2, 4] ≈ bg * (1 - 1/3)
-
-    # xy target: padding relaxes to the prior, and frozen cells are still untouched
-    m8 = load_ws3d_model(path)
-    frozen_before = m8.A[1, 1, 1]
-    tgt8 = fill(1.0, nx, ny, nz)
-    MTGeophysics.smooth_padding_decay_xy!(m8, ix, iy, bg, 0.01, protected; target=tgt8)
-    @test m8.A[1, 1, 3] ≈ 1.0 atol=1e-6
-    @test m8.A[1, 1, 1] == frozen_before             # frozen sheet cell untouched
-
-    #---------- one wild core-edge cell must not paint a whole padding row ----------
-    m6 = load_ws3d_model(path)
-    m6.A[:, :, 3] .= 0.0
-    m6.A[4, 3, 3] = 9.0                      # a lone spike on the core edge
-    MTGeophysics.smooth_padding_decay_xy!(m6, ix, iy, bg, 10.0)
-    @test m6.A[4, 3, 3] ≈ 9.0                # the core itself is untouched
-    @test all(i -> m6.A[i, 3, 3] < bg, 5:nx) # median source ignores the spike
-
-    #---------- distance is physical, not index steps times a median width ----------
-    dxg = [1000.0, 1000.0, 1000.0, 1000.0, 40000.0, 40000.0]   # padding grades hard
-    Ag = fill(0.0, nx, ny, nz)
-    gpath = joinpath(mktempdir(), "graded.ws")
-    write_ws3d_model(gpath, dxg, dy, dz, Ag)
-    mg = load_ws3d_model(gpath)
-    MTGeophysics.smooth_padding_decay_xy!(mg, 2:4, iy, bg, 1.0)
-    # L = 1 core cell = 1000 m, but i=5 is 20.5 km from the core edge, so it must
-    # already be at background. index steps x median width would call it 1 cell
-    # out, weight exp(-1), and leave it at 1.26 -- a third of the way to the source
-    @test mg.A[5, 3, 3] ≈ bg atol=1e-6
-    @test mg.A[6, 3, 3] ≈ bg atol=1e-6
-end
-
-@testset "Depth-scaled RBF widths" begin
-    nx, ny, nz = 8, 7, 6
-    dx = fill(1000.0, nx); dy = fill(1000.0, ny)
-    dz = [50.0, 100.0, 300.0, 900.0, 2700.0, 8100.0]
-    A = fill(2.0, nx, ny, nz)
-    path = joinpath(mktempdir(), "tiny2.ws")
-    write_ws3d_model(path, dx, dy, dz, A)
-    m = load_ws3d_model(path)
-
-    keep = trues(nx, ny, nz)
-    keep[4, 4, 1] = false
-    keep[4, 4, 6] = false
-    rng = MersenneTwister(11)
-    r = build_rbf_map(m, 1:nx, 1:ny, 2, rng;
-                      sigma_scale=1.0, sigma_scale_deep=3.0, exclude=keep)
-    @test length(r.ci) == 2
-    q_top = findfirst(==(1), r.ck)
-    q_bot = findfirst(==(6), r.ck)
-    @test q_top !== nothing && q_bot !== nothing
-
-    N = nx * ny * nz
-    for row in 1:N
-        @test sum(r.wts[r.ptr[row]:r.ptr[row+1]-1]) ≈ 1.0
-    end
-
-    rowid(i, j, k) = i + (j - 1) * nx + (k - 1) * nx * ny
-    wof(row, q) = begin
-        p = r.ptr[row]:r.ptr[row+1]-1
-        t = findfirst(==(q), r.nbrs[p])
-        t === nothing ? 0.0 : r.wts[p][t]
-    end
-    @test wof(rowid(4, 4, 4), q_bot) > 0.9
-    @test wof(rowid(4, 4, 2), q_top) > wof(rowid(4, 4, 2), q_bot)
-
-    dv = zeros(nx, ny, nz)
-    apply_rbf_map!(dv, r, fill(3.7, 2))
-    @test all(x -> isapprox(x, 3.7; atol=1e-12), dv)
 end

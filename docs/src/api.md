@@ -47,7 +47,10 @@
 | Function | Description |
 |:---------|:------------|
 | `ReadModel2D`, `WriteModel2D` | ModEM-layout model files (earth cells, air tagged 1e17) |
-| `load_data2d`, `write_data2d` | ModEM Full_Impedance data (ZXY = TE, ZYX = TM) |
+| `load_data2d`, `write_data2d` | ModEM Full_Impedance data (ZXY = TE, ZYX = TM), `[mV/km]/[nT]` |
+| `EstimateStrike2D(data)` | Phase tensor strike of a survey, with consistency and skew |
+| `StrikeData2D(data, strike)`, `RotateData2D(data, strike)` | Data rotated to the strike frame (`nothing` = auto) |
+| `RotateToStrike2D(path; strike)` | Write the rotated data as `<stem>-r<ext>` |
 | `ReadFwdCtrl2D`, `WriteFwdCtrl2D`, `ReadInvCtrl2D`, `WriteInvCtrl2D`, `ReadCov2D`, `WriteCov2D` | Control and covariance files |
 | `ReadVFSACtrl2D`, `WriteVFSACtrl2D`, `ReadMask2D`, `WriteMask2D` | VFSA control and `mask.ctrl` |
 | `Mesh2DFromInputs(model, data, fwd)` | Solver mesh and resistivity, air from `fwd.ctrl`, stations snapped to the ground |
@@ -100,7 +103,9 @@
 
 | Function | Description |
 |:---------|:------------|
-| `load_data_modem(path)` | Load 3D data file |
+| `load_data_modem(path)` | Load 3D data file, with its rotation history |
+| `rotate_data(path_or_data, angle; kind)` | Rotate Z and tipper for a mesh, a strike or declination, see [rotation](rotation.md) |
+| `RotationStep` | One step of a data file's rotation history |
 | `load_model_modem(path)` | Load 3D model file |
 | `write_model_modem(path, model)` | Write 3D model file |
 | `chi2_and_rms(obs, pred)` | Compute 3D misfit |

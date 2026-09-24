@@ -26,7 +26,10 @@ t = Topography2D(ReadModel2D("model.rho"), load_data2d("data.dat"), topo;
 # t.model (air 1e17, water), t.mask (0 air, 9 water, 1 free), t.data (Z set), t.datum, t.ground
 ```
 
-In station columns the ground moves to the cell boundary nearest the station.
+In station columns the ground moves, up or down, to the cell boundary nearest the station
+(the shallowest station's when several share a column). A station in a dip narrower than a
+column therefore lowers its column's ground instead of being left under it, and every station
+built this way sits on its ground within half a cell.
 [`MakeMesh2D`](mesh2d.md) does all of this from a data file and `topo.dat`.
 
 ## Stations on a staircase
@@ -57,5 +60,5 @@ return to 100 Ω·m away from the hill.
 ## Fréchet derivatives
 
 G and Gᵗ include the topography: the receiver sampling reads every surface row it needs,
-and air and water cells have zero columns. `test/TestTopography2D.jl` checks them against
+and air and water cells have zero columns. `test/TestFrechet2D.jl` checks them against
 finite differences and with the dot-product test.
