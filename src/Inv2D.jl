@@ -127,8 +127,9 @@ end
 # active cells: default all earth cells; mask, cartesian, or linear indices otherwise
 function _inv2d_cells(mesh, rho, active)
     indices = CartesianIndices(rho)
+    air = mt2d_air_mask(mesh)
     cells = if active === nothing
-        [i for i in indices if i[1] > mesh.n_air_cells]
+        [i for i in indices if !air[i]]
     elseif active isa AbstractArray{Bool}
         size(active) == size(rho) || throw(DimensionMismatch("active mask must match model"))
         findall(active)
@@ -137,7 +138,7 @@ function _inv2d_cells(mesh, rho, active)
     end
     isempty(cells) && throw(ArgumentError("at least one active earth cell is required"))
     all(i -> checkbounds(Bool, rho, i), cells) || throw(BoundsError(rho, cells))
-    all(i -> i[1] > mesh.n_air_cells, cells) || throw(ArgumentError("air cells cannot be inverted"))
+    all(i -> !air[i], cells) || throw(ArgumentError("air cells cannot be inverted"))
     length(unique(cells)) == length(cells) || throw(ArgumentError("active cells must be unique"))
     cells
 end
@@ -164,26 +165,28 @@ function _inv2d_data(mesh, data, mode)
 end
 
 # finite-volume regularization of log10(m/mref): gradient terms approximate the
-# area integral, smallness uses cell area over the median earth-cell area
-function _inv2d_regularizer(mesh, rho, opt)
+# area integral, smallness uses cell area over the median earth-cell area; excluded
+# cells (air, water) take no term and no smoothing pair
+function _inv2d_regularizer(mesh, rho, opt; excluded = mt2d_air_mask(mesh))
     nz, ny = size(rho)
     linear = LinearIndices(rho)
     I, J, V = Int[], Int[], Float64[]
     row = 0
     area0 = median(mesh.z_cell_sizes[mesh.n_air_cells+1:end]) * median(mesh.y_cell_sizes)
     for iy in 1:ny, iz in mesh.n_air_cells+1:nz
+        excluded[iz, iy] && continue
         cell = linear[iz, iy]
         if opt.smallness > 0
             row += 1
             push!(I, row); push!(J, cell)
             push!(V, sqrt(opt.smallness * mesh.z_cell_sizes[iz] * mesh.y_cell_sizes[iy] / area0))
         end
-        if iy < ny && opt.smooth_y > 0
+        if iy < ny && opt.smooth_y > 0 && !excluded[iz, iy+1]
             row += 1
             w = sqrt(opt.smooth_y * mesh.z_cell_sizes[iz] / ((mesh.y_cell_sizes[iy] + mesh.y_cell_sizes[iy+1]) / 2))
             append!(I, (row, row)); append!(J, (cell, linear[iz, iy+1])); append!(V, (-w, w))
         end
-        if iz < nz && opt.smooth_z > 0
+        if iz < nz && opt.smooth_z > 0 && !excluded[iz+1, iy]
             row += 1
             w = sqrt(opt.smooth_z * mesh.y_cell_sizes[iy] / ((mesh.z_cell_sizes[iz] + mesh.z_cell_sizes[iz+1]) / 2))
             append!(I, (row, row)); append!(J, (cell, linear[iz+1, iy])); append!(V, (-w, w))
@@ -315,6 +318,8 @@ Invert TE/TM complex impedances for earth-cell log10 resistivity, minimizing
 - `active_cells`: model-shaped Boolean mask or vector of cartesian/linear indices;
   default all earth cells. Other cells stay fixed, air is always fixed
 - `reference_resistivity`: model the regularization pulls toward; default the start
+- `water_cells`: model-shaped Boolean mask of fixed water, left out of the default
+  active cells; like air, it takes no regularization term and no smoothing pair
 
 Returns `Inv2DResult`; no files are written by this method, the six-file method below
 writes a run directory.
@@ -322,7 +327,8 @@ writes a run directory.
 function Invert2D(mesh::MT2DMesh, initial_resistivity::AbstractMatrix{<:Real}, observed::DataFile2D;
                   algorithm::AbstractInversion2D = GaussNewton2DConfig(),
                   options::Inv2DOptions = Inv2DOptions(),
-                  active_cells = nothing, reference_resistivity = initial_resistivity)
+                  active_cells = nothing, reference_resistivity = initial_resistivity,
+                  water_cells::Union{Nothing, AbstractMatrix{Bool}} = nothing)
     opt = options
     _inv2d_validate(opt)
     inv2d_validate(algorithm)
@@ -330,18 +336,26 @@ function Invert2D(mesh::MT2DMesh, initial_resistivity::AbstractMatrix{<:Real}, o
     #---------- setup ----------
     rho0 = Matrix{Float64}(initial_resistivity)
     size(reference_resistivity) == size(rho0) || throw(DimensionMismatch("reference must match initial model"))
-    all(x -> isfinite(x) && x > 0, reference_resistivity[mesh.n_air_cells+1:end, :]) ||
+    air = mt2d_air_mask(mesh)
+    all(x -> isfinite(x) && x > 0, reference_resistivity[.!air]) ||
         throw(ArgumentError("reference earth resistivity must be positive and finite"))
     cells = _inv2d_cells(mesh, rho0, active_cells)
     rows = _inv2d_data(mesh, observed, opt.mode)
-    all(x -> isfinite(x) && x > 0, rho0[mesh.n_air_cells+1:end, :]) ||
+    all(x -> isfinite(x) && x > 0, rho0[.!air]) ||
         throw(ArgumentError("initial earth resistivity must be positive and finite"))
+    excluded = copy(air)
+    if water_cells !== nothing
+        size(water_cells) == size(rho0) || throw(DimensionMismatch("water mask must match initial model"))
+        active_cells === nothing && filter!(i -> !water_cells[i], cells)
+        any(i -> water_cells[i], cells) && throw(ArgumentError("water cells cannot be inverted"))
+        excluded .|= water_cells
+    end
 
-    # air takes part in neither the parameters nor the regularization
-    rho0[1:mesh.n_air_cells, :] .= mesh.air_resistivity
+    # air takes part in neither the parameters nor the regularization, water only in the forward
+    rho0[air] .= mesh.air_resistivity
     reference = Matrix{Float64}(reference_resistivity)
-    reference[1:mesh.n_air_cells, :] .= mesh.air_resistivity
-    R = _inv2d_regularizer(mesh, rho0, opt)
+    reference[air] .= mesh.air_resistivity
+    R = _inv2d_regularizer(mesh, rho0, opt; excluded)
     R_active = R[:, LinearIndices(rho0)[cells]]
     problem = Inv2DProblem(mesh, rows, cells, R, R_active, log10.(reference), opt)
 
@@ -417,8 +431,8 @@ end
 #---------- file workflow ----------
 
 # shared options and the algorithm config from inv.ctrl
-function _inv2d_from_ctrl(c::InvCtrl2D)
-    options = Inv2DOptions(mode = c.mode, max_iter = c.max_iter, beta = c.lambda, smallness = c.smallness,
+function _inv2d_from_ctrl(c::InvCtrl2D; mode::Symbol = c.mode)
+    options = Inv2DOptions(mode = mode, max_iter = c.max_iter, beta = c.lambda, smallness = c.smallness,
                            smooth_y = c.smooth_y, smooth_z = c.smooth_z, log_bounds = c.log_bounds,
                            max_step = c.max_step, max_linesearch = c.max_linesearch, target_rms = c.target_rms)
     algorithm = c.algorithm == :gn ? GaussNewton2DConfig(damping = c.gn_damping) :
@@ -451,34 +465,74 @@ function _inv2d_predicted(response::MT2DResponse, observed::DataFile2D, mode::Sy
     predicted
 end
 
-# vfsa keeps its own driver and file layout until it moves behind this interface
-function _invert2d_vfsa(dir, mesh, ρ0, observed, ctrl, fwd, cov)
-    any(==(0), cov.mask) && @warn "VFSA does not use the covariance mask yet, every earth cell is perturbed"
-    fwd.air_resistivity == 1e9 || @warn "VFSA uses 1e9 ohm m air, not the $(fwd.air_resistivity) in fwd.ctrl"
-    vdir = joinpath(dir, "vfsa")
-    mkpath(vdir)
-    config = VFSA2DMTConfig(n_chains = ctrl.vfsa_chains, n_ctrl = ctrl.vfsa_control_points, max_iter = ctrl.max_iter,
-                            n_trials = ctrl.vfsa_trials, log_bounds = ctrl.log_bounds, step_scale = ctrl.vfsa_step_scale,
-                            seed = ctrl.vfsa_seed, target_rms = ctrl.target_rms, keep_models = true)
-    vfsa = VFSA2DMT(write_model2d(joinpath(vdir, "start_with_air.rho"), mesh, ρ0),
-                    write_data2d(joinpath(vdir, "observed.dat"), observed); run_dir = vdir, config)
-    final = load_model2d(vfsa.best_chain.best_model_path).resistivity
-    final, _inv2d_predicted(vfsa.best_chain.best_response, observed, ctrl.mode)
+# mesh, start model, active and water cells of the file workflows from the model and its mask
+# (cov.ctrl or mask.ctrl): 0 = air or fixed, 9 = water, others free
+function _inv2d_file_setup(start::ModelFile2D, observed::DataFile2D, fwd::FwdCtrl2D, mask::AbstractMatrix{<:Integer}, kind)
+    size(mask) == size(start.resistivity) ||
+        error("the $kind is $(size(mask)) cells, the model is $(size(start.resistivity))")
+    mesh, ρ0 = Mesh2DFromInputs(start, observed, fwd)
+    na = mesh.n_air_cells
+    air = mt2d_air_mask(mesh)
+    bad = findall(air[na+1:end, :] .& (mask .!= 0))
+    isempty(bad) || error("$(length(bad)) topographic air cell(s) have $kind ≠ 0, first at (row, column) $(Tuple(bad[1]))")
+    water = falses(size(ρ0))
+    water[na+1:end, :] .= mask .== MT2D_MASK_WATER
+    wet = intersect(mt2d_receiver_columns(mesh), findall(vec(any(water; dims = 1))))
+    isempty(wet) || error("stations stand over water (mask $(MT2D_MASK_WATER)) in model column(s) $wet; water belongs in the padding")
+    active = falses(size(ρ0))
+    active[na+1:end, :] .= (mask .!= 0) .& (mask .!= MT2D_MASK_WATER)
+    active .&= .!air
+    any(active) || error("the $kind fixes every cell")
+    (; mesh, ρ0, active, water, offsets = mt2d_station_offsets(mesh, observed))
 end
+
+function _inv2d_write_history(path, history)
+    open(path, "w") do io
+        println(io, join(string.(keys(first(history))), ','))
+        foreach(h -> println(io, join(values(h), ',')), history)
+    end
+    path
+end
+
+function _inv2d_open_run(run_dir, data_path, inputs)
+    dir = run_dir === nothing ? _inv2d_run_dir(data_path) : mkpath(String(run_dir))
+    mkpath(joinpath(dir, "inputs"))
+    foreach(p -> cp(p, joinpath(dir, "inputs", basename(p)); force = true), inputs)
+    println("Run directory: ", dir)
+    dir
+end
+
+# cells and station snapping, the tail of every Summary.txt
+function _inv2d_summary_cells(io, s)
+    println(io, "Active cells: ", count(s.active))
+    println(io, "Topographic air cells: ", sum(mt2d_topo_air(s.mesh)))
+    println(io, "Water cells: ", count(s.water))
+    any(o -> o.offset != 0, s.offsets) || return
+    println(io, "Station snapping (Z = data depth below the model top, ground = mesh surface of the column, m):")
+    @printf(io, "  %-12s %10s %10s %10s %10s\n", "site", "Z", "ground", "offset", "tolerance")
+    for o in s.offsets
+        @printf(io, "  %-12s %10.2f %10.2f %10.2f %10.2f%s\n", o.site, o.z, o.surface, o.offset, o.tolerance,
+                abs(o.offset) > o.tolerance ? "  beyond tolerance" : "")
+    end
+end
+
+_inv2d_components(mode) = mode == :TETM ? ["ZXY", "ZYX"] : mode == :TE ? ["ZXY"] : ["ZYX"]
 
 """
     Invert2D(start_path, data_path, fwd_path, inv_path, cov_path, prior_path; run_dir=nothing)
 
-ModEM-style inversion from six files: the start model, the observed data, `fwd.ctrl`,
-`inv.ctrl`, the model covariance and the prior model. The algorithm (GN, NLCG or VFSA)
-comes from `inv.ctrl`, the air from `fwd.ctrl`, and the inverted cells from the
-covariance mask (0 = fixed). The prior is the reference model of the regularization.
+ModEM-style deterministic inversion (GN or NLCG) from six files: the start model, the
+observed data, `fwd.ctrl`, `inv.ctrl`, the model covariance and the prior model. The
+algorithm comes from `inv.ctrl`, the air from `fwd.ctrl`, and the inverted cells from the
+covariance mask (0 = air or fixed, 9 = water, fixed and unregularized, others free).
+Topographic air (model cells above 1e15 ohm m) must carry mask 0, and no station may
+stand over water. The prior is the reference model of the regularization. VFSA has its
+own five-file entry, `VFSA2D`.
 
 Everything is written to `run_dir`, by default `run_YYYYmmdd_HHMMSS/` next to the data:
-`model.rho` (ModEM layout, restartable), `data.pred`, `History.csv` (GN and NLCG),
-`Summary.txt`, and copies of the inputs in `inputs/`. `examples/model_2D_to_SEGY.jl`
-turns `model.rho` into a SEG-Y section. Returns a named tuple with the run directory,
-mesh, models, data, history, rms and termination reason.
+`model.rho` (ModEM layout, restartable), `data.pred`, `History.csv`, `Summary.txt`, and
+copies of the inputs in `inputs/`. Returns a named tuple with the run directory, mesh,
+models, data, history, rms and termination reason.
 """
 function Invert2D(start_path::AbstractString, data_path::AbstractString, fwd_path::AbstractString,
                   inv_path::AbstractString, cov_path::AbstractString, prior_path::AbstractString;
@@ -487,55 +541,30 @@ function Invert2D(start_path::AbstractString, data_path::AbstractString, fwd_pat
     fwd, ctrl, cov = ReadFwdCtrl2D(fwd_path), ReadInvCtrl2D(inv_path), ReadCov2D(cov_path)
     start, prior = ReadModel2D(start_path), ReadModel2D(prior_path)
     _same_grid(start, prior) || error("the prior model must be on the start model's grid")
-    size(cov.mask) == size(start.resistivity) ||
-        error("the covariance mask is $(size(cov.mask)) cells, the model is $(size(start.resistivity))")
-    mesh, ρ0 = Mesh2DFromInputs(start, observed, fwd)
-    _, ρref = Mesh2DFromInputs(prior, observed, fwd)
-    active = falses(size(ρ0))
-    active[mesh.n_air_cells+1:end, :] .= cov.mask .!= 0
-    any(active) || error("the covariance mask fixes every cell")
+    s = _inv2d_file_setup(start, observed, fwd, cov.mask, "covariance mask")
+    priormesh, ρref = Mesh2DFromInputs(prior, observed, fwd; warn = false)
+    mt2d_topo_air(priormesh) == mt2d_topo_air(s.mesh) || error("the prior model's topography differs from the start model's")
+    dir = _inv2d_open_run(run_dir, data_path, (start_path, data_path, fwd_path, inv_path, cov_path, prior_path))
 
-    dir = run_dir === nothing ? _inv2d_run_dir(data_path) : String(run_dir)
-    inputs = joinpath(dir, "inputs")
-    mkpath(inputs)
-    for p in (start_path, data_path, fwd_path, inv_path, cov_path, prior_path)
-        cp(p, joinpath(inputs, basename(p)); force = true)
-    end
-    println("Run directory: ", dir)
+    options, algorithm = _inv2d_from_ctrl(ctrl)
+    result = Invert2D(s.mesh, s.ρ0, observed; algorithm, options, active_cells = s.active, reference_resistivity = ρref,
+                      water_cells = any(s.water) ? s.water : nothing)
+    predicted = _inv2d_predicted(result.response, observed, ctrl.mode)
+    fit = chi2_rms2d(observed, predicted; components = _inv2d_components(ctrl.mode))
 
-    history, reason, converged = nothing, :max_iter, false
-    if ctrl.algorithm == :vfsa
-        final, predicted = _invert2d_vfsa(dir, mesh, ρ0, observed, ctrl, fwd, cov)
-    else
-        options, algorithm = _inv2d_from_ctrl(ctrl)
-        result = Invert2D(mesh, ρ0, observed; algorithm, options, active_cells = active, reference_resistivity = ρref)
-        final, history, reason, converged = result.resistivity, result.history, result.reason, result.converged
-        predicted = _inv2d_predicted(result.response, observed, ctrl.mode)
-    end
-    components = ctrl.mode == :TETM ? ["ZXY", "ZYX"] : ctrl.mode == :TE ? ["ZXY"] : ["ZYX"]
-    fit = chi2_rms2d(observed, predicted; components)
-    if ctrl.algorithm == :vfsa
-        converged = fit.rms <= ctrl.target_rms
-        reason = converged ? :target_rms : :max_iter
-    end
-
-    WriteModel2D(joinpath(dir, "model.rho"), mesh, final)
+    WriteModel2D(joinpath(dir, "model.rho"), s.mesh, result.resistivity)
     write_data2d(joinpath(dir, "data.pred"), predicted)
-    if history !== nothing
-        open(joinpath(dir, "History.csv"), "w") do io
-            println(io, join(string.(keys(first(history))), ','))
-            foreach(h -> println(io, join(values(h), ',')), history)
-        end
-    end
+    _inv2d_write_history(joinpath(dir, "History.csv"), result.history)
     open(joinpath(dir, "Summary.txt"), "w") do io
         println(io, "Algorithm: ", uppercase(string(ctrl.algorithm)))
-        println(io, "Termination: ", reason)
-        println(io, "Converged: ", converged)
+        println(io, "Termination: ", result.reason)
+        println(io, "Converged: ", result.converged)
         @printf(io, "RMS: %.6f\n", fit.rms)
         println(io, "Real data count: ", fit.count)
-        history === nothing || println(io, "Accepted iterations: ", length(history) - 1)
-        println(io, "Active cells: ", count(active))
+        println(io, "Accepted iterations: ", length(result.history) - 1)
+        _inv2d_summary_cells(io, s)
     end
-    (; run_dir = dir, algorithm = ctrl.algorithm, ctrl, fwd, mesh, observed, predicted, start = ρ0, prior = ρref,
-       final, active, history, rms = fit.rms, reason, converged)
+    (; run_dir = dir, algorithm = ctrl.algorithm, ctrl, fwd, mesh = s.mesh, observed, predicted, start = s.ρ0,
+       prior = ρref, final = result.resistivity, active = s.active, water = s.water, history = result.history,
+       vfsa = nothing, rms = fit.rms, reason = result.reason, converged = result.converged)
 end

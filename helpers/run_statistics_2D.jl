@@ -1,16 +1,14 @@
-# This helper script recomputes the 2D ensemble statistics from the saved best model of each chain.
+# Recompute the 2D VFSA ensemble statistics from the saved best model of each chain
+# Author: @pankajkmishra
+# Usage: julia --project=. helpers/run_statistics_2D.jl <run_dir>
 
 using MTGeophysics
 
 function main(args::AbstractVector{<:AbstractString} = ARGS)
-    1 <= length(args) <= 2 || error("usage: julia --project=. helpers/run_statistics_2D.jl <run_dir> [observed_data_path]")
-    run_dir = args[1]
-    observed_data_path = length(args) == 2 ? args[2] : nothing
-    stats = AnalyseEnsemble2D(run_dir; observed_data_path = observed_data_path, copy_script = false)
-    println("Summary = ", stats.summary_path)
-    println("MeanModel = ", stats.mean_model_path)
-    println("MedianModel = ", stats.median_model_path)
-    println("StdModel = ", stats.uncertainty_table_path)
+    length(args) == 1 || error("usage: julia --project=. helpers/run_statistics_2D.jl <run_dir>")
+    stats = AnalyseEnsemble2D(args[1])
+    println("Chains = ", length(stats.chains))
+    foreach(p -> println("  ", p), stats.paths)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

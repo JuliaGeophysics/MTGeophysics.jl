@@ -1,11 +1,14 @@
-Algorithm                         : VFSA
-Initial damping factor lambda     : 1
 Exit search when rms is less than : 1
 Maximum number of iterations      : 3000
 Mode                              : TETM
 Log10 resistivity bounds          : 0 4
-VFSA chains                       : 2
-VFSA control points               : 400
-VFSA trials                       : 1
-VFSA step scale                   : 0.11
-VFSA seed                         : 20260308
+Number of chains                  : 2
+Control points                    : 400
+Trials per iteration              : 1
+Step scale                        : 0.11
+Starting temperature              : 1
+Cooling ratio                     : 0.001
+RBF width y (cells)               : 2
+RBF width z (cells)               : 2.5
+Random seed                       : 20260308
+Snapshot interval                 : 0

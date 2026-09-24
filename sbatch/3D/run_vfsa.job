@@ -1,0 +1,32 @@
+#!/bin/bash
+#SBATCH --job-name=vfsa3d
+#SBATCH --account=project_xxxx
+#SBATCH --partition=longrun
+#SBATCH --time=10-00:00:00
+#SBATCH --nodes=1
+#SBATCH --ntasks=21
+#SBATCH --cpus-per-task=1
+#SBATCH --mem-per-cpu=5000
+#SBATCH --output=%x_%j.out
+
+set -euo pipefail
+unset SLURM_MEM_PER_NODE SLURM_MEM_PER_GPU
+
+MODULEPATH=""
+for pat in $(cat /appl/modulefiles/.modulepath_init_$(uname -m)); do
+    for d in $pat; do [ -d "$d" ] && MODULEPATH="${MODULEPATH:+$MODULEPATH:}$d"; done
+done
+export MODULEPATH
+module --force purge
+module load StdEnv
+module load gcc/15.2.0
+module load openmpi/5.0.10
+module load openblas/0.3.30
+
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 JULIA_PKG_PRECOMPILE_AUTO=0
+
+cd "$SLURM_SUBMIT_DIR"
+J="/appl/soft/manual/general/x86_64/julia/1.12.5/bin/julia --project=."
+$J -e 'using MTGeophysics' >/dev/null 2>&1 || true
+$J -e 'using MTGeophysics' >/dev/null 2>&1 || J="$J --compiled-modules=existing"
+$J examples/run_vfsa3D.jl "${1:-$SLURM_JOB_ID}"

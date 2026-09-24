@@ -1,0 +1,6 @@
+Algorithm                         : GN
+Mode                              : XYYX
+Exit search when rms is less than : 1
+Maximum number of iterations      : 20
+Log10 resistivity bounds          : 0 4
+Initial damping factor lambda     : 1

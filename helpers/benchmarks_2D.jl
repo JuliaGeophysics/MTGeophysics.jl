@@ -1,9 +1,11 @@
 # 2D COMEMI benchmark generator
 # Author: @pankajkmishra
 # Writes each case as a ModEM-style input set in examples/data/<case>: noisy synthetic data from a
-# fine mesh, and start/prior models and cov.ctrl on a coarser inversion mesh
+# fine mesh, and start/prior models, cov.ctrl (GN, NLCG) and mask.ctrl (VFSA) on a coarser inversion mesh
 # The control files are shipped in examples/ctrl/2D; FwdCtrl there also sets the air of both meshes
-# Usage: julia --project=. helpers/benchmarks_2D.jl [2D-I] [2D-II] [2D-III]      (default below)
+# 2D-IV is 2D-III under synthetic Finnish relief with a lake in the padding, written with its topo.dat; its data
+# mesh splits every inversion cell, so both meshes share one topography staircase and differ only below the ground
+# Usage: julia --project=. helpers/benchmarks_2D.jl [2D-I] [2D-II] [2D-III] [2D-IV]      (default below)
 
 using MTGeophysics
 using Printf
@@ -16,9 +18,10 @@ const BENCHMARK_CASES = Dict(
     "2D-I"   => "comemi2d_case1_dyke",
     "2D-II"  => "comemi2d_case2_resistive_blocks",
     "2D-III" => "comemi2d_case3_mixed",
+    "2D-IV"  => "comemi2d_case3_mixed",
 )
-# 2D-IV (2D-III with topography) takes over as the default once topography is supported
-const DEFAULT_CASES = ["2D-III"]
+const TOPOGRAPHY_CASES = ["2D-IV"]
+const DEFAULT_CASES = ["2D-IV"]
 
 # E-W profile near Jyväskylä, central Finland; local x north, y east, sites on the flat surface
 const SURVEY = (
@@ -41,6 +44,20 @@ const INVERSION_MESH = (
     y_core_range = (-9000.0, 9000.0), y_core_cell = 500.0, y_padding = 40_000.0, pad_factor = 1.3,
     background_resistivity = 100.0, first_layer_div = 5.0, vertical_factor = 1.1, depth_mult = 4.0,
 )
+
+# topography cases: the data mesh is the inversion mesh with every cell split y × z, air and water
+# inherited from the parent cell; independent staircases leave a TM modelling floor near rms 100
+const SHARED_SURFACE_SPLIT = (y = 2, z = 2)
+
+# smooth relief of central Finland: rolling till with a ridge and a valley over the stations,
+# 100-200 m relief, and a lake (level 95 m a.s.l.) in the western padding; elevations m a.s.l.
+const TOPOGRAPHY = (
+    y = collect(-60_000.0:100.0:60_000.0),
+    lake = (y_range = (-30_000.0, -18_000.0), level = 95.0),
+    water_resistivity = 100.0,
+)
+relief(y) = 140 + 50 * sin(2π * y / 11_000) + 45 * exp(-((y - 3000) / 1600)^2) -
+            35 * exp(-((y + 5200) / 1400)^2) - 80 * exp(-((y + 24_000) / 5000)^2)
 
 const CTRL_DIR = joinpath(dirname(@__DIR__), "examples", "ctrl", "2D")
 const FWD_PATH = joinpath(CTRL_DIR, "FwdCtrl")
@@ -81,17 +98,55 @@ function survey_mesh(m)
                 air_cells = FWD.air_layers)
 end
 
+function subdivide_mesh(m::MT2DMesh, ky::Int, kz::Int)
+    na = m.n_air_cells
+    dy = repeat(m.y_cell_sizes ./ ky, inner = ky)
+    dz = vcat(m.z_cell_sizes[1:na], repeat(m.z_cell_sizes[na+1:end] ./ kz, inner = kz))
+    MT2DMesh(y_nodes = m.y_nodes[1] .+ vcat(0.0, cumsum(dy)), z_nodes = m.z_nodes[1] .+ vcat(0.0, cumsum(dz)),
+             y_cell_sizes = dy, z_cell_sizes = dz, receiver_positions = m.receiver_positions,
+             frequencies = m.frequencies, n_air_cells = na, air_resistivity = m.air_resistivity)
+end
+
+# fine earth model with the coarse mask's air (1e17) and water cut in, cell by parent cell
+function inherit_surface(ρ::AbstractMatrix, mask::AbstractMatrix{<:Integer}, ky::Int, kz::Int)
+    out = copy(ρ)
+    for iy in axes(out, 2), iz in axes(out, 1)
+        parent = mask[(iz - 1) ÷ kz + 1, (iy - 1) ÷ ky + 1]
+        parent == 0 && (out[iz, iy] = MTGeophysics.MT2D_AIR_TAG)
+        parent == MTGeophysics.MT2D_MASK_WATER && (out[iz, iy] = TOPOGRAPHY.water_resistivity)
+    end
+    out
+end
+
+function survey_topography()
+    coords = survey_coordinates(TOPOGRAPHY.y)
+    Topo2D(latitudes = coords.latitudes, longitudes = coords.longitudes, elevations = relief.(TOPOGRAPHY.y))
+end
+
+# the model file with the topography cut in, and the data template with its station depths
+function cut_topography(model_path, template, topo)
+    t = Topography2D(ReadModel2D(model_path), template, topo; water = [TOPOGRAPHY.lake],
+                     water_resistivity = TOPOGRAPHY.water_resistivity)
+    WriteModel2D(model_path, t.model.y_cell_sizes, t.model.z_cell_sizes, t.model.resistivity)
+    t
+end
+
 #---------- generator ----------
 
 """
     SaveBenchmarks2D(; output_root=examples/data, cases=DEFAULT_CASES) -> records
 
-Write each COMEMI case (`"2D-I"`, `"2D-II"`, `"2D-III"`) into `output_root/<case>`:
-- `model.true`: the true model on the fine data mesh (16 m surface layer), for plots only
+Write each COMEMI case (`"2D-I"`, `"2D-II"`, `"2D-III"`, `"2D-IV"`) into `output_root/<case>`:
+- `model.true`: the true model on the fine data mesh, for plots only
 - `data.dat`: noisy synthetic impedances from the fine mesh, errors 5% of |Z|
 - `model.start`, `model.prior`: 100 ohm m halfspace on the inversion mesh (32 m surface layer)
-- `cov.ctrl`: model covariance for the inversion mesh, every cell free
+- `cov.ctrl` (GN, NLCG) and `mask.ctrl` (VFSA): every inversion cell free
 
+With topography (2D-IV) the models hold the topographic air (1e17 ohm m) and the lake
+water, `cov.ctrl` and `mask.ctrl` give them mask 0 and 9, data Z is the depth below the
+model top (the highest station), and `topo.dat` holds the relief in WGS84 lat, lon,
+elevation. Its data mesh splits every inversion cell `SHARED_SURFACE_SPLIT` and takes the
+air and water of the parent cell, so the two meshes share one topography staircase.
 The forward and inversion controls come from `examples/ctrl/2D`.
 """
 function SaveBenchmarks2D(;
@@ -100,25 +155,45 @@ function SaveBenchmarks2D(;
 )
     unknown = setdiff(cases, keys(BENCHMARK_CASES))
     isempty(unknown) || error("unknown cases $unknown, choose from $(sort(collect(keys(BENCHMARK_CASES))))")
-    data_mesh, inv_mesh = survey_mesh(DATA_MESH), survey_mesh(INVERSION_MESH)
-    truths = Dict(m.name => m for m in MTGeophysics.build_mt2d_comemi_models(data_mesh))
+    inv_mesh = survey_mesh(INVERSION_MESH)
+    ky, kz = SHARED_SURFACE_SPLIT
     halfspace = build_mt2d_halfspace_model(inv_mesh; background_resistivity = INVERSION_MESH.background_resistivity)
     nz, ny = length(inv_mesh.z_cell_sizes) - inv_mesh.n_air_cells, length(inv_mesh.y_cell_sizes)
     records = NamedTuple[]
     for case in cases
+        topographic = case in TOPOGRAPHY_CASES
+        data_mesh = topographic ? subdivide_mesh(inv_mesh, ky, kz) : survey_mesh(DATA_MESH)
+        truth = only(m for m in MTGeophysics.build_mt2d_comemi_models(data_mesh) if m.name == BENCHMARK_CASES[case])
         dir = joinpath(output_root, case)
         mkpath(dir)
         paths = (
             case_dir = dir,
-            true_model_path = WriteModel2D(joinpath(dir, "model.true"), data_mesh, truths[BENCHMARK_CASES[case]].resistivity),
+            true_model_path = WriteModel2D(joinpath(dir, "model.true"), data_mesh, truth.resistivity),
             start_model_path = WriteModel2D(joinpath(dir, "model.start"), inv_mesh, halfspace),
             prior_model_path = WriteModel2D(joinpath(dir, "model.prior"), inv_mesh, halfspace),
             cov_path = WriteCov2D(joinpath(dir, "cov.ctrl"), Cov2D(nz, ny)),
+            mask_path = WriteMask2D(joinpath(dir, "mask.ctrl"), ones(Int, nz, ny)),
         )
+        template = survey_template()
+        if topographic
+            topo = survey_topography()
+            WriteTopo2D(joinpath(dir, "topo.dat"), topo)
+            t = cut_topography(paths.start_model_path, template, topo)
+            cut_topography(paths.prior_model_path, template, topo)
+            template = t.data
+            c = Cov2D(nz, ny)
+            WriteCov2D(paths.cov_path, Cov2D(sy = c.sy, sz = c.sz, n_smooth = c.n_smooth, mask = t.mask))
+            WriteMask2D(paths.mask_path, t.mask)
+            fine = ReadModel2D(paths.true_model_path)
+            WriteModel2D(paths.true_model_path, fine.y_cell_sizes, fine.z_cell_sizes,
+                         inherit_surface(fine.resistivity, t.mask, ky, kz))
+            e = relief.(SURVEY.receivers)
+            @printf("%s: datum %.1f m a.s.l., station relief %.1f m, %d air and %d water cells in the inversion model\n",
+                    case, t.datum, maximum(e) - minimum(e), count(==(0), t.mask), count(==(9), t.mask))
+        end
         data_path = mktempdir() do tmp
-            template = write_data2d(joinpath(tmp, "data.template"), survey_template())
-            ForwardSolve2D(paths.true_model_path, template, FWD_PATH; output_path = joinpath(dir, "data.dat"),
-                           add_noise = true, rng_seed = SURVEY.rng_seed)
+            ForwardSolve2D(paths.true_model_path, write_data2d(joinpath(tmp, "data.template"), template), FWD_PATH;
+                           output_path = joinpath(dir, "data.dat"), add_noise = true, rng_seed = SURVEY.rng_seed)
         end
         push!(records, merge(paths, (; data_path)))
     end

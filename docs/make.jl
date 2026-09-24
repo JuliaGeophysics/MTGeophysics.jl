@@ -11,8 +11,10 @@ makedocs(;
     pages = [
         "Home" => "index.md",
         "Getting Started"       => "getting_started.md",
-        "1D Forward Modelling"  => "forward1d.md",
+        "1D Modelling and Inversion" => "forward1d.md",
         "2D Forward Modelling"  => "forward2d.md",
+        "2D Topography"         => "topography2d.md",
+        "2D Mesh Tool"          => "mesh2d.md",
         "2D Deterministic Inversion" => "gaussnewton2d.md",
         "2D VFSA Inversion"     => "inversion2d.md",
         "3D VFSA Inversion"     => "inversion3d.md",

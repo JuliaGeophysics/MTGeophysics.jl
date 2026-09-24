@@ -25,9 +25,10 @@
 
 ## Features
 
-- 1D and 2D MT forward solvers (analytical and finite-difference)
-- 2D/3D VFSA inversion with ensemble uncertainty quantification
-- [2D deterministic inversion](docs/src/gaussnewton2d.md): modular framework with Gauss-Newton and NLCG, implicit Fréchet derivatives and their transpose, skin-depth mesh (`examples/run_inv2D.jl`)
+- 1D (exact) and 2D (finite-difference) MT forward solvers with Fréchet derivatives and their transpose
+- 2D topography and water, `topo.dat`, and a mesh tool (batch or GLMakie)
+- [2D and 1D inversion](docs/src/gaussnewton2d.md) from ModEM-style files: Gauss–Newton and NLCG (six files), and [VFSA](docs/src/inversion2d.md) with a mask and ensemble uncertainty (five files)
+- 3D VFSA inversion with ensemble uncertainty quantification
 - ModEM 3D model and data I/O
 - Interactive 3D slice viewers (GLMakie) with GIS overlays and coordinate reprojection
 - Shapefile export for GIS integration
@@ -73,39 +74,34 @@ The `julia --project=.` prefix used throughout the examples below activates that
 
 ## Getting started
 
-Generate the COMMEMI 2D benchmarks (true model, halfspace starting model, and noisy observed data), then run a short multi-chain VFSA inversion on COMMEMI-I:
+Generate the 2D-IV benchmark. It is COMEMI 2D-III under 100–200 m of Finnish-style relief, with a
+lake in the padding. Its noisy data come from a fine mesh, while the start and prior models, the
+covariance and the mask sit on a coarser inversion mesh with the same topography. Then invert it with
+Gauss–Newton or NLCG (six ModEM-style files), or with VFSA (five files: a mask, no covariance or prior):
 
 ```bash
-julia --project=. helpers/benchmarks_2D.jl
-julia --project=. examples/run_vfsa2D.jl
+julia --project=. helpers/benchmarks_2D.jl                    # examples/data/2D-IV
+julia --project=. examples/run_inv2D.jl GN                     # or NLCG
+julia --project=. -t 10 examples/run_vfsa2D.jl                 # threaded chains, ensemble uncertainty
 ```
 
-Results land in a timestamped `examples/run_VFSA2DMT_<timestamp>/` directory with per-chain logs, best models, and ensemble mean/median/std.
+Each run writes `run_YYYYmmdd_HHMMSS/` next to the data: `model.rho`, `data.pred`, `Summary.txt`,
+the inputs, the plots and, for VFSA, the chains and the ensemble mean, median, spread and 5-95% range.
 
-The same inversion driven directly from Julia:
+The same inversion from Julia:
 
 ```julia
 using MTGeophysics
 
-result = VFSA2DMT(
-    VFSA2DMTParams(
-        script_path      = @__FILE__,
-        start_model_path = "examples/0COMEMI2D-I/Comemi2D1.ini",
-        data_path        = "examples/0COMEMI2D-I/Comemi2D1.obs",
-        config = VFSA2DMTConfig(
-            n_chains    = 2,
-            n_ctrl      = 400,
-            max_iter    = 3000,
-            n_trials    = 1,
-            log_bounds  = (0.0, 4.0),
-            seed        = 20260308,
-            keep_models = true,
-        ),
-    ),
-)
+d = "examples/data/2D-IV"; c = "examples/ctrl/2D"
+run = Invert2D("$d/model.start", "$d/data.dat", "$c/FwdCtrl", "$c/InvCtrl.GN", "$d/cov.ctrl", "$d/model.prior")
+PlotInversion2D(run; true_model_path = "$d/model.true")
+vrun = VFSA2D("$d/model.start", "$d/data.dat", "$c/FwdCtrl", "$c/InvCtrl.VFSA", "$d/mask.ctrl")
 ```
 
-> Note: this is a quick demonstration workflow. For production-quality inversion, tune the number of VFSA iterations, number of chains, cooling schedule, regularization, and uncertainty/ensemble controls for your survey and model size.
+`helpers/benchmarks_2D.jl 2D-III` adds the same model without topography,
+`helpers/benchmarks_1D.jl` a 1D sounding for `examples/run_inv1D.jl`, and
+`examples/make_mesh2D.jl` builds the inputs for your own data file.
 
 See the [documentation](https://juliageophysics.github.io/MTGeophysics.jl/dev/) for the full 1D/2D/3D workflows, ensemble statistics and convergence animations, ModEM I/O, configuration options, and the interactive 3D viewers.
 

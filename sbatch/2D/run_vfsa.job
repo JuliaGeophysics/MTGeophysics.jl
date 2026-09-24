@@ -1,0 +1,20 @@
+#!/bin/bash
+#SBATCH --job-name=inv2d-vfsa
+#SBATCH --account=project_xxxx
+#SBATCH --partition=small
+#SBATCH --time=12:00:00
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=64G
+#SBATCH --output=%x_%j.out
+
+set -uo pipefail
+unset SLURM_MEM_PER_NODE SLURM_MEM_PER_CPU SLURM_MEM_PER_GPU
+export JULIA_PKG_PRECOMPILE_AUTO=0
+
+cd "$SLURM_SUBMIT_DIR"
+J="/appl/soft/manual/general/x86_64/julia/1.12.5/bin/julia --project=. -t $SLURM_CPUS_PER_TASK"
+$J -e 'using MTGeophysics' >/dev/null 2>&1 || true
+$J -e 'using MTGeophysics' >/dev/null 2>&1 || J="$J --compiled-modules=existing"
+$J examples/run_vfsa2D.jl "$@"

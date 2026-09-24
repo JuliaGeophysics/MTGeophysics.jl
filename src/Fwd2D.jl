@@ -13,6 +13,7 @@
 #                from the top of the air layer
 #   maxwell      ∇×E = -iωμ H,   ∇×H = σ E
 #   domain       Ω = [y₀, y₁] × [0, z_max], air included with σ_air = 1/ρ_air
+#   topography   σ = σ_air above the ground surface z = s(y), which may vary with y
 #
 #   TE (E-polarisation), E = Ex(y,z) x̂
 #     ∇·(μ⁻¹ ∇Ex) - iωσ Ex = 0                                   in Ω
@@ -35,7 +36,7 @@
 #     TM takes u¹ᴰ = H = -(1/iωμ) dE/dz, which solves d/dz(ρ dH/dz) - iωμ H = 0
 #     the ω²μ₀ε₀ term is kept only in this 1D problem
 #
-#   data, fields at each receiver on the air/earth interface
+#   data, fields at each receiver on the ground surface, z = s(y)
 #     Zxy = Ex / Hy (TE),   Zyx = Ey / Hx (TM)
 #     ρa = |Z|² / (ωμ₀),   φ = atan(Im Z, Re Z)
 #     Zxy lies in the first quadrant, Zyx in the third
@@ -358,10 +359,9 @@ end
 
 #---------- receiver fields ----------
 
-# TE: Ex and Hy at the receivers from the two surface node rows
-function compute_fields_at_receivers_te(
+# TE: Ex and Hy on the nodes of a surface row, from its two node rows
+function _mt2d_surface_fields_te(
     ω::Float64,
-    receiver_locations::Matrix{Float64},
     y_nodes::Vector{Float64},
     first_cell_thickness::Float64,
     sigma_row::AbstractVector{<:Real},
@@ -370,7 +370,6 @@ function compute_fields_at_receivers_te(
     y_lengths = diff(y_nodes)
     n_y = length(y_lengths)
     μ = μ₀_2D .* ones(n_y)
-    n_receivers = size(receiver_locations, 1)
 
     E = electric_pair[:, 1]
     Hz0 = (ddx(n_y) * electric_pair[:, 1]) ./ y_lengths ./ (1im * ω)
@@ -386,25 +385,36 @@ function compute_fields_at_receivers_te(
     Hysurface[2:end-1] = Hyhalf .- (∂Hz∂y .- σavg .* Equarter) .* (0.5 * first_cell_thickness)
     Hysurface[1] = Hysurface[2]
     Hysurface[end] = Hysurface[end - 1]
+    E, Hysurface
+end
 
-    Erec = zeros(CT, n_receivers)
-    Hrec = zeros(CT, n_receivers)
+# linear interpolation of nodal surface fields to the receivers, unnormalised; only E / H is used
+function _mt2d_interpolate_receivers(receiver_locations, y_nodes, E, H)
+    n_receivers = size(receiver_locations, 1)
+    Erec = zeros(eltype(E), n_receivers)
+    Hrec = zeros(eltype(H), n_receivers)
     for i in 1:n_receivers
         y = receiver_locations[i, 1]
         node = findfirst(v -> v > y, y_nodes)
         Δy1 = y - y_nodes[node - 1]
         Δy2 = y_nodes[node] - y
         Erec[i] = E[node - 1] * Δy2 + E[node] * Δy1
-        Hrec[i] = Hysurface[node - 1] * Δy2 + Hysurface[node] * Δy1
+        Hrec[i] = H[node - 1] * Δy2 + H[node] * Δy1
     end
-
     Erec, Hrec
 end
 
-# TM: Ey and Hx at the receivers from the two surface node rows
-function compute_fields_at_receivers_tm(
+# TE: Ex and Hy at the receivers of one surface row
+function compute_fields_at_receivers_te(ω::Float64, receiver_locations::Matrix{Float64}, y_nodes::Vector{Float64},
+                                        first_cell_thickness::Float64, sigma_row::AbstractVector{<:Real},
+                                        electric_pair::AbstractMatrix{<:Complex})
+    E, H = _mt2d_surface_fields_te(ω, y_nodes, first_cell_thickness, sigma_row, electric_pair)
+    _mt2d_interpolate_receivers(receiver_locations, y_nodes, E, H)
+end
+
+# TM: Ey and Hx on the nodes of a surface row, from its two node rows
+function _mt2d_surface_fields_tm(
     ω::Float64,
-    receiver_locations::Matrix{Float64},
     y_nodes::Vector{Float64},
     first_cell_thickness::Float64,
     sigma_row::AbstractVector{<:Real},
@@ -412,7 +422,6 @@ function compute_fields_at_receivers_tm(
 )
     y_lengths = diff(y_nodes)
     n_y = length(y_lengths)
-    n_receivers = size(receiver_locations, 1)
 
     H = magnetic_pair[:, 1]
     Jz0 = -(ddx(n_y) * magnetic_pair[:, 1]) ./ y_lengths
@@ -430,18 +439,21 @@ function compute_fields_at_receivers_tm(
     Eysurface[1] = Eysurface[2]
     Eysurface[end] = Eysurface[end - 1]
 
-    Erec = zeros(CT, n_receivers)
-    Hrec = zeros(CT, n_receivers)
-    for i in 1:n_receivers
-        y = receiver_locations[i, 1]
-        node = findfirst(v -> v > y, y_nodes)
-        Δy1 = y - y_nodes[node - 1]
-        Δy2 = y_nodes[node] - y
-        Erec[i] = Eysurface[node - 1] * Δy2 + Eysurface[node] * Δy1
-        Hrec[i] = H[node - 1] * Δy2 + H[node] * Δy1
-    end
+    # tread-centre Ey of every cell from its own ρ alone: next to a topographic step a surface node
+    # averages in the neighbouring air cell, whose ρ makes the nodal Ey mesh dependent
+    Hmid0 = (magnetic_pair[1:end-1, 1] .+ magnetic_pair[2:end, 1]) ./ 2
+    Hmid1 = (magnetic_pair[1:end-1, 2] .+ magnetic_pair[2:end, 2]) ./ 2
+    Eycell = (Hmid1 .- Hmid0) ./ (first_cell_thickness .* sigma_row) .-
+             1im * ω * μ₀_2D .* (0.75 .* Hmid0 .+ 0.25 .* Hmid1) .* (0.5 * first_cell_thickness)
+    Eysurface, CT.(H), CT.(Eycell)
+end
 
-    Erec, Hrec
+# TM: Ey and Hx at the receivers of one surface row
+function compute_fields_at_receivers_tm(ω::Float64, receiver_locations::Matrix{Float64}, y_nodes::Vector{Float64},
+                                        first_cell_thickness::Float64, sigma_row::AbstractVector{<:Real},
+                                        magnetic_pair::AbstractMatrix{<:Complex})
+    E, H = _mt2d_surface_fields_tm(ω, y_nodes, first_cell_thickness, sigma_row, magnetic_pair)
+    _mt2d_interpolate_receivers(receiver_locations, y_nodes, E, H)
 end
 
 # fold phases into [0, 90] degrees
@@ -462,9 +474,8 @@ end
 
 # one frequency and mode: impedance at the receivers and the state the Fréchet code reuses
 function _solve_mt2d(pol::Symbol, frequency::Float64, mesh::TensorMesh2D, coefficients::CoeffMat,
-                     receiver_locations::Matrix{Float64})
-    boundary_values, sampler = pol == :TE ? (get_boundary_mt2d_te, compute_fields_at_receivers_te) :
-                                            (get_boundary_mt2d_tm, compute_fields_at_receivers_tm)
+                     receiver_locations::Matrix{Float64}, plan)
+    boundary_values = pol == :TE ? get_boundary_mt2d_te : get_boundary_mt2d_tm
     y_lengths = mesh.y_lengths
     z_lengths = mesh.z_lengths
     conductivity = mesh.conductivity
@@ -487,13 +498,68 @@ function _solve_mt2d(pol::Symbol, frequency::Float64, mesh::TensorMesh2D, coeffi
     field[end, 2:end-1] = boundary[n_y+2*n_z+2:end]
     field[2:end-1, 2:end-1] = copy(transpose(reshape(interior, n_y - 1, n_z - 1)))
 
-    z_index = _mt2d_surface_row(z_lengths, mesh.origin[2], receiver_locations[1, 2])
-    pair = copy(transpose(field[z_index:z_index+1, :]))
-    σrow = conductivity[(z_index - 1) * n_y + 1:z_index * n_y]
-    Erec, Hrec = sampler(ω, receiver_locations, y_nodes, z_lengths[z_index], σrow, pair)
+    surface = map(plan.groups) do g
+        pair = copy(transpose(field[g.z_index:g.z_index+1, :]))
+        σrow = conductivity[(g.z_index - 1) * n_y + 1:g.z_index * n_y]
+        _mt2d_surface_fields(pol, ω, y_nodes, z_lengths[g.z_index], σrow, pair)
+    end
 
     u = vec(copy(transpose(field)))
-    Erec ./ Hrec, (; factor, Aio, u, z_index, frequency)
+    _mt2d_station_impedance(pol, plan, surface, receiver_locations, y_nodes), (; factor, Aio, u, frequency)
+end
+
+_mt2d_surface_fields(pol, ω, y_nodes, dz, σrow, pair) =
+    pol == :TE ? _mt2d_surface_fields_te(ω, y_nodes, dz, σrow, pair) :
+                 _mt2d_surface_fields_tm(ω, y_nodes, dz, σrow, pair)
+
+# where each receiver reads its fields: the surface node row of its column, and, next to a
+# topographic step, a dipole window of the columns within half the dipole length each side
+# (its own column alone for a dipole shorter than a cell) whose tread-centre TM Ey, from each
+# cell's own ρ, is averaged by width, as an electric dipole integrates E; on a staircase the
+# point value swings between the convex and concave step corners, and a corner node's Ey takes
+# in the air beside it (checked on the trapezoidal hill in test/TestTopography2D.jl)
+function _mt2d_station_plan(mesh::MT2DMesh, t::TensorMesh2D, locations::Matrix{Float64})
+    ny = length(mesh.y_cell_sizes)
+    topo = mt2d_topo_air(mesh)
+    surface_row(k) = mesh.n_air_cells + topo[k] + 1
+    columns = mt2d_receiver_columns(mesh)
+    rows = [_mt2d_surface_row(t.z_lengths, t.origin[2], locations[i, 2]) for i in axes(locations, 1)]
+    all(i -> rows[i] == surface_row(columns[i]), eachindex(rows)) || error("receiver depths do not match the ground")
+    windows = map(columns) do c
+        half = round(Int, mesh.dipole_length / 2 / mesh.y_cell_sizes[c])
+        cols = max(1, c - half):min(ny, c + half)
+        flat = all(k -> topo[k] == topo[c], union(cols, max(1, c - 1):min(ny, c + 1)))
+        flat ? nothing : collect(cols)
+    end
+    needed = sort(unique(vcat(rows, [surface_row(k) for w in windows if w !== nothing for k in w])))
+    index = Dict(r => i for (i, r) in enumerate(needed))
+    groups = [(z_index = r,) for r in needed]
+    stations = [(group = index[rows[i]],
+                 window = windows[i] === nothing ? nothing :
+                          [(group = index[surface_row(k)], column = k, width = mesh.y_cell_sizes[k]) for k in windows[i]])
+                for i in eachindex(rows)]
+    (; groups, stations)
+end
+
+# impedance at every receiver from the nodal surface fields of each group
+function _mt2d_station_impedance(pol, plan, surface, locations, y_nodes)
+    T = promote_type(eltype(surface[1][1]), eltype(surface[1][2]))
+    Z = zeros(T, length(plan.stations))
+    for (i, p) in enumerate(plan.stations)
+        Es, Hs = surface[p.group]
+        y = locations[i, 1]
+        node = findfirst(v -> v > y, y_nodes)
+        Δy1 = y - y_nodes[node - 1]
+        Δy2 = y_nodes[node] - y
+        E = Es[node - 1] * Δy2 + Es[node] * Δy1
+        H = Hs[node - 1] * Δy2 + Hs[node] * Δy1
+        if pol == :TM && p.window !== nothing
+            Ew = sum(w.width * surface[w.group][3][w.column] for w in p.window)
+            E = (Δy1 + Δy2) * Ew / sum(w.width for w in p.window)
+        end
+        Z[i] = E / H
+    end
+    Z
 end
 
 # TE (Ex) and TM (Hx) systems on the tensor mesh, and the receiver locations
@@ -503,7 +569,7 @@ function _assemble_mt2d_system(mesh::MT2DMesh, resistivity::AbstractMatrix{<:Rea
     size(resistivity) == (n_z, n_y) || error("resistivity must be size ($(n_z), $(n_y))")
 
     σ = 1.0 ./ Matrix{Float64}(resistivity)
-    σ[1:mesh.n_air_cells, :] .= 1 / mesh.air_resistivity
+    σ[mt2d_air_mask(mesh)] .= 1 / mesh.air_resistivity
 
     tensor_mesh = TensorMesh2D(
         mesh.y_cell_sizes,
@@ -514,8 +580,8 @@ function _assemble_mt2d_system(mesh::MT2DMesh, resistivity::AbstractMatrix{<:Rea
     setup_tensor_mesh_2d!(tensor_mesh)
 
     receiver_y = mesh.receiver_positions .- first(mesh.y_nodes)
-    receiver_z = abs(first(mesh.z_nodes))
-    receiver_locations = hcat(receiver_y, fill(receiver_z, length(mesh.receiver_positions)))
+    receiver_z = mesh.z_nodes[mesh.n_air_cells+1] - first(mesh.z_nodes) .+ mt2d_receiver_depths(mesh)
+    receiver_locations = hcat(receiver_y, receiver_z)
 
     n_y_cells, n_z_cells = tensor_mesh.grid_size
     interior, exterior = get_boundary_index(n_y_cells, n_z_cells)
@@ -545,6 +611,7 @@ end
 
 # response plus, with cache_fields, the per-frequency states for Fréchet derivatives
 function _mt2d_forward_cache(mesh, resistivity; mode = :TETM, cache_fields::Bool = true)
+    mesh.dimension == 1 && return _mt1d_forward_cache(mesh, resistivity; mode, cache_fields)
     mode in (:TE, :TM, :TETM) || throw(ArgumentError("mode must be :TE, :TM, or :TETM"))
     size(resistivity) == (length(mesh.z_cell_sizes), length(mesh.y_cell_sizes)) ||
         throw(DimensionMismatch("resistivity must have shape (nz, ny)"))
@@ -556,6 +623,8 @@ function _mt2d_forward_cache(mesh, resistivity; mode = :TETM, cache_fields::Bool
         throw(ArgumentError("receivers must lie in [first(y_nodes), last(y_nodes))"))
     t, te, tm, locations = _assemble_mt2d_system(mesh, resistivity)
     inside, outside = get_boundary_index(t.grid_size...)
+    plan = _mt2d_station_plan(mesh, t, locations)
+    air = mt2d_air_mask(mesh)
     nf, nr = length(mesh.frequencies), length(mesh.receiver_positions)
     arrays = (rho_xy = zeros(nf, nr), phase_xy = zeros(nf, nr), z_xy = zeros(ComplexF64, nf, nr),
               rho_yx = zeros(nf, nr), phase_yx = zeros(nf, nr), z_yx = zeros(ComplexF64, nf, nr))
@@ -563,7 +632,7 @@ function _mt2d_forward_cache(mesh, resistivity; mode = :TETM, cache_fields::Bool
     if nr > 0
         for (i, f) in enumerate(mesh.frequencies), pol in (:TE, :TM)
             mode in (pol, :TETM) || continue
-            Z, state = _solve_mt2d(pol, f, t, pol == :TE ? te : tm, locations)
+            Z, state = _solve_mt2d(pol, f, t, pol == :TE ? te : tm, locations, plan)
             rho, phase, z = pol == :TE ? (arrays.rho_xy, arrays.phase_xy, arrays.z_xy) :
                                        (arrays.rho_yx, arrays.phase_yx, arrays.z_yx)
             z[i, :] = Z
@@ -574,7 +643,7 @@ function _mt2d_forward_cache(mesh, resistivity; mode = :TETM, cache_fields::Bool
     end
     response = MT2DResponse(; frequencies = mesh.frequencies, periods = 1 ./ mesh.frequencies,
                             receivers = mesh.receiver_positions, arrays...)
-    response, (; mesh, t, locations, inside, outside, states, response)
+    response, (; mesh, t, locations, inside, outside, states, response, air, plan)
 end
 
 """
@@ -910,7 +979,9 @@ One row per real datum (Re and Im of each ZXY/ZYX data line), impedance in
 """
 function WriteFrechet2D(path::AbstractString, mesh::MT2DMesh, ρ::AbstractMatrix{<:Real}, data::DataFile2D;
                         mode::Symbol = :TETM)
-    G = FrechetDerivative2D(mesh, ρ; mode, parameterization = :log10_resistivity)
+    # every earth-model cell is a column, topographic air ones are zero
+    G = FrechetDerivative2D(mesh, ρ; mode, parameterization = :log10_resistivity,
+                            active_cells = [i for i in CartesianIndices(ρ) if i[1] > mesh.n_air_cells])
     scale = 1 / (μ₀_2D * 1000)
     nf, ns = size(data.z_xy)
     nz, ny = length(mesh.z_cell_sizes) - mesh.n_air_cells, length(mesh.y_cell_sizes)
@@ -951,32 +1022,38 @@ function _mt2d_parameter_scale(mesh, rho, parameterization)
         throw(ArgumentError("parameterization must be :resistivity, :log_resistivity, or :log10_resistivity"))
     scale = parameterization == :resistivity ? ones(size(rho)) :
             parameterization == :log_resistivity ? Float64.(rho) : log(10.0) .* rho
-    scale[1:mesh.n_air_cells, :] .= 0
+    scale[mt2d_air_mask(mesh)] .= 0
     scale
 end
 
+# sampler inputs, per surface row of the station plan: its cell row σ, then Re and Im of its
+# two node rows; adjacent rows share nodes, so node indices may repeat
 function _mt2d_surface_input(c, s)
     ny = c.t.grid_size[1]
-    row = (s.z_index-1)*ny+1:s.z_index*ny
-    nodes = (s.z_index-1)*(ny+1)+1:(s.z_index+1)*(ny+1)
-    vcat(c.t.conductivity[row], real.(s.u[nodes]), imag.(s.u[nodes])), row, nodes
+    groups = c.plan.groups
+    rows = mapreduce(g -> collect((g.z_index-1)*ny+1:g.z_index*ny), vcat, groups)
+    nodes = mapreduce(g -> collect((g.z_index-1)*(ny+1)+1:(g.z_index+1)*(ny+1)), vcat, groups)
+    vcat(c.t.conductivity[rows], real.(s.u[nodes]), imag.(s.u[nodes])), rows, nodes
 end
 
 function _mt2d_sample(c, s, x)
-    ny = c.t.grid_size[1]
+    groups = c.plan.groups
+    ny, ng = c.t.grid_size[1], length(groups)
     n = 2*(ny+1)
-    σ = x[1:ny]
-    pair = reshape(complex.(x[ny+1:ny+n], x[ny+n+1:ny+2n]), ny+1, 2)
-    sampler = s.pol == :TE ? compute_fields_at_receivers_te : compute_fields_at_receivers_tm
-    E, H = sampler(2π*s.frequency, c.locations, [0.0; cumsum(c.t.y_lengths)],
-                   c.t.z_lengths[s.z_index], σ, pair)
-    E ./ H
+    ore, oim = ng*ny, ng*ny + ng*n
+    y_nodes = [0.0; cumsum(c.t.y_lengths)]
+    surface = map(enumerate(groups)) do (k, g)
+        σ = x[(k-1)*ny+1:k*ny]
+        pair = reshape(complex.(x[ore+(k-1)*n+1:ore+k*n], x[oim+(k-1)*n+1:oim+k*n]), ny+1, 2)
+        _mt2d_surface_fields(s.pol, 2π*s.frequency, y_nodes, c.t.z_lengths[g.z_index], σ, pair)
+    end
+    _mt2d_station_impedance(s.pol, c.plan, surface, c.locations, y_nodes)
 end
 
 function _mt2d_frechet(c, δρ)
     σ = c.t.conductivity
     δσ = -σ.^2 .* vec(permutedims(δρ))
-    δσ[1:c.mesh.n_air_cells*c.t.grid_size[1]] .= 0
+    δσ[vec(permutedims(c.air))] .= 0
     Mn = c.t.average_cell_to_node * c.t.face
     Mf = c.t.average_cell_to_face * c.t.face
     D = c.t.gradient
@@ -1044,13 +1121,16 @@ _mt2d_ops(c) = (Mn = c.t.average_cell_to_node * c.t.face, Mf = c.t.average_cell_
 # ẑ = impedance part of δd̂ at the receivers, λ = adjoint field
 function _mt2d_state_frechet_transpose!(σ̂, c, s, ẑ, ops)
     σ = c.t.conductivity
-    x, row, nodes = _mt2d_surface_input(c, s)
+    x, rows, nodes = _mt2d_surface_input(c, s)
     x̂ = ForwardDiff.gradient(x -> real(dot(ẑ, _mt2d_sample(c, s, x))), x)
-    ny = c.t.grid_size[1]
-    n = length(nodes)
+    nσ, n = length(rows), length(nodes)
     û = zeros(ComplexF64, length(s.u))
-    û[nodes] = complex.(x̂[ny+1:ny+n], x̂[ny+n+1:ny+2n])
-    σ̂[row] .+= x̂[1:ny]
+    for (k, i) in enumerate(nodes)
+        û[i] += complex(x̂[nσ+k], x̂[nσ+n+k])
+    end
+    for (k, i) in enumerate(rows)
+        σ̂[i] += x̂[k]
+    end
     λ = zeros(ComplexF64, length(s.u))
     λ[c.inside] = s.factor' \ û[c.inside]
     b̂ = û[c.outside] - s.Aio' * λ[c.inside]
@@ -1066,7 +1146,7 @@ end
 # σ̂ to model-shaped ρ̂ = -σ² σ̂, air zeroed
 function _mt2d_dual_to_rho(c, σ̂)
     ρ̂ = permutedims(reshape(-c.t.conductivity.^2 .* σ̂, c.t.grid_size...))
-    ρ̂[1:c.mesh.n_air_cells, :] .= 0
+    ρ̂[c.air] .= 0
     ρ̂
 end
 
@@ -1147,7 +1227,7 @@ column with the forward lu factors reused.
   each block `(nf * nr, length(cells))`; rows follow `vec(response.field)`, frequency fastest;
   columns follow `cells`, Cartesian indices in model `(z, y)` order
 - `active_cells`: `nothing` for all earth cells, a model-shaped Bool mask, or Cartesian/linear
-  indices; requested air columns are zero
+  indices; requested air columns (air layers and topography) are zero
 - for large models use `ApplyFrechet2D` and `ApplyFrechetTranspose2D` instead
 """
 function FrechetDerivative2D(mesh::MT2DMesh, ρ::AbstractMatrix{<:Real};
@@ -1157,7 +1237,7 @@ function FrechetDerivative2D(mesh::MT2DMesh, ρ::AbstractMatrix{<:Real};
     scale = _mt2d_parameter_scale(mesh, ρ, parameterization)
     allcells = CartesianIndices(ρ)
     cells = if active_cells === nothing
-        [i for i in allcells if i[1] > mesh.n_air_cells]
+        [i for i in allcells if !c.air[i]]
     elseif active_cells isa AbstractArray{Bool}
         size(active_cells) == size(ρ) || throw(DimensionMismatch("active mask must match resistivity"))
         findall(active_cells)

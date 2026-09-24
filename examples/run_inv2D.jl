@@ -1,14 +1,14 @@
-# 2D MT inversion, ModEM style, from six files
+# 2D MT deterministic inversion (GN or NLCG), ModEM style, from six files; VFSA runs from run_vfsa2D.jl
 # Author: @pankajkmishra
-# The algorithm (GN, NLCG or VFSA) comes from the inversion control; results and plots go to run_YYYYmmdd_HHMMSS/ next to the data
+# The algorithm comes from the inversion control; results and plots go to run_YYYYmmdd_HHMMSS/ next to the data
 # Controls are shipped in examples/ctrl/2D; generate the models and data once: julia --project=. helpers/benchmarks_2D.jl
-# Usage: julia --project=. examples/run_inv2D.jl [GN|NLCG|VFSA]
+# Usage: julia --project=. examples/run_inv2D.jl [GN|NLCG]
 #        julia --project=. examples/run_inv2D.jl model.start data.dat FwdCtrl InvCtrl cov.ctrl model.prior
 
 using MTGeophysics
 using Printf
 
-const CASE_DIR = joinpath(@__DIR__, "data", "2D-III")
+const CASE_DIR = joinpath(@__DIR__, "data", "2D-IV")
 const CTRL_DIR = joinpath(@__DIR__, "ctrl", "2D")
 const PLOT_DEPTH_KM = 10.0         # depth limit of the model plots
 const LOG10_RHO_RANGE = (0.0, 3.5)
@@ -20,7 +20,7 @@ inputs = if length(ARGS) <= 1
 elseif length(ARGS) == 6
     ARGS
 else
-    error("usage: julia --project=. examples/run_inv2D.jl [GN|NLCG|VFSA] or model.start data.dat FwdCtrl InvCtrl cov.ctrl model.prior")
+    error("usage: julia --project=. examples/run_inv2D.jl [GN|NLCG] or model.start data.dat FwdCtrl InvCtrl cov.ctrl model.prior")
 end
 all(isfile, inputs) || error("missing inputs $(filter(!isfile, inputs)); run julia --project=. helpers/benchmarks_2D.jl first")
 true_model = joinpath(dirname(inputs[2]), "model.true")   # plots only, skipped when absent
@@ -31,8 +31,7 @@ plots = PlotInversion2D(run; true_model_path = isfile(true_model) ? true_model :
 
 println()
 @printf("Algorithm   : %s\n", uppercase(string(run.algorithm)))
-run.history === nothing || @printf("Termination : %s (converged = %s), %d iterations\n",
-                                   run.reason, run.converged, length(run.history) - 1)
+@printf("Termination : %s (converged = %s), %d iterations\n", run.reason, run.converged, length(run.history) - 1)
 @printf("Final RMS   : %.3f, %.1f s\n", run.rms, elapsed)
 println("Outputs     : ", run.run_dir, "  (model.rho, data.pred)")
 foreach(p -> println("  ", relpath(p, run.run_dir)), plots)

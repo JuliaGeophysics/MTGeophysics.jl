@@ -6,7 +6,7 @@
 
 using MTGeophysics
 
-const CASE_DIR = joinpath(@__DIR__, "data", "2D-III")
+const CASE_DIR = joinpath(@__DIR__, "data", "2D-IV")
 const CTRL_DIR = joinpath(@__DIR__, "ctrl", "2D")
 
 inputs = if isempty(ARGS)

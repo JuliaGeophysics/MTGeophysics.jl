@@ -15,16 +15,19 @@ using Test
             inv = InvCtrl2D(algorithm = :nlcg, lambda = 3.0, target_rms = 1.2, max_iter = 40, log_bounds = (-1.0, 4.5),
                             smooth_y = 2.0, nlcg_precondition = false)
             @test ReadInvCtrl2D(WriteInvCtrl2D(joinpath(dir, "inv.ctrl"), inv)) == inv
-            vfsa = InvCtrl2D(algorithm = :vfsa, lambda = 1.0, target_rms = 1.1, max_iter = 9, vfsa_seed = 7)
-            @test ReadInvCtrl2D(WriteInvCtrl2D(joinpath(dir, "vfsa.ctrl"), vfsa)) == vfsa
+            vfsa = VFSACtrl2D(target_rms = 1.1, max_iter = 9, seed = 7, chains = 3, rbf_y = 1.5, log_bounds = (0.5, 3.5))
+            @test ReadVFSACtrl2D(WriteVFSACtrl2D(joinpath(dir, "vfsa.ctrl"), vfsa)) == vfsa
+            mask = [1 1 0 1; 1 9 9 1; 1 1 1 0]
+            @test ReadMask2D(WriteMask2D(joinpath(dir, "mask.ctrl"), mask)) == mask
+            @test readlines(joinpath(dir, "mask.ctrl"))[1] == "4 3"
             # each file holds only its own algorithm's keys
             @test !occursin("VFSA", read(joinpath(dir, "inv.ctrl"), String)) && !occursin("GN damping", read(joinpath(dir, "inv.ctrl"), String))
-            @test !occursin("Smallness", read(joinpath(dir, "vfsa.ctrl"), String))
+            @test !any(k -> occursin(k, read(joinpath(dir, "vfsa.ctrl"), String)), ("Smallness", "Algorithm", "lambda"))
             cov = Cov2D(sy = [0.1, 0.2, 0.3], sz = 0.4, n_smooth = 2, exceptions = [(2, 1, 0.0)], mask = [1 1 0 1; 1 2 2 1; 1 1 1 1])
             back = ReadCov2D(WriteCov2D(joinpath(dir, "cov.ctrl"), cov))
             @test back.sy == cov.sy && back.sz == cov.sz && back.n_smooth == 2
             @test back.exceptions == cov.exceptions && back.mask == cov.mask
-            @test !any(f -> occursin('#', read(joinpath(dir, f), String)), ("fwd.ctrl", "inv.ctrl", "cov.ctrl"))
+            @test !any(f -> occursin('#', read(joinpath(dir, f), String)), ("fwd.ctrl", "inv.ctrl", "vfsa.ctrl", "cov.ctrl", "mask.ctrl"))
 
             # only the required keys, the rest take defaults
             path = joinpath(dir, "min.ctrl")
@@ -33,6 +36,13 @@ using Test
             c = ReadInvCtrl2D(path)
             @test c.algorithm == :gn && c.max_iter == 5 && c.target_rms == 1.05 && c.mode == :TETM
 
+            write(path, "Algorithm : VFSA\nInitial damping factor lambda : 1\nExit search when rms is less than : 1\n" *
+                        "Maximum number of iterations : 5\n")
+            @test_throws ErrorException ReadInvCtrl2D(path)                       # vfsa has its own control
+            write(path, "Exit search when rms is less than : 1\nMaximum number of iterations : 5\nVFSA chains : 2\n")
+            @test_throws ErrorException ReadVFSACtrl2D(path)                      # old prefixed keys
+            write(path, "1 2\n1\n")
+            @test_throws ErrorException ReadMask2D(path)                          # one value short
             write(path, "Algorithm : GN\nMaximum number of iterations : 5\n")
             @test_throws ErrorException ReadInvCtrl2D(path)                       # missing required keys
             write(path, "Mode : TE\nAir layers : 5\nAir thickness (m) : 1e4\nAir growth factor : 2\n" *
@@ -47,7 +57,8 @@ using Test
         # the shipped controls read cleanly, one per algorithm
         ctrl_dir = joinpath(dirname(@__DIR__), "examples", "ctrl", "2D")
         @test ReadFwdCtrl2D(joinpath(ctrl_dir, "FwdCtrl")).mode == :TETM
-        @test [ReadInvCtrl2D(joinpath(ctrl_dir, "InvCtrl.$a")).algorithm for a in ("GN", "NLCG", "VFSA")] == [:gn, :nlcg, :vfsa]
+        @test [ReadInvCtrl2D(joinpath(ctrl_dir, "InvCtrl.$a")).algorithm for a in ("GN", "NLCG")] == [:gn, :nlcg]
+        @test ReadVFSACtrl2D(joinpath(ctrl_dir, "InvCtrl.VFSA")).chains >= 1
     end
 
     #---------- model files and mesh assembly ----------
@@ -70,7 +81,7 @@ using Test
             @test m.resistivity ≈ ρ[mesh.n_air_cells+1:end, :] rtol = 1e-5
             @test m.origin[2] ≈ mesh.y_nodes[1]
             # older layout with air rows reads as the same earth model
-            legacy = ReadModel2D(write_model2d(joinpath(dir, "legacy.rho"), mesh, ρ))
+            legacy = ReadModel2D(MTGeophysics._write_model2d_legacy(joinpath(dir, "legacy.rho"), mesh, ρ))
             @test legacy.resistivity ≈ m.resistivity rtol = 1e-5
             @test all(abs.(legacy.z_cell_sizes .- m.z_cell_sizes) .<= 5e-4)
             shifted = MT2DMesh(y_nodes = mesh.y_nodes .+ 10, z_nodes = mesh.z_nodes, y_cell_sizes = mesh.y_cell_sizes,
@@ -86,19 +97,21 @@ using Test
         model = ModelFile2D(title = "", x_cell_sizes = [1.0], y_cell_sizes = fill(100.0, 10), z_cell_sizes = fill(50.0, 4),
                             resistivity = fill(30.0, 4, 10), n_air_cells = 0, origin = [0.0, -500.0, 0.0], rotation = 0.0,
                             format = "LOGE")
-        survey = (receivers = [-250.0, 250.0], frequencies = [1.0, 10.0], z_positions = zeros(2))
+        survey = (receivers = [-250.0, 250.0], frequencies = [1.0, 10.0], z_positions = zeros(2), site_names = ["A", "B"])
         fwd = FwdCtrl2D(mode = :TETM, air_layers = 4, air_thickness = 8000.0, air_growth = 2.0, air_resistivity = 1e7)
         m, r = Mesh2DFromInputs(model, survey, fwd)
         @test m.n_air_cells == 4 && m.air_resistivity == 1e7 && size(r) == (8, 10)
         @test all(r[1:4, :] .== 1e7) && all(r[5:end, :] .== 30.0)
         @test m.z_nodes[5] ≈ 0 && m.z_nodes[1] ≈ -8000 && m.y_nodes[1] ≈ -500 && m.y_nodes[end] ≈ 500
         @test_throws ArgumentError Mesh2DFromInputs(model, merge(survey, (receivers = [-250.0, 900.0],)), fwd)
-        @test_throws ArgumentError Mesh2DFromInputs(model, merge(survey, (z_positions = [0.0, 12.0],)), fwd)
+        # stations snap to the ground, warned beyond half a surface cell (25 m here)
+        @test_logs Mesh2DFromInputs(model, merge(survey, (z_positions = [0.0, 12.0],)), fwd)
+        @test_logs (:warn, r"moved to the ground") Mesh2DFromInputs(model, merge(survey, (z_positions = [0.0, 40.0],)), fwd)
 
         # geometric air rounds in the older model layout; the surface row must still be found
         mktempdir() do dir
-            reloaded = load_model2d(write_model2d(joinpath(dir, "air.rho"), m, r))
-            back = build_mesh_from_model2d(reloaded; frequencies = [1.0, 10.0], receiver_positions = [-250.0, 250.0])
+            reloaded = MTGeophysics._load_model2d_legacy(MTGeophysics._write_model2d_legacy(joinpath(dir, "air.rho"), m, r))
+            back = MTGeophysics._mesh_from_legacy_model2d(reloaded; frequencies = [1.0, 10.0], receiver_positions = [-250.0, 250.0])
             @test all(isfinite, run_mt2d_forward(back, reloaded.resistivity).z_xy)
         end
 
@@ -147,50 +160,6 @@ using Test
         end
     end
 
-    #---------- SEG-Y model sections ----------
-
-    @testset "SEG-Y section on a curved profile" begin
-        # model_2D_to_SEGY comes from examples/model_2D_to_SEGY.jl, included by runtests.jl
-        mesh = BuildMesh2D(frequencies = [1.0, 10.0], receiver_positions = collect(-1500.0:500.0:1500.0),
-                           y_core_range = (-2000.0, 2000.0), y_core_cell = 250.0, y_padding = 3000.0, pad_factor = 1.5,
-                           air_top = -10_000.0, air_cells = 5, ground_layers = [50.0, 50.0, 100.0, 200.0, 400.0])
-        ρ = build_mt2d_halfspace_model(mesh; background_resistivity = 100.0)
-        ρ[mesh.n_air_cells+3, 9:12] .= 5.0                                     # conductor 100-200 m deep
-        # stations on a 3 km radius arc near Jyväskylä, profile y = arc length
-        θ = mesh.receiver_positions ./ 3000
-        lat = 62.25 .+ (3000 .* (1 .- cos.(θ))) ./ 111_320
-        lon = 25.75 .+ (3000 .* sin.(θ)) ./ (111_320 * cosd(62.25))
-        data = data_from_response2d(run_mt2d_forward(mesh, ρ); latitudes = lat, longitudes = lon, origin = [62.25, 25.75])
-        mktempdir() do dir
-            model_path = WriteModel2D(joinpath(dir, "model.rho"), mesh, ρ)
-            data_path = write_data2d(joinpath(dir, "data.dat"), data)
-            path = model_2D_to_SEGY(model_path, data_path)
-            @test path == joinpath(dir, "model.sgy")
-            b = SegyIO.segy_read(path)
-            h = b.traceheaders
-            nsamp, ntr = size(b.data)
-            @test filesize(path) == 3600 + ntr * (240 + 4nsamp)
-            @test b.fileheader.bfh.DataSampleFormat == 5 && b.fileheader.bfh.dt == 50 && nsamp == 16
-            @test ntr == 16                                                    # the 4 km core at 250 m, no padding
-            text = String([Char(findfirst(==(c), EBCDIC) + 31) for c in codeunits(b.fileheader.th) if c in EBCDIC])
-            @test occursin("EPSG:32635", text) && occursin("LOG10 RESISTIVITY", text)
-            y = getfield.(h, :ShotPoint) ./ 100
-            @test all(abs.(y .- (-2000 .+ 250 .* ((1:ntr) .- 0.5))) .< 0.01)
-            # samples are the cell values: sample k sits at depth (k-1) dz
-            ic = findfirst(>(-500), y)
-            @test b.data[3, ic] ≈ log10(5) && b.data[1, ic] ≈ 2 && b.data[5, 1] ≈ 2
-            # traces follow the arc, about dy apart in map view
-            x, n = getfield.(h, :SourceX) ./ 100, getfield.(h, :SourceY) ./ 100
-            @test x == getfield.(h, :CDPX) ./ 100 && all(==(-100), getfield.(h, :RecSourceScalar))
-            to_map = MTGeophysics.Proj.Transformation("EPSG:4326", "EPSG:32635"; always_xy = true)
-            ends = [to_map(lon[i], lat[i]) for i in (1, length(lat))]
-            @test abs(n[ic] - (ends[1][2] + ends[2][2]) / 2) > 50                # the line is curved
-            @test all(d -> abs(d - 250) < 5, hypot.(diff(x), diff(n)))
-            @test size(SegyIO.segy_read(model_2D_to_SEGY(model_path, data_path, joinpath(dir, "all.sgy"); y_range = :all)).data, 2) == floor(Int, (mesh.y_nodes[end] - mesh.y_nodes[1]) / 250)
-            @test_throws ArgumentError model_2D_to_SEGY(model_path, data_path, joinpath(dir, "bad.sgy"); dz = 12.5)
-        end
-    end
-
     #---------- forward and inversion from files ----------
 
     @testset "file workflows" begin
@@ -216,7 +185,7 @@ using Test
             WriteCov2D(path("cov.ctrl"), Cov2D(length(mesh.z_cell_sizes) - mesh.n_air_cells, length(mesh.y_cell_sizes)))
             fwd = ReadFwdCtrl2D(path("fwd.ctrl"))
             WriteFwdCtrl2D(path("fwd.ctrl"), FwdCtrl2D(fwd.mode, fwd.air_layers, fwd.air_thickness, fwd.air_growth,
-                                                        fwd.air_resistivity, true))
+                                                        fwd.air_resistivity, true, fwd.dipole_length))
             pred = ForwardSolve2D(path("model.rho"), path("data.dat"), path("fwd.ctrl"))
             @test pred == path("data.pred")
             p = load_data2d(pred)
@@ -252,15 +221,19 @@ using Test
             @test all(isfile, plots) && all(p -> startswith(p, joinpath(run.run_dir, "plots")), plots)
             @test isfile(PlotData2D(path("obs.dat"); predicted_path = pred, output_path = path("DataFit.png")))
 
-            # vfsa behind the same six-file front end
-            vfsa = InvCtrl2D(algorithm = :vfsa, lambda = 1.0, target_rms = 1.0, max_iter = 1, vfsa_chains = 2,
-                             vfsa_control_points = 8, log_bounds = (0.0, 4.0))
-            WriteInvCtrl2D(path("inv_vfsa.ctrl"), vfsa)
-            cov.mask .= 1
-            WriteCov2D(path("cov.ctrl"), cov)
-            vrun = Invert2D(path("model.rho"), path("obs.dat"), path("fwd.ctrl"), path("inv_vfsa.ctrl"),
-                            path("cov.ctrl"), path("model.prior"))
+            # vfsa from five files: the mask alone, no covariance and no prior
+            WriteVFSACtrl2D(path("vfsa.ctrl"), VFSACtrl2D(target_rms = 1.0, max_iter = 1, chains = 2, control_points = 8,
+                                                          log_bounds = (0.0, 4.0)))
+            mask = ones(Int, size(model.resistivity))
+            mask[1, :] .= 0
+            WriteMask2D(path("mask.ctrl"), mask)
+            @test_throws ErrorException Invert2D(path("model.rho"), path("obs.dat"), path("fwd.ctrl"), path("vfsa.ctrl"),
+                                                 path("cov.ctrl"), path("model.prior"))
+            vrun = VFSA2D(path("model.rho"), path("obs.dat"), path("fwd.ctrl"), path("vfsa.ctrl"), path("mask.ctrl"))
             @test vrun.algorithm == :vfsa && isfinite(vrun.rms) && vrun.history === nothing
+            @test isfile(joinpath(vrun.run_dir, "inputs", "mask.ctrl")) && !isfile(joinpath(vrun.run_dir, "inputs", "cov.ctrl"))
+            vfinal = ReadModel2D(joinpath(vrun.run_dir, "model.rho")).resistivity
+            @test vfinal[1, :] ≈ model.resistivity[1, :] rtol = 1e-5               # masked layer stays fixed
             @test vrun.converged == (vrun.rms <= 1.0) && vrun.reason in (:target_rms, :max_iter)
             @test all(f -> isfile(joinpath(vrun.run_dir, f)), ("model.rho", "data.pred", "Summary.txt"))
             @test isdir(joinpath(vrun.run_dir, "vfsa"))

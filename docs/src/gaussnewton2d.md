@@ -1,83 +1,70 @@
-# 2D deterministic inversion
+# 2D Deterministic Inversion
 
-The 2D inversion code is split into a framework and separate algorithm files.
+Gauss–Newton and NLCG share one driver and one six-file front end, as ModEM does. VFSA
+has its own five-file front end, with a mask but no covariance or prior
+([2D VFSA Inversion](inversion2d.md)). 1D reuses both ([1D](forward1d.md)).
 
 | File | Contents |
 |:-----|:---------|
-| `src/Mesh2D.jl` | Mesh geometry, skin-depth vertical core, model builders, model I/O |
-| `src/Fwd2D.jl` | TE/TM forward solver, data I/O, misfit, Fréchet derivatives (G, G δm, Gᵗ δd̂) |
-| `src/Inv2D.jl` | Problem setup, objective, regularization, line search, driver `Invert2D` |
-| `src/Inv2D_GN.jl` | Damped Gauss–Newton algorithm |
-| `src/Inv2D_NLCG.jl` | Preconditioned nonlinear conjugate gradients |
-| `src/PlotModel2D.jl` | Model sections, mesh layout, convergence |
-| `src/PlotData2D.jl` | Data pseudo-sections, site curves, observed-vs-predicted fit |
-
-`Inv2D.jl` does not depend on any particular algorithm. Future algorithms, such as
-L-BFGS or Occam, go in their own `Inv2D_<Name>.jl`.
+| `src/Control2D.jl` | `fwd.ctrl`, `inv.ctrl`, VFSA control, `cov.ctrl` and `mask.ctrl` readers and writers |
+| `src/Mesh2D.jl` | mesh geometry, topography helpers, model builders and model I/O |
+| `src/Fwd2D.jl` | TE/TM solver, data I/O, misfit, Fréchet derivatives (G, G δm, Gᵗ δd̂) |
+| `src/Topo2D.jl` | `topo.dat`, topography and water cut into models |
+| `src/Inv2D.jl` | problem setup, objective, regularization, line search, driver, six-file `Invert2D` |
+| `src/Inv2D_GN.jl` | damped Gauss–Newton |
+| `src/Inv2D_NLCG.jl` | preconditioned nonlinear conjugate gradients |
+| `src/Inv2D_VFSA.jl` | very fast simulated annealing, its ensemble and the five-file `VFSA2D` |
+| `src/PlotModel2D.jl` | resistivity sections and the mesh |
+| `src/PlotData2D.jl` | data curves and fit, convergence, `PlotInversion2D` |
 
 ## Quick start
 
-All inversions take the same inputs: an observed data file and a start model,
-whose grid defines the mesh. Generate the COMEMI-III benchmark once. It uses a
-skin-depth mesh, 17 frequencies from 0.1 to 1000 Hz, 11 sites, and 5% noise,
-all set in `BENCHMARK_MESH` in the helper:
-
 ```bash
-julia --project=. helpers/benchmarks_2D.jl        # writes examples/0COMEMI2D-III/
+julia --project=. helpers/benchmarks_2D.jl                 # examples/data/2D-IV
+julia --project=. examples/run_inv2D.jl GN                  # or NLCG
+julia --project=. examples/run_inv2D.jl model.start data.dat FwdCtrl InvCtrl cov.ctrl model.prior
 ```
-
-Then invert it with any algorithm:
-
-```bash
-julia --project=. examples/run_inv2D.jl gn        # Gauss–Newton
-julia --project=. examples/run_inv2D.jl nlcg      # nonlinear conjugate gradients
-julia --project=. examples/run_inv2D.jl vfsa      # very fast simulated annealing
-```
-
-Each run writes its results to `examples/Results/<alg>2D_<timestamp>/`. The
-`plots/` subfolder gets the same plots for every algorithm:
-
-- `mesh_full`, `mesh_core`
-- `mstart_core`, `mtrue_core`
-- `mfinal_core`, `mfinal_full`
-- `data_fit`
-- `data_obs_maps`, `data_pred_maps`
-- `convergence` (Gauss–Newton and NLCG only)
-
-In Julia:
 
 ```julia
-using MTGeophysics
-
-result = Invert2D("Comemi2D3.ini", "Comemi2D3.obs"; output_dir = "Results/run",
-    algorithm = NLCG2DConfig(),                 # or GaussNewton2DConfig()
-    options = Inv2DOptions(max_iter = 200, beta = 1.0, target_rms = 1.0))
+run = Invert2D("model.start", "data.dat", "FwdCtrl", "InvCtrl.GN", "cov.ctrl", "model.prior")
+PlotInversion2D(run; true_model_path = "model.true")
 ```
 
-The in-memory form is `Invert2D(mesh, initial, observed; algorithm, options)`.
-`GaussNewton2D(...; config)` and `NLCG2D(...; config)` are shorthands.
+The inputs are the start model, the observed data, `fwd.ctrl` (mode and air), `inv.ctrl`
+(`Algorithm : GN` or `NLCG`, and settings), the covariance file and the prior (the
+reference model of the regularization). The regularizer is the gradient one below, with
+its weights in `inv.ctrl`. The covariance file keeps the ModEM layout, but only its mask
+is read (0 = air or fixed, 9 = water, others free).
+The controls ship in `examples/ctrl/2D`; `MakeMesh2D` ([mesh tool](mesh2d.md)) writes
+all of them for a new data file.
 
-With `output_dir`, the file workflow writes `model_<tag>.rho`, `data_<tag>.dat`,
-`history_<tag>.csv`, and `summary_<tag>.txt`. The tag is `gn` or `nlcg`,
-depending on the algorithm.
-Existing result files are never overwritten. Input data must contain observed
-impedances and absolute errors, not a `.ref` template of relative errors.
+Everything goes to `run_YYYYmmdd_HHMMSS/` next to the data: `model.rho` (restartable),
+`data.pred`, `History.csv`, `Summary.txt`, the inputs in `inputs/`, and the plots of
+`PlotInversion2D` in `plots/` (mesh, start, final and true models, data fit, convergence).
 
-## Mesh: skin-depth vertical core
+`inv.ctrl` (`examples/ctrl/2D/InvCtrl.GN`):
 
-`BuildMesh2D` designs the ground layers from the survey unless you pass
-explicit `ground_layers`:
+```text
+Algorithm                         : GN
+Initial damping factor lambda     : 1
+Exit search when rms is less than : 1
+Maximum number of iterations      : 20
+Mode                              : TETM
+Log10 resistivity bounds          : 0 4
+Max log10 step                    : 0.5
+Max line search steps             : 12
+Smallness weight                  : 0.01
+Smoothing weight y                : 1
+Smoothing weight z                : 1
+GN damping                        : 0.01
+```
 
-- the core is **uniform** (constant dz) from the surface to at least
-  `z_core_skin_depths` (default 1) skin depths of the lowest frequency;
-- the skin depth is `δ = sqrt(2ρ/(ωμ₀)) ≈ 503·sqrt(ρ/f)`, using `background_resistivity`;
-- dz defaults to `max(δ_min/3, δ_max/max_core_layers)`, or you can set `z_core_cell`;
-- below the core, layers grow by `pad_factor` until the mesh bottom reaches
-  `z_bottom_skin_depths` (default 4) skin depths.
+lambda is β, fixed through the run. NLCG replaces `GN damping` with `NLCG restart` and
+`NLCG precondition`.
 
-`plot_mt2d_mesh(mesh; region=:full)` shows the whole mesh, with the uniform core
-outlined and the skin depths of `f_min` and `f_max` marked. `region=:core`
-zooms in on the core.
+The in-memory form is `Invert2D(mesh, initial, observed; algorithm, options,
+active_cells, reference_resistivity, water_cells)`; `GaussNewton2D(...; config)` and
+`NLCG2D(...; config)` are shorthands.
 
 ## Objective and options
 
@@ -117,8 +104,9 @@ Termination reasons are:
 - `:line_search_failed`
 
 Without an active mask, all earth cells, including the padding, are inverted.
-Air is fixed. Active cells can be a model-shaped Boolean mask or a vector of
-Cartesian `(z, y)` or linear indices.
+Air, topographic air included, is fixed. Active cells can be a model-shaped Boolean mask
+or a vector of Cartesian `(z, y)` or linear indices. Air and water cells take no
+regularization term, and no smoothing pair crosses into them.
 
 ## Gauss–Newton
 

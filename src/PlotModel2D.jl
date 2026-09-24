@@ -1,15 +1,20 @@
 # 2D MT model plots
 # Author: @pankajkmishra
-# Resistivity sections, mesh layout with skin-depth core, and inversion convergence
+# Resistivity sections and the mesh layout with its skin-depth core
 
 using CairoMakie
 
 """
     plot_mt2d_model(mesh, resistivity; output_path, show_air=false, show_grid=false, show_padding=true,
-                    maximum_depth_km=Inf, resistivity_log10_range=(0.0, 4.0), annotation=nothing) -> path
+                    maximum_depth_km=Inf, resistivity_log10_range=(0.0, 4.0), annotation=nothing,
+                    water=nothing, log10_values=false, colormap=:Spectral,
+                    colorbar_label="log10 ρ (Ω·m)") -> path
 
-Resistivity section with the stations on top. `annotation` is a short label drawn
-inside the section, top left, e.g. an iteration number; there is no title.
+Resistivity section, depth below the model top, with the stations on the ground. Air,
+topographic air included, is blank; with topography the ground is drawn as a line.
+`water` is a model-shaped mask of water cells, shaded blue. `annotation` is a short
+label drawn inside the section, top left, e.g. an iteration number; there is no title.
+With `log10_values` the matrix is plotted as given, e.g. a log10 standard deviation.
 """
 function plot_mt2d_model(
     mesh::MT2DMesh,
@@ -21,6 +26,10 @@ function plot_mt2d_model(
     maximum_depth_km::Real = Inf,
     resistivity_log10_range::Tuple{Float64, Float64} = (0.0, 4.0),
     annotation::Union{Nothing, AbstractString} = nothing,
+    water::Union{Nothing, AbstractMatrix{Bool}} = nothing,
+    log10_values::Bool = false,
+    colormap = :Spectral,
+    colorbar_label::AbstractString = "log10 ρ (Ω·m)",
 )
     CairoMakie.activate!()
 
@@ -29,20 +38,25 @@ function plot_mt2d_model(
     y_edges = mesh.y_nodes[first(column_range):(last(column_range) + 1)] ./ 1000
     row_range = show_air ? (1:size(resistivity, 1)) : ((mesh.n_air_cells + 1):size(resistivity, 1))
     z_edges = show_air ? (mesh.z_nodes ./ 1000) : (mesh.z_nodes[(mesh.n_air_cells + 1):end] ./ 1000)
-    rho_plot = log10.(resistivity[row_range, column_range])
-    show_air && (rho_plot[1:mesh.n_air_cells, :] .= NaN)      # air drawn as nan_color
+    rho_plot = log10_values ? Float64.(resistivity[row_range, column_range]) : log10.(resistivity[row_range, column_range])
+    rho_plot[mt2d_air_mask(mesh)[row_range, column_range]] .= NaN      # air drawn as nan_color
 
     figure = Figure(size = (1100, 650))
     axis = _mt_axis(figure[1, 1]; xlabel = "Offset (km)", ylabel = "Depth (km)", yreversed = true)
-    heatmap = heatmap!(axis, y_edges, z_edges, rho_plot', colormap = :Spectral, colorrange = resistivity_log10_range,
+    heatmap = heatmap!(axis, y_edges, z_edges, rho_plot', colormap = colormap, colorrange = resistivity_log10_range,
                        nan_color = :aliceblue)
-    Colorbar(figure[1, 2], heatmap, label = "log10 ρ (Ω·m)", labelfont = :regular)
+    Colorbar(figure[1, 2], heatmap, label = colorbar_label, labelfont = :regular)
     xlims!(axis, minimum(y_edges), maximum(y_edges))
+    if water !== nothing && any(water)
+        wet = [water[iz, iy] ? 1.0 : NaN for iz in row_range, iy in column_range]
+        heatmap!(axis, y_edges, z_edges, wet', colormap = [:lightskyblue, :lightskyblue], nan_color = :transparent)
+    end
+    _mt2d_ground_line!(axis, mesh, column_range)
 
     scatter!(
         axis,
         mesh.receiver_positions ./ 1000,
-        fill(0.0, length(mesh.receiver_positions));
+        mt2d_receiver_depths(mesh) ./ 1000;
         marker = :dtriangle,
         markersize = 12,
         color = :black,
@@ -64,6 +78,17 @@ function plot_mt2d_model(
     annotation === nothing || text!(axis, 0.01, 0.98; text = annotation, space = :relative,
                                     align = (:left, :top), fontsize = 14)
     _mt_save(output_path, figure)
+end
+
+# staircase ground surface in km, only when there is topography
+function _mt2d_ground_line!(axis, mesh, columns = eachindex(mesh.y_cell_sizes))
+    topo = mt2d_topo_air(mesh)
+    any(>(0), topo) || return nothing
+    z0 = mesh.z_nodes[mesh.n_air_cells+1]
+    depth = [mesh.z_nodes[mesh.n_air_cells+1+topo[iy]] - z0 for iy in columns] ./ 1000
+    stairs!(axis, mesh.y_nodes[first(columns):last(columns)+1] ./ 1000, vcat(depth, depth[end]);
+            step = :post, color = :black, linewidth = 1.2)
+    nothing
 end
 
 """
@@ -142,7 +167,8 @@ function plot_mt2d_mesh(
     hlines!(axis, [δ_min], color = :teal, linestyle = :dot, linewidth = 2,
             label = @sprintf("δ(f_max) = %.2f km", δ_min))
     hlines!(axis, [0.0], color = :black, linewidth = 1.5)
-    scatter!(axis, mesh.receiver_positions ./ 1000, zeros(length(mesh.receiver_positions));
+    _mt2d_ground_line!(axis, mesh)
+    scatter!(axis, mesh.receiver_positions ./ 1000, mt2d_receiver_depths(mesh) ./ 1000;
              marker = :dtriangle, markersize = 12, color = :black)
 
     xlims!(axis, ys[1], ys[end])
@@ -152,68 +178,12 @@ function plot_mt2d_mesh(
     _mt_save(output_path, figure)
 end
 
-#---------- inversion convergence ----------
+#---------- model file grid ----------
 
-"""
-    plot_inv2d_convergence(history; output_path, target_rms=0.0) -> path
-
-Rms (with the target line when `target_rms > 0`) and the objective terms per iteration.
-"""
-function plot_inv2d_convergence(history::AbstractVector; output_path::AbstractString, target_rms::Real = 0.0)
-    CairoMakie.activate!()
-
-    it = [h.iteration for h in history]
-    figure = Figure(size = (1100, 450))
-    ax1 = _mt_axis(figure[1, 1]; xlabel = "Iteration", ylabel = "RMS")
-    scatterlines!(ax1, it, [h.rms for h in history], color = :navy)
-    target_rms > 0 && hlines!(ax1, [target_rms], color = :gray, linestyle = :dash)
-
-    ax2 = _mt_axis(figure[1, 2]; xlabel = "Iteration", ylabel = "Objective terms", yscale = log10)
-    scatterlines!(ax2, it, [h.objective for h in history], label = "objective")
-    scatterlines!(ax2, it, [h.chi2 / 2 for h in history], label = "χ²/2")
-    # regularization is exactly zero at the start model, skip it on a log axis
-    reg = [(h.iteration, h.regularization) for h in history if h.regularization > 0]
-    isempty(reg) || scatterlines!(ax2, first.(reg), last.(reg), label = "‖R(m - m_ref)‖²/2")
-    axislegend(ax2, position = :rt, framevisible = false, labelfont = :regular)
-    _mt_save(output_path, figure)
-end
-
-#---------- inversion run ----------
-
-# earth-only mesh for plotting a model file on its own grid
-_mt2d_earth_mesh(model::ModelFile2D; receivers = Float64[]) = MT2DMesh(
-    y_nodes = model.origin[2] .+ vcat(0.0, cumsum(model.y_cell_sizes)), z_nodes = vcat(0.0, cumsum(model.z_cell_sizes)),
-    y_cell_sizes = model.y_cell_sizes, z_cell_sizes = model.z_cell_sizes, receiver_positions = Float64.(receivers),
-    frequencies = [1.0], n_air_cells = 0)
-
-"""
-    PlotInversion2D(run; true_model_path=nothing, maximum_depth_km=10.0,
-                    resistivity_log10_range=(0.0, 4.0), background_resistivity=100.0) -> paths
-
-Standard plots of a run returned by the six-file `Invert2D`, written to `run.run_dir/plots`:
-the mesh, the start, final and (when given) true models, the data fit, and the
-convergence for GN and NLCG.
-"""
-function PlotInversion2D(run; true_model_path::Union{Nothing, AbstractString} = nothing,
-                         maximum_depth_km::Real = 10.0, resistivity_log10_range = (0.0, 4.0),
-                         background_resistivity::Real = 100.0)
-    dir = joinpath(run.run_dir, "plots")
-    path(name) = joinpath(dir, name)
-    core = (show_padding = false, maximum_depth_km, resistivity_log10_range)
-    paths = String[
-        plot_mt2d_mesh(run.mesh; output_path = path("Mesh.png"), region = :full, background_resistivity),
-        plot_mt2d_mesh(run.mesh; output_path = path("MeshCore.png"), region = :core, background_resistivity),
-        plot_mt2d_model(run.mesh, run.start; output_path = path("ModelStart.png"), core...),
-        plot_mt2d_model(run.mesh, run.final; output_path = path("ModelFinal.png"), core...),
-        plot_mt2d_model(run.mesh, run.final; output_path = path("ModelFinalFull.png"), resistivity_log10_range),
-        plot_mt2d_data_fit(run.observed, run.predicted; output_path = path("DataFit.png")),
-    ]
-    run.history === nothing || push!(paths, plot_inv2d_convergence(run.history; output_path = path("Convergence.png"),
-                                                                    target_rms = run.ctrl.target_rms))
-    if true_model_path !== nothing
-        truth = ReadModel2D(true_model_path)
-        push!(paths, plot_mt2d_model(_mt2d_earth_mesh(truth; receivers = run.mesh.receiver_positions), truth.resistivity;
-                                     output_path = path("ModelTrue.png"), core...))
-    end
-    paths
+# earth-only mesh for plotting a model file on its own grid, topographic air from the tags
+function _mt2d_earth_mesh(model::ModelFile2D; receivers = Float64[])
+    topo = _mt2d_model_topo_air(model.resistivity)
+    MT2DMesh(y_nodes = model.origin[2] .+ vcat(0.0, cumsum(model.y_cell_sizes)), z_nodes = vcat(0.0, cumsum(model.z_cell_sizes)),
+             y_cell_sizes = model.y_cell_sizes, z_cell_sizes = model.z_cell_sizes, receiver_positions = Float64.(receivers),
+             frequencies = [1.0], n_air_cells = 0, topo_air = any(>(0), topo) ? topo : Int[])
 end

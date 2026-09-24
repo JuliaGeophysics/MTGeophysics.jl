@@ -72,8 +72,8 @@ geometry_checks = check_comemi_models(benchmark_mesh, benchmark_models)
 mktempdir() do temp_dir
     r = only(SaveBenchmarks2D(output_root = temp_dir, cases = ["2D-I"]))
     @test r.case_dir == joinpath(temp_dir, "2D-I")
-    @test all(isfile, (r.true_model_path, r.data_path, r.start_model_path, r.prior_model_path, r.cov_path))
-    @test readdir(r.case_dir) == ["cov.ctrl", "data.dat", "model.prior", "model.start", "model.true"]   # controls ship in examples/ctrl/2D
+    @test all(isfile, (r.true_model_path, r.data_path, r.start_model_path, r.prior_model_path, r.cov_path, r.mask_path))
+    @test readdir(r.case_dir) == ["cov.ctrl", "data.dat", "mask.ctrl", "model.prior", "model.start", "model.true"]   # controls ship in examples/ctrl/2D
     @test !occursin('#', read(r.cov_path, String))
     observed = load_data2d(r.data_path)
     @test observed.site_names[1] == "JYV001" && issorted(observed.longitudes)

@@ -9,7 +9,11 @@ using Printf
     MT2DMesh
 
 Profile mesh and survey: y (along the profile) and z (down) nodes and cell sizes, air
-rows first, receiver positions on the air/earth interface and frequencies.
+rows first, receiver positions and frequencies. `topo_air` holds the topographic air
+cells at the top of each earth column (empty = flat); every receiver sits on the ground
+surface of its column; next to a topographic step TM Ey is averaged over
+`dipole_length` metres (at least one column each side). `dimension = 1` marks a
+one-column layered earth (`Mesh1D`), solved exactly instead of by finite differences.
 """
 Base.@kwdef struct MT2DMesh
     y_nodes::Vector{Float64}
@@ -20,6 +24,9 @@ Base.@kwdef struct MT2DMesh
     frequencies::Vector{Float64}
     n_air_cells::Int
     air_resistivity::Float64 = 1e9
+    topo_air::Vector{Int} = Int[]
+    dipole_length::Float64 = 100.0
+    dimension::Int = 2
 end
 
 """
@@ -41,6 +48,66 @@ Base.@kwdef struct ModelFile2D
 end
 
 const μ₀_2D = 4π * 1e-7
+
+#---------- topography ----------
+#
+# as in 3D (MakeMesh3D, load_ws3d_model): model files hold topographic air as 1e17 ohm m
+# and any cell above 1e15 ohm m reads as air; the cov mask gives air 0 and water 9
+
+const MT2D_AIR_TAG = 1e17
+const MT2D_AIR_THRESHOLD = 1e15
+const MT2D_MASK_WATER = 9
+
+# topographic air cells per earth column, 0 everywhere when flat
+mt2d_topo_air(mesh::MT2DMesh) = isempty(mesh.topo_air) ? zeros(Int, length(mesh.y_cell_sizes)) : mesh.topo_air
+
+"""
+    mt2d_air_mask(mesh) -> BitMatrix
+
+Air cells of the full mesh `(nz, ny)`: the air layers plus the topographic air.
+"""
+function mt2d_air_mask(mesh::MT2DMesh)
+    air = falses(length(mesh.z_cell_sizes), length(mesh.y_cell_sizes))
+    for (iy, k) in enumerate(mt2d_topo_air(mesh))
+        air[1:mesh.n_air_cells+k, iy] .= true
+    end
+    air
+end
+
+# column of each receiver, and the depth of its ground surface below the model top
+mt2d_receiver_columns(mesh::MT2DMesh) = [searchsortedlast(mesh.y_nodes, y) for y in mesh.receiver_positions]
+mt2d_receiver_depths(mesh::MT2DMesh) =
+    [mesh.z_nodes[mesh.n_air_cells+1+mt2d_topo_air(mesh)[iy]] - mesh.z_nodes[mesh.n_air_cells+1]
+     for iy in mt2d_receiver_columns(mesh)]
+
+# leading tagged cells of each column of an earth model; tagged cells under the ground are an error
+function _mt2d_model_topo_air(ρ::AbstractMatrix{<:Real})
+    tagged = ρ .> MT2D_AIR_THRESHOLD
+    topo = [something(findfirst(!, tagged[:, iy]), size(ρ, 1) + 1) - 1 for iy in axes(ρ, 2)]
+    all(<(size(ρ, 1)), topo) || throw(ArgumentError("a model column holds air only"))
+    for iy in axes(ρ, 2)
+        stray = findfirst(tagged[topo[iy]+1:end, iy])
+        stray === nothing || throw(ArgumentError("air-tagged cell under the ground in column $iy, row $(topo[iy] + stray)"))
+    end
+    topo
+end
+
+"""
+    mt2d_station_offsets(mesh, data) -> Vector{NamedTuple}
+
+Snap of each station to the ground surface of its column: `site`, `z` (data depth
+below the model top), `surface` (the mesh's ground depth there), `offset = z - surface`
+and `tolerance`, half the thickness of the first earth cell of that column.
+"""
+function mt2d_station_offsets(mesh::MT2DMesh, data)
+    columns, depths = mt2d_receiver_columns(mesh), mt2d_receiver_depths(mesh)
+    topo = mt2d_topo_air(mesh)
+    map(eachindex(columns)) do i
+        dz = mesh.z_cell_sizes[mesh.n_air_cells+topo[columns[i]]+1]
+        (site = data.site_names[i], z = data.z_positions[i], surface = depths[i],
+         offset = data.z_positions[i] - depths[i], tolerance = dz / 2)
+    end
+end
 
 mt2d_y_centers(mesh::MT2DMesh) = 0.5 .* (mesh.y_nodes[1:end-1] .+ mesh.y_nodes[2:end])
 
@@ -321,13 +388,8 @@ function _write_vector_lines(io, values::AbstractVector{<:Real}; per_line::Int =
     end
 end
 
-"""
-    write_model2d(path, mesh, resistivity; title="MTGeophysics.jl 2D profile model", use_loge=true) -> path
-
-Write the older MTGeophysics model layout, air rows included, which `VFSA2DMT` still
-reads and writes. New inputs and results use `WriteModel2D`.
-"""
-function write_model2d(
+# the older MTGeophysics model layout with air rows; ReadModel2D still reads it, the tests write it
+function _write_model2d_legacy(
     path::AbstractString,
     mesh::MT2DMesh,
     resistivity::AbstractMatrix{<:Real};
@@ -362,12 +424,7 @@ function write_model2d(
     String(path)
 end
 
-"""
-    load_model2d(path) -> ModelFile2D
-
-Read the older MTGeophysics model layout written by `write_model2d`, air rows included.
-"""
-function load_model2d(path::AbstractString)
+function _load_model2d_legacy(path::AbstractString)
     isfile(path) || error("model file not found: $path")
     lines = readlines(path)
 
@@ -448,12 +505,8 @@ function load_model2d(path::AbstractString)
     )
 end
 
-"""
-    build_mesh_from_model2d(model; frequencies, receiver_positions) -> MT2DMesh
-
-Solver mesh of a model read by `load_model2d`, air rows included.
-"""
-function build_mesh_from_model2d(
+# solver mesh of an older-layout model, air rows included
+function _mesh_from_legacy_model2d(
     model::ModelFile2D;
     frequencies::AbstractVector{<:Real},
     receiver_positions::AbstractVector{<:Real},
@@ -473,7 +526,7 @@ end
 
 #---------- ModEM-layout model files ----------
 #
-# layout, as Mod2DMT writes it, earth cells only, after one '#' description line as in
+# layout, earth cells only, after one '#' description line as in
 # ModEM 3D model files:
 #   ny nz LOGE            (or LINEAR)
 #   ny cell widths (m)
@@ -494,7 +547,7 @@ function ReadModel2D(path::AbstractString)
     isempty(lines) && error("$path: empty model file")
     head = split(strip(lines[1]))
     if length(head) >= 5 && all(t -> occursin(r"^-?\d+$", t), head[1:4])
-        legacy = load_model2d(path)
+        legacy = _load_model2d_legacy(path)
         na = legacy.n_air_cells
         return ModelFile2D(title = legacy.title, x_cell_sizes = [1.0], y_cell_sizes = legacy.y_cell_sizes,
                            z_cell_sizes = legacy.z_cell_sizes[na+1:end], resistivity = legacy.resistivity[na+1:end, :],
@@ -557,8 +610,10 @@ function WriteModel2D(path::AbstractString, mesh::MT2DMesh, ρ::AbstractMatrix{<
     # the layout has no origin, readers centre the grid on y = 0
     abs(mesh.y_nodes[1] + mesh.y_nodes[end]) <= 1e-6 * (mesh.y_nodes[end] - mesh.y_nodes[1]) ||
         throw(ArgumentError("mesh must be centred on y = 0, it spans $(mesh.y_nodes[1]) to $(mesh.y_nodes[end]) m"))
-    WriteModel2D(path, mesh.y_cell_sizes, mesh.z_cell_sizes[mesh.n_air_cells+1:end],
-                 ρ[mesh.n_air_cells+1:end, :]; loge)
+    na = mesh.n_air_cells
+    earth = Matrix{Float64}(ρ[na+1:end, :])
+    earth[mt2d_air_mask(mesh)[na+1:end, :]] .= MT2D_AIR_TAG
+    WriteModel2D(path, mesh.y_cell_sizes, mesh.z_cell_sizes[na+1:end], earth; loge)
 end
 
 #---------- mesh from model, data and fwd.ctrl ----------
@@ -576,15 +631,17 @@ function mt2d_air_layers(n::Integer, thickness::Real, growth::Real)
 end
 
 """
-    Mesh2DFromInputs(model::ModelFile2D, data::DataFile2D, fwd::FwdCtrl2D) -> (mesh, ρ)
+    Mesh2DFromInputs(model::ModelFile2D, data::DataFile2D, fwd::FwdCtrl2D; warn=true) -> (mesh, ρ)
 
 Mesh and full resistivity (air rows first) for a ModEM-layout model, the survey in
 `data`, and the air in `fwd`. The model is centred on the data's local y = 0.
+Topographic air (cells above 1e15 ohm m) takes the `fwd` air resistivity. Each station
+sits on the ground of its column; a data depth Z more than half a surface cell away
+from it is warned about (see `mt2d_station_offsets`).
 """
-function Mesh2DFromInputs(model::ModelFile2D, data, fwd::FwdCtrl2D)
+function Mesh2DFromInputs(model::ModelFile2D, data, fwd::FwdCtrl2D; warn::Bool = true)
     model.n_air_cells == 0 || throw(ArgumentError("model must hold earth cells only, read it with ReadModel2D"))
-    all(z -> abs(z) < 1e-6, data.z_positions) ||
-        throw(ArgumentError("stations off the flat model top need topography support, not available yet"))
+    topo = _mt2d_model_topo_air(model.resistivity)
     air = mt2d_air_layers(fwd.air_layers, fwd.air_thickness, fwd.air_growth)
     dz = vcat(air, model.z_cell_sizes)
     y_nodes = model.origin[2] .+ vcat(0.0, cumsum(model.y_cell_sizes))
@@ -594,7 +651,14 @@ function Mesh2DFromInputs(model::ModelFile2D, data, fwd::FwdCtrl2D)
     mesh = MT2DMesh(y_nodes = y_nodes, z_nodes = z_nodes, y_cell_sizes = Float64.(model.y_cell_sizes),
                     z_cell_sizes = dz, receiver_positions = Float64.(data.receivers),
                     frequencies = Float64.(data.frequencies), n_air_cells = fwd.air_layers,
-                    air_resistivity = fwd.air_resistivity)
+                    air_resistivity = fwd.air_resistivity, topo_air = any(>(0), topo) ? topo : Int[],
+                    dipole_length = fwd.dipole_length)
     ρ = vcat(fill(fwd.air_resistivity, fwd.air_layers, length(model.y_cell_sizes)), model.resistivity)
+    ρ[mt2d_air_mask(mesh)] .= fwd.air_resistivity
+    if warn
+        off = filter(o -> abs(o.offset) > o.tolerance, mt2d_station_offsets(mesh, data))
+        isempty(off) || @warn "$(length(off)) station(s) moved to the ground of their column by more than half a surface cell" *
+            join([@sprintf("\n  %s: Z %.1f m, ground %.1f m", o.site, o.z, o.surface) for o in off])
+    end
     mesh, ρ
 end
