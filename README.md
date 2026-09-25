@@ -23,16 +23,6 @@
 ---
 
 
-## Features
-
-- 1D (exact) and 2D (finite-difference) MT forward solvers with Fréchet derivatives and their transpose
-- 2D topography and water, `topo.dat`, and a mesh tool (batch or GLMakie)
-- [2D and 1D inversion](docs/src/inversion/2d_deterministic.md) from ModEM-style files: Gauss–Newton and NLCG (six files), and [VFSA](docs/src/inversion/2d_vfsa.md) with a mask and ensemble uncertainty (five files)
-- 3D VFSA inversion with ensemble uncertainty quantification
-- ModEM 3D model and data I/O
-- Interactive 3D slice viewers (GLMakie) with GIS overlays and coordinate reprojection
-- Shapefile export for GIS integration
-
 ## Requirements
 
 - [Julia](https://julialang.org) 1.10 or newer
