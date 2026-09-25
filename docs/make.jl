@@ -7,7 +7,8 @@ makedocs(;
         repo       = "github.com/JuliaGeophysics/MTGeophysics.jl",
         devbranch  = "main",
         devurl     = "dev",
-        deploy_url = "juliageophysics.github.io/MTGeophysics.jl",
+        # full URL with https://, otherwise the host is taken as part of the base path
+        deploy_url = "https://juliageophysics.com/MTGeophysics.jl",
         description = "Magnetotelluric forward modelling, inversion and visualisation in Julia",
     ),
     # nested lists become the dropdown menus of the top navigation bar
