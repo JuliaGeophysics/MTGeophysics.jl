@@ -27,7 +27,7 @@
 
 - 1D (exact) and 2D (finite-difference) MT forward solvers with Fréchet derivatives and their transpose
 - 2D topography and water, `topo.dat`, and a mesh tool (batch or GLMakie)
-- [2D and 1D inversion](docs/src/gaussnewton2d.md) from ModEM-style files: Gauss–Newton and NLCG (six files), and [VFSA](docs/src/inversion2d.md) with a mask and ensemble uncertainty (five files)
+- [2D and 1D inversion](docs/src/inversion/2d_deterministic.md) from ModEM-style files: Gauss–Newton and NLCG (six files), and [VFSA](docs/src/inversion/2d_vfsa.md) with a mask and ensemble uncertainty (five files)
 - 3D VFSA inversion with ensemble uncertainty quantification
 - ModEM 3D model and data I/O
 - Interactive 3D slice viewers (GLMakie) with GIS overlays and coordinate reprojection
@@ -103,7 +103,7 @@ vrun = VFSA2D("$d/model.start", "$d/data.dat", "$c/FwdCtrl", "$c/InvCtrl.VFSA", 
 `helpers/benchmarks_1D.jl` a 1D sounding for `examples/run_inv1D.jl`, and
 `examples/make_mesh2D.jl` builds the inputs for your own data file.
 
-See the [documentation](https://juliageophysics.github.io/MTGeophysics.jl/dev/) for the full 1D/2D/3D workflows, ensemble statistics and convergence animations, ModEM I/O, configuration options, and the interactive 3D viewers.
+See the [documentation](https://juliageophysics.github.io/MTGeophysics.jl/dev/) for the full 1D/2D/3D workflows, ensemble statistics, ModEM I/O, configuration options, and the interactive 3D viewers.
 
 # Research using this code 
 

@@ -1,7 +1,9 @@
 [deps]
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+DocumenterVitepress = "4710194d-e776-4893-9690-8d956a29c365"
 MTGeophysics = "71b12eb5-90c3-4985-b1e7-1ec075583b1e"
 
 [compat]
 Documenter = "1"
-MTGeophysics = "0.6"
+DocumenterVitepress = "0.3"
+MTGeophysics = "0.7"

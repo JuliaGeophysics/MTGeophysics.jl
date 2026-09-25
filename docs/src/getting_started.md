@@ -1,47 +1,37 @@
 # Getting Started
 
-## Requirements
+In this section we install MTGeophysics.jl, check that it works, and run a first forward model and
+inversion on a small synthetic example. It takes about ten minutes.
 
-- Julia 1.10+ (developed on 1.12.4)
-- OpenGL for interactive 3D viewers (GLMakie)
+## What you need
 
-## Installation
+- Julia 1.10 or newer
+- OpenGL, only for the interactive 3D viewers (GLMakie)
+- ModEM compiled with MPI, only for 3D inversion (see [3D VFSA](inversion/3d_vfsa.md))
 
-There are two ways to install, depending on how you intend to use the package.
+## Install the package
 
-### 1. From the registry
+There are two ways to install MTGeophysics.jl. Pick the one that matches how you want to use it.
 
-MTGeophysics.jl is registered in the Julia General registry. Use this if you want to call the
-package from your own project or scripts. Install it into a dedicated project environment:
+### Option 1: as a package
+
+Use this if you want to call MTGeophysics from your own scripts. We install it into its own
+environment:
 
 ```julia
-julia> ]  # press ] to enter the Pkg REPL
-pkg> activate @mtgeophysics   # a named shared environment; or `activate .` for the current folder
+julia> ]                      # press ] to enter the package manager
+pkg> activate @mtgeophysics   # a named environment; or `activate .` for the current folder
 pkg> add MTGeophysics
 ```
 
-or, non-interactively:
-
-```bash
-julia --project=@mtgeophysics -e 'using Pkg; Pkg.add("MTGeophysics")'
-```
-
-To add it to a specific project directory instead:
-
-```bash
-julia --project=/path/to/your/project -e 'using Pkg; Pkg.add("MTGeophysics")'
-```
-
 !!! tip
-    As a general Julia best practice, avoid installing packages into your default (global)
-    environment. A dedicated per-project environment keeps dependencies isolated and
-    reproducible, and avoids slow, unexpected version changes across unrelated packages you
-    already have installed.
+    Avoid installing packages into your default (global) Julia environment. A separate environment
+    per project keeps versions stable and your work reproducible.
 
-### 2. From a clone
+### Option 2: from a clone
 
-Use this if you want the bundled `examples/` and `helpers/` scripts, the benchmark generators,
-and the test suite, or if you plan to develop the package:
+Use this if you want the example scripts, the benchmark generators and the tests, or if you plan to
+change the code:
 
 ```bash
 git clone https://github.com/JuliaGeophysics/MTGeophysics.jl.git
@@ -49,48 +39,56 @@ cd MTGeophysics.jl
 julia --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
 
-`Pkg.instantiate()` installs the exact dependency versions recorded in `Manifest.toml`. All
-example commands in this documentation assume you are in the clone root and pass
-`--project=.` so that this environment is active.
+`Pkg.instantiate()` installs the exact versions listed in `Manifest.toml`. All commands in this
+documentation assume you are in the clone folder and pass `--project=.`.
 
-To develop the clone while using it from another environment, use `Pkg.develop`:
-
-```bash
-julia --project=/path/to/your/project -e 'using Pkg; Pkg.develop(path="/path/to/MTGeophysics.jl")'
-```
-
-## Verify
+## Check the installation
 
 ```bash
 julia --project=. -e 'using MTGeophysics; println("OK")'
-julia --project=. test/runtests.jl
 ```
 
-## Generate benchmarks
+If this prints `OK`, you are ready to go. The first `using` compiles the package and can take a few
+minutes.
 
-Before running the examples, generate the synthetic benchmark data:
+## Create the example data
+
+The examples use small synthetic data sets. Let's create them:
 
 ```bash
 julia --project=. helpers/benchmarks_1D.jl
 julia --project=. helpers/benchmarks_2D.jl
 ```
 
-This creates `examples/data/1D-I` (a five-layer sounding) and `examples/data/2D-IV` (COMEMI
-2D-III under topography, with a lake and its bathymetry among the stations). `helpers/benchmarks_2D.jl 2D-I 2D-II 2D-III` adds the
-flat COMEMI cases. Each 2D folder holds `model.true`, `data.dat`, `model.start`,
-`model.prior`, `cov.ctrl` (GN, NLCG) and `mask.ctrl` (VFSA), and 2D-IV also `topo.dat`.
-1D-I holds only `data.dat` and `model.true`, since the 1D inversion lays out its own mesh.
-The control files ship in `examples/ctrl/1D` and `examples/ctrl/2D`.
+This writes two folders:
 
-## First session
+- `examples/data/1D-I`: one sounding over a five-layer earth.
+- `examples/data/2D-IV`: a 2D profile over hills with a lake, based on the COMEMI 2D-III model.
+
+Each folder holds the true model and noisy data computed from it. The 2D folder also holds a start
+model and the other inversion inputs. The control files the examples use are in `examples/ctrl/`.
+
+## Your first run
+
+Now we can compute forward responses and run two inversions:
 
 ```bash
-julia --project=. helpers/benchmarks_1D.jl
-julia --project=. helpers/benchmarks_2D.jl
-julia --project=. examples/run_fwd1D.jl
-julia --project=. examples/run_inv1D.jl GN
-julia --project=. examples/run_inv1D.jl VFSA
-julia --project=. examples/run_fwd2D.jl
-julia --project=. examples/run_inv2D.jl GN
-julia --project=. -t 10 examples/run_vfsa2D.jl
+julia --project=. examples/run_fwd1D.jl        # 1D forward response
+julia --project=. examples/run_inv1D.jl GN     # 1D Gauss–Newton inversion
+julia --project=. examples/run_fwd2D.jl        # 2D forward response
+julia --project=. examples/run_inv2D.jl GN     # 2D Gauss–Newton inversion
 ```
+
+Each inversion writes a new folder, `run_YYYYmmdd_HHMMSS/`, next to the data. Inside you will find the
+recovered model (`model.rho`), its predicted data (`data.pred`), a short `Summary.txt` and a `plots/`
+folder. Open the plots to see how well the model fits the data and how it compares with the true
+model.
+
+## Where to go next
+
+- Have your own data? Start with [Data and model files](data/files.md) and
+  [1D and 2D meshes](data/mesh2d.md).
+- Want to know what a forward run computes? See [Forward](forward/2d.md).
+- Ready to invert? See [Inversion](inversion/2d_deterministic.md).
+- Working in 3D? See [3D meshes](data/mesh3d.md), [3D VFSA](inversion/3d_vfsa.md) and the
+  [3D viewers](visualisation/3d_models.md).

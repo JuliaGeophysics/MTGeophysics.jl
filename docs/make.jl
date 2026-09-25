@@ -1,31 +1,55 @@
-using Documenter
+using Documenter, DocumenterVitepress
 
 makedocs(;
     sitename = "MTGeophysics.jl",
     authors  = "JuliaGeophysics community, Pankaj K Mishra, and contributors",
-    format   = Documenter.HTML(;
-        prettyurls = get(ENV, "CI", nothing) == "true",
-        canonical  = "https://juliageophysics.github.io/MTGeophysics.jl",
-        collapselevel = 2,
+    format   = DocumenterVitepress.MarkdownVitepress(;
+        repo       = "github.com/JuliaGeophysics/MTGeophysics.jl",
+        devbranch  = "main",
+        devurl     = "dev",
+        deploy_url = "juliageophysics.github.io/MTGeophysics.jl",
+        description = "Magnetotelluric forward modelling, inversion and visualisation in Julia",
     ),
+    # nested lists become the dropdown menus of the top navigation bar
     pages = [
         "Home" => "index.md",
-        "Getting Started"       => "getting_started.md",
-        "Data Rotation"         => "rotation.md",
-        "1D Modelling and Inversion" => "forward1d.md",
-        "2D Forward Modelling"  => "forward2d.md",
-        "2D Topography"         => "topography2d.md",
-        "2D Mesh Tool"          => "mesh2d.md",
-        "2D Deterministic Inversion" => "gaussnewton2d.md",
-        "2D VFSA Inversion"     => "inversion2d.md",
-        "3D VFSA Inversion"     => "inversion3d.md",
-        "3D Visualization"      => "visualization3d.md",
-        "Model Editing"         => "editing.md",
-        "API Reference"         => "api.md",
+        "Getting Started" => "getting_started.md",
+        "Data & Meshes" => [
+            "Data and model files" => "data/files.md",
+            "Rotation and strike"  => "data/rotation.md",
+            "1D and 2D meshes"     => "data/mesh2d.md",
+            "3D meshes"            => "data/mesh3d.md",
+        ],
+        "Forward" => [
+            "1D" => "forward/1d.md",
+            "2D" => "forward/2d.md",
+            "3D" => "forward/3d.md",
+        ],
+        "Inversion" => [
+            "1D"               => "inversion/1d.md",
+            "2D deterministic" => "inversion/2d_deterministic.md",
+            "2D VFSA"          => "inversion/2d_vfsa.md",
+            "3D VFSA"          => "inversion/3d_vfsa.md",
+        ],
+        "Visualisation" => [
+            "1D"              => "visualisation/1d.md",
+            "2D"              => "visualisation/2d.md",
+            "3D models"       => "visualisation/3d_models.md",
+            "3D data maps"    => "visualisation/3d_data.md",
+            "3D model editing" => "visualisation/editing.md",
+        ],
+        "API" => "api.md",
+        "For Developers" => [
+            "Code layout"          => "developers/index.md",
+            "Control file reference" => "developers/control_files.md",
+            "2D solver notes"      => "developers/solver2d.md",
+            "2D inversion theory"  => "developers/inversion2d.md",
+            "Adding an algorithm"  => "developers/new_algorithm.md",
+        ],
     ],
 )
 
-deploydocs(;
+DocumenterVitepress.deploydocs(;
     repo = "github.com/JuliaGeophysics/MTGeophysics.jl.git",
     devbranch = "main",
     push_preview = true,

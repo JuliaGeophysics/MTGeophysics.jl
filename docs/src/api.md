@@ -1,5 +1,8 @@
 # API Reference
 
+The exported functions and types, grouped by topic. In the Julia REPL, `?name` shows the docstring
+of a function.
+
 ## Types
 
 | Type | Description |
@@ -104,7 +107,7 @@
 | Function | Description |
 |:---------|:------------|
 | `load_data_modem(path)` | Load 3D data file, with its rotation history |
-| `rotate_data(path_or_data, angle; kind)` | Rotate Z and tipper for a mesh, a strike or declination, see [rotation](rotation.md) |
+| `rotate_data(path_or_data, angle; kind)` | Rotate Z and tipper for a mesh, a strike or declination, see [rotation](data/rotation.md) |
 | `RotationStep` | One step of a data file's rotation history |
 | `load_model_modem(path)` | Load 3D model file |
 | `write_model_modem(path, model)` | Write 3D model file |
@@ -116,6 +119,18 @@
 | `has_tipper_data(d)` | Whether a data set carries usable tippers |
 | `write_ptiv_gis(data_file; ...)` | Write phase tensor / induction vector shapefiles per period |
 | `PlotPTIVMap(data_file; ...)` | Interactive phase tensor and induction vector map |
+
+## 3D Meshes
+
+| Function | Description |
+|:---------|:------------|
+| `MakeMesh3D(data; ...)` | Start model and ModEM covariance from a data file (batch or GUI), see [3D meshes](data/mesh3d.md) |
+| `MeshToMesh(model, data, target)` | Resample a model onto another mesh, with matching data and covariance |
+| `extract_topography`, `write_topography`, `read_topography` | Ground surface of a 3D model |
+| `extract_bathymetry`, `write_bathymetry`, `read_bathymetry` | Sea floor of a 3D model |
+| `air_mask_from_topography`, `air_mask_from_model` | Air cells of a 3D model |
+| `water_mask_from_bathymetry`, `water_mask_from_model` | Water cells of a 3D model |
+| `chi2_and_rms_distorted(obs, pred; damping)` | 3D misfit after per-site galvanic distortion correction |
 
 ## WS3D Model I/O
 
