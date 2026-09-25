@@ -4,8 +4,7 @@ layout: home
 
 hero:
   name: "MTGeophysics.jl"
-  text: "Magnetotellurics in Julia"
-  tagline: Forward modelling, inversion and visualisation of MT data in 1D, 2D and 3D, using the same files as ModEM.
+  tagline: A software repository for magnetotelluric geophysics research and applications.
   actions:
     - theme: brand
       text: Getting Started
@@ -38,13 +37,7 @@ features:
 
 ## What is MTGeophysics.jl?
 
-MTGeophysics.jl is a Julia package for magnetotelluric (MT) research and applications. It gives you
-the building blocks of an MT workflow (reading data, building meshes, forward modelling, inversion
-and plotting) so that you can test new ideas without rebuilding the basic tools first.
-
-The package reads and writes the same data and model files as
-[ModEM](https://github.com/magnetotellurics/ModEM), so you can move models and data back and forth
-between the two. It is part of the [JuliaGeophysics](https://github.com/JuliaGeophysics) ecosystem.
+MTGeophysics.jl is part of the [JuliaGeophysics ecosystem](https://github.com/JuliaGeophysics) and is intended for both research and real-world applications. It provides reusable forward-modelling, inversion, and visualization components so you can prototype new machine-learning methods, inversion strategies, and data-analysis ideas quickly without rebuilding core MT tooling from scratch. More broadly, JuliaGeophysics aims to build a tightly integrated yet modular ecosystem for multiphysics workflows, multisource data integration, and uncertainty quantification.
 
 ## Install
 

@@ -9,7 +9,7 @@ makedocs(;
         devurl     = "dev",
         # full URL with https://, otherwise the host is taken as part of the base path
         deploy_url = "https://juliageophysics.com/MTGeophysics.jl",
-        description = "Magnetotelluric forward modelling, inversion and visualisation in Julia",
+        description = "A software repository for magnetotelluric geophysics research and applications",
     ),
     # nested lists become the dropdown menus of the top navigation bar
     pages = [
