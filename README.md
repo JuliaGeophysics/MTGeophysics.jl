@@ -6,7 +6,6 @@
 	<a href="https://juliageophysics.github.io/MTGeophysics.jl/stable/"><img src="https://img.shields.io/badge/docs-stable-blue.svg" alt="Documentation (stable)"></a>
 	<a href="https://juliageophysics.github.io/MTGeophysics.jl/dev/"><img src="https://img.shields.io/badge/docs-dev-blue.svg" alt="Documentation (dev)"></a>
 	<a href="https://joss.theoj.org/papers/e45b75b003b013751a4a2e1a51314103"><img src="https://joss.theoj.org/papers/e45b75b003b013751a4a2e1a51314103/status.svg" alt="JOSS status"></a>
-	<a href="https://juliahub.com/ui/Packages/General/MTGeophysics"><img src="https://juliahub.com/docs/General/MTGeophysics/stable/version.svg" alt="Registry version"></a>
 	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/releases"><img src="https://img.shields.io/github/v/release/JuliaGeophysics/MTGeophysics.jl?label=release&color=blue" alt="Latest release"></a>
 	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/blob/main/LICENSE.md"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT license"></a>
 	<a href="https://github.com/JuliaGeophysics/MTGeophysics.jl/actions/workflows/CI.yml"><img src="https://github.com/JuliaGeophysics/MTGeophysics.jl/actions/workflows/CI.yml/badge.svg" alt="CI"></a>
