@@ -121,7 +121,10 @@ of a function.
 | `has_tipper_data(d)` | Whether a data set carries usable tippers |
 | `write_ptiv_gis(data_file; ...)` | Write phase tensor / induction vector shapefiles per period |
 | `PlotPTIVMap(data_file; ...)` | Interactive phase tensor and induction vector map |
-| `DataDashboard(data_file; predicted, ...)` | Page through the sites: ρ/φ, tipper, phase tensors, skews, strike, residuals, see [Data dashboard](visualisation/dashboard.md) |
+| `DataDashboard(data_file; predicted, mask, ...)` | Page through the sites (ρ/φ, full tensor, tipper) and mask data, see [Data dashboard](visualisation/dashboard.md) |
+| `write_data_mask(path, d, keep)`, `read_data_mask(path)` | Write and read a mask file (site, period, component) |
+| `apply_data_mask(target, mask)` | Apply a mask to a ModEM file or to a directory of EDIs, writing masked copies |
+| `apply_data_mask!(d, mask)`, `mask_keep(d, mask)` | Mask a `Data` in place, or return what a mask keeps |
 
 ## 3D Meshes
 

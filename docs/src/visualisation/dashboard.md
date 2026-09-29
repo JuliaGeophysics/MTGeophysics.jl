@@ -1,7 +1,8 @@
 # Data dashboard
 
-The dashboard pages through the sites of a ModEM data file, one site at a time. It is the place to
-look at field data before an inversion, and at the fit after one.
+The dashboard pages through the sites of a ModEM data file, one site at a time, and masks data. It is
+the place to clean field data before an inversion, and to look at the fit after one. The mask is saved
+as a text file that applies to the EDIs or to any ModEM file of the same survey.
 
 ## Open it
 
@@ -10,6 +11,7 @@ using MTGeophysics
 
 DataDashboard("data.dat")                              # observed only
 DataDashboard("data.dat"; predicted = "dpred.dat")     # observed against a ModEM response
+DataDashboard("data.dat"; mask = "data_mask.txt")      # continue from a saved mask
 ```
 
 EDI files are converted to a ModEM file first (see [EDI files](../data/files.md#EDI-files)):
@@ -21,7 +23,7 @@ DataDashboard(EDIToModEM("EDI/COPROD2"))               # writes EDI/COPROD2.dat
 From the command line, with a directory of EDIs or a ModEM file:
 
 ```bash
-julia --project=. examples/DataDashboard.jl <data.dat | edi_dir> [predicted.dat]
+julia --project=. examples/edit_data.jl <data.dat | edi_dir> [predicted.dat] [--mask mask.txt]
 ```
 
 The window needs GLMakie and a display. On a cluster, `--png <dir>` (or
@@ -29,51 +31,81 @@ The window needs GLMakie and a display. On a cluster, `--png <dir>` (or
 
 ## What it shows
 
-The top row is the apparent resistivity and phase of the four impedance components. Observed data are
-circles with error bars, predicted data are lines, and masked points are hollow. The yx phase is
-turned by 180° so both off-diagonal phases sit in the first quadrant. The **Diagonals** toggle shows or
-hides Zxx and Zyy.
-
-Below are four panels, each with its own menu:
-
 | Panel | Content |
 |:------|:--------|
-| Tipper | Re and Im of Tzx and Tzy |
-| Phase tensors & induction arrows | PT ellipses along period, coloured by Φmin, with the real (black) and imaginary (grey) induction arrows; one row each for observed and predicted |
-| PT skew β | with the ±3° band |
-| Ellipticity, Swift & Bahr skew | the PT ellipticity, Swift κ and Bahr η, with η = 0.3 marked |
-| Strike | PT azimuth and Swift strike, clockwise from north, modulo 90° |
-| Normalised residuals | (predicted − observed) / error for the real and imaginary parts, with the site RMS |
-| Relative errors | \|δZ\|/\|Z\| per component and the tipper errors, with the error floor marked |
-| Niblett–Bostick | Bostick resistivity against depth for xy, yx and the determinant |
+| Apparent resistivity | Zxy (red) and Zyx (blue), with error bars; the range fits the kept points with half a decade to spare |
+| Phase | the same components as recorded, on a fixed −200° to 200°: Zxy in the first quadrant, Zyx in the third |
+| Tipper | Re (red) and Im (blue) of Tzx above Tzy, on the right |
+| Map | the sites in longitude and latitude (true distances), on the left; click one to go there |
 
-The map on the left shows the sites, coloured by their RMS when a response is loaded, and the phase
-tensor ellipses at one period (the slider underneath). Click a site on the map to go to it.
+**Full tensor** adds Zxx (pale green) and Zyy (pale purple) to the same two panels; it only changes the
+view, and masking always takes all four impedances. The map and the
+tipper collapse with the buttons at the left and right edges; the tipper starts collapsed when the survey
+has none. With all three open the map, ρa/φ and tipper columns share the width 1 : 2 : 2; with one side
+closed the other two are equal. Every site shares the survey's period axis. Observed data are markers, a
+predicted response is lines, and masked points are hollow.
 
-Residuals and RMS use the errors raised to `z_floor`·√|Zxy·Zyx| (default 5 %) and `t_floor` (0.03),
-as an inversion would. The error bars show the recorded errors.
+## Masking
 
-## Keys and editing
+No panel zooms or pans, and masking is by drag only; a click on a data panel does nothing:
 
 | Action | Effect |
 |:-------|:-------|
-| ← / → | previous / next site |
-| ↑ / ↓ | map period |
-| click a site on the map | go to that site |
-| **Edit mask** on, click a ρ, φ or tipper point | mask it, or restore it |
-| **Drop site** / **Reset site** | mask or restore the whole site |
-| **Export ModEM** | write the kept data, with floored errors, to `<name>Edited.dat` (or `export_path`) |
+| drag across ρa or φ | select a band of periods over both panels and mask all four impedances in it |
+| drag across a tipper panel | mask Tzx and Tzy in the band |
+| drag with Shift held | restore the band instead |
+| **Mask site** / **Restore site** | mask or restore the whole site |
+| **Save mask** | write the mask to `mask_path` (default: the `mask` it started from, else `<name>_mask.txt`) |
+| **Write ModEM** | write the kept data to `<name>_<date_time>.dat` |
+| **Write EDI** | write the kept data as one EDI per site to `<name>_EDI_<date_time>/` |
 | **Save PNG** | write the window as a PNG |
+| ← / → | previous / next site |
+
+Both writes keep the errors as they were read; the editor applies no error floor. A new time-stamped
+name each time means no write replaces an earlier one.
+
+A band on ρa or φ takes the full impedance tensor at its periods, and one on the tipper takes Re and Im of both components.
+Axis ranges follow the kept points, so masking an outlier zooms in on the rest; a masked point that
+falls outside comes back with **Restore site** or a restoring band.
+
+## Mask files
+
+A mask file lists what is left out, one line per site, period and component. `*` stands for every period
+or every component:
+
+```text
+# MTGeophysics data mask, 2026-09-29 14:02:11, from Quantec2017.dat
+# one masked datum per line; * is every period or every component; components Zxx Zxy Zyx Zyy Tzx Tzy
+# zrot 0.00
+# site  period_s  component
+MT1247  8.192021e-02  *
+MT1247  2.925700e+01  Zxy
+MT1250  *  *
+```
+
+Apply it to the survey in either form; the originals are not touched:
+
+```julia
+apply_data_mask("data.dat", "data_mask.txt")   # -> data_masked_<date_time>.dat
+apply_data_mask("EDI/", "data_mask.txt")       # -> EDI_masked_<date_time>/ and EDI_masked_<date_time>.dat
+```
+
+For a ModEM file the masked lines are dropped and everything else is kept as written. EDIs are read as
+`EDIToModEM` reads them, written again without the masked values (fully masked sites are left out), and
+converted to the ModEM file beside them. Sites match by name and periods within 1 % (`rtol`). The mask
+records the frame it was drawn in (`zrot`), and applying it to data in another frame gives a warning,
+since Zxy in one frame is not Zxy in another. In code, `apply_data_mask!(d, mask)` masks a `Data` in
+place and `mask_keep(d, mask)` returns what a mask keeps.
 
 ## Options
 
 ```julia
 DataDashboard("data.dat";
     predicted = "dpred.dat",
-    z_floor = 0.05, t_floor = 0.03,                   # errors for residuals, RMS and export
-    panels = [:tipper, :ptstrip, :resid, :beta],      # the four panels at start
-    iv_convention = :parkinson,                       # :parkinson towards conductors, :wiese away
-    export_path = "edited.dat")
+    mask = "data_mask.txt", mask_path = "data_mask.txt",
+    show_map = true, show_tipper = nothing,           # side panels at start; nothing: open if there is a tipper
+    full_tensor = false,
+    export_dir = "exports")                           # where Write ModEM / Write EDI go (default: beside the data)
 ```
 
 A response from a rotated mesh is turned back into the frame of the observed data before it is

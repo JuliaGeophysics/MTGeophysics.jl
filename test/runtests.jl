@@ -15,6 +15,7 @@ include(joinpath(@__DIR__, "Helpers2D.jl"))
     #---------- 3D ----------
     include(joinpath(@__DIR__, "TestIO3D.jl"))
     include(joinpath(@__DIR__, "TestRotate.jl"))
+    include(joinpath(@__DIR__, "TestDataMask.jl"))
     include(joinpath(@__DIR__, "TestDistortion3D.jl"))
     include(joinpath(@__DIR__, "TestCore3D.jl"))
     include(joinpath(@__DIR__, "TestMask3D.jl"))
