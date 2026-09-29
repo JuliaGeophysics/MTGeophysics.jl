@@ -16,6 +16,7 @@ using Proj
 #----- 3-D ModEM I/O and misfit (existing code) ---------------------------#
 
 include("Data.jl")
+include("EDI.jl")
 include("Rotate.jl")
 include("Model.jl")
 include("Chi2RMS.jl")
@@ -71,6 +72,7 @@ include("Topo2D.jl")
 include("Fwd1D.jl")
 include("PlotModel2D.jl")
 include("PlotData2D.jl")
+include("DataDashboard.jl")
 include("Inv2D.jl")
 include("Inv2D_GN.jl")
 include("Inv2D_NLCG.jl")
@@ -88,6 +90,8 @@ include("VFSA3DMT.jl")
 
 export Data, Model, ModEMData, ModEMModel
 export load_data_modem, write_data_modem, make_nan_data, calc_rho_pha
+export EDIToModEM, ModEMToEDI
+export DataDashboard
 export rotate_data, RotationStep
 export read_mackie3d_model, load_model_modem, write_model_modem
 export chi2_and_rms

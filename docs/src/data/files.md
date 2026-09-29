@@ -23,6 +23,36 @@ so every 2D workflow first rotates the data to the strike (see [Rotation and str
     A data file whose impedances are all zero works as a template. A forward run fills it with the
     predicted response for those stations and frequencies.
 
+## EDI files
+
+Field data usually come as SEG EDI files, one per site. They are converted to a ModEM data file once,
+and everything else works on that file:
+
+```julia
+EDIToModEM("EDI/COPROD2")                  # a directory of EDIs -> EDI/COPROD2.dat
+EDIToModEM("site.edi", "site.dat")         # one file
+ModEMToEDI("data.dat")                     # one EDI per site -> data_EDI/
+```
+
+`EDIToModEM` reads the three EDI layouts in use: transfer functions (`>ZXXR` … `>TYVAR.EXP`, errors
+the square root of the variances), apparent resistivity and phase only (`>RHOXY`, `>PHSXY`), and
+cross spectra (`>=SPECTRASECT`). From spectra, Z and T are formed with the remote-reference channels.
+Their errors are the 68 % bounds of the local regression, from the residual power and the magnetic
+autopowers. They are an estimate and differ from the errors the acquisition processing reports.
+
+Periods are shared between sites within 0.2 %. Station x and y are metres in a transverse Mercator
+projection about the sites' centroid, as in `MakeMesh3D`. Site names come from DATAID, or from SECTID
+when all files share one DATAID. `z_floor` and `t_floor` raise the errors on the way. A file that
+cannot be read is skipped with a warning.
+
+!!! note
+    Some published EDIs are a unit factor off. `EDIToModEM` warns and rescales a file whose apparent
+    resistivities come out beyond 10⁶ Ω·m, or below 10⁻³ Ω·m, when one [mV/km]/[nT] ↔ Ohm factor
+    brings them back. The MTNet BC87 files need this. `fix_units = false` turns it off.
+
+A ModEM file holds one rotation. If the EDIs are in different frames (ZROT), every site is turned to
+north on the way, and a site-period without the full tensor is dropped.
+
 ## Model files
 
 | Dimension | Format | Read | Write |
