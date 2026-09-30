@@ -37,6 +37,7 @@ makedocs(;
             "2D"              => "visualisation/2d.md",
             "3D models"       => "visualisation/3d_models.md",
             "3D data maps"    => "visualisation/3d_data.md",
+            "Data dashboard"  => "visualisation/dashboard.md",
             "3D model editing" => "visualisation/editing.md",
         ],
         "API" => "api.md",

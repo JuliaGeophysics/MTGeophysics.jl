@@ -107,6 +107,8 @@ of a function.
 | Function | Description |
 |:---------|:------------|
 | `load_data_modem(path)` | Load 3D data file, with its rotation history |
+| `EDIToModEM(edi_path, output_path)` | Convert an EDI file or a directory of them to a ModEM data file, see [EDI files](data/files.md#EDI-files) |
+| `ModEMToEDI(data_path, output_dir)` | Write one EDI per site of a ModEM data file |
 | `rotate_data(path_or_data, angle; kind)` | Rotate Z and tipper for a mesh, a strike or declination, see [rotation](data/rotation.md) |
 | `RotationStep` | One step of a data file's rotation history |
 | `load_model_modem(path)` | Load 3D model file |
@@ -119,6 +121,10 @@ of a function.
 | `has_tipper_data(d)` | Whether a data set carries usable tippers |
 | `write_ptiv_gis(data_file; ...)` | Write phase tensor / induction vector shapefiles per period |
 | `PlotPTIVMap(data_file; ...)` | Interactive phase tensor and induction vector map |
+| `DataDashboard(data_file; predicted, mask, ...)` | Page through the sites (ρ/φ, full tensor, tipper) and mask data, see [Data dashboard](visualisation/dashboard.md) |
+| `write_data_mask(path, d, keep)`, `read_data_mask(path)` | Write and read a mask file (site, period, component) |
+| `apply_data_mask(target, mask)` | Apply a mask to a ModEM file or to a directory of EDIs, writing masked copies |
+| `apply_data_mask!(d, mask)`, `mask_keep(d, mask)` | Mask a `Data` in place, or return what a mask keeps |
 
 ## 3D Meshes
 
