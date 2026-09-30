@@ -24,6 +24,7 @@ jobs:
       matrix:
         version:
           - '1.12.5'  # pinned development/support version
+          - '1.13.0'
         os:
           - ubuntu-latest
         arch:

@@ -5,8 +5,10 @@ inversion on a small synthetic example. It takes about ten minutes.
 
 ## What you need
 
-- Julia 1.10 or newer
-- OpenGL, only for the interactive 3D viewers (GLMakie)
+- Julia 1.12 or newer (tested on 1.12 and 1.13)
+- OpenGL, for the interactive 3D viewers (GLMakie). GLMakie is installed with the package, so on a
+  machine without a display, such as a cluster node, install and run Julia under a virtual display,
+  e.g. `xvfb-run julia`
 - ModEM compiled with MPI, only for 3D inversion (see [3D VFSA](inversion/3d_vfsa.md))
 
 ## Install the package
