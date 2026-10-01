@@ -129,16 +129,26 @@ When the model carries an `npad` field with the per-side padding cell counts
 `(nx_pad, ny_pad)` (as stored by `load_model_modem`), those counts are used
 directly. Models without usable `npad` information fall back to width-based
 `core_indices` detection. Pass `use_npad=false` to force width detection.
+
+`npad` holds one count per axis, so it can only describe padding that is the same
+on both sides. On an axis whose cell widths show uneven padding (more cells on one
+side than the other), the width-detected core is used for that axis instead.
 """
 function lateral_core_ranges(m; tol::Real = 0.2, use_npad::Bool = true)
-    if use_npad
-        r = _npad_core_ranges(m)
-        isnothing(r) || return r
-    end
     ix = core_indices(m.cx; tol=tol)
     iy = core_indices(m.cy; tol=tol)
+    if use_npad
+        r = _npad_core_ranges(m)
+        if !isnothing(r)
+            return (_is_evenly_padded(ix, length(m.cx)) ? r[1] : ix,
+                    _is_evenly_padded(iy, length(m.cy)) ? r[2] : iy)
+        end
+    end
     return ix, iy
 end
+
+# true when the core range `r` leaves the same number of padding cells on both sides of an axis of `n` cells
+_is_evenly_padded(r::AbstractRange, n::Integer) = first(r) - 1 == n - last(r)
 
 """
     core_view(m; tol=0.2, use_npad=true)
