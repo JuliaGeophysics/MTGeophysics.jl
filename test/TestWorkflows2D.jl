@@ -12,8 +12,8 @@ using Test
             # a small survey with the shipped controls
             path(f) = joinpath(dir, f)
             ctrl_dir = joinpath(dirname(@__DIR__), "examples", "ctrl", "2D")
-            cp(joinpath(ctrl_dir, "FwdCtrl"), path("fwd.ctrl"))
-            cp(joinpath(ctrl_dir, "InvCtrl.GN"), path("inv.ctrl"))
+            write(path("fwd.ctrl"), read(joinpath(ctrl_dir, "FwdCtrl")))
+            write(path("inv.ctrl"), read(joinpath(ctrl_dir, "InvCtrl.GN")))
             f, y = [1.0, 10.0, 100.0], [-750.0, -250.0, 250.0, 750.0]
             mesh = BuildMesh2D(frequencies = f, receiver_positions = y, y_core_range = (-1000.0, 1000.0), y_core_cell = 250.0,
                                y_padding = 4000.0, pad_factor = 1.5, air_top = -20_000.0, air_cells = 8, max_core_layers = 6)

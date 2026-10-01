@@ -44,6 +44,8 @@ julia --project=. -e 'using Pkg; Pkg.instantiate()'
 `Pkg.instantiate()` installs the exact versions listed in `Manifest.toml`. All commands in this
 documentation assume you are in the clone folder and pass `--project=.`.
 
+For the rest of this document, we assume that you followed the installation following option 2, because you will need the example scripts and some helper files present in the original repository. If you installed the package in a separate environment, you can still run the examples, but you will need to copy the `examples/` and `helpers/` folders from the repository into your working folder.
+
 ## Check the installation
 
 ```bash
