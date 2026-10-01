@@ -123,7 +123,8 @@ end
 function _load_topography_geotiff(path::AbstractString)
     ArchGDAL.read(path) do dataset
         band = ArchGDAL.getband(dataset, 1)
-        zgrid = Float64.(ArchGDAL.read(band))
+        # ArchGDAL returns (x, y); sampling below indexes zgrid[y, x].
+        zgrid = permutedims(Float64.(ArchGDAL.read(band)))
         nodata = ArchGDAL.getnodatavalue(band)
         gt = ArchGDAL.getgeotransform(dataset)
         x0, dx, rx, y0, ry, dy = Float64.(gt)
