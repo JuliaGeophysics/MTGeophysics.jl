@@ -1,8 +1,8 @@
 # 3D core and padding detection
 # Author: @pankajkmishra
 # Ensures core_indices returns the whole uniform plateau even when the fine survey cells are a minority along an
-# axis (narrow, wide and offset cores), lateral_core_ranges honours npad, and core expansion grows by whole cells
-# clamped to the grid; headless, no solver
+# axis (narrow, wide and offset cores), lateral_core_ranges honours npad except on unevenly padded axes, and core
+# expansion grows by whole cells clamped to the grid; headless, no solver
 
 @testset "Core detection (CoreUtils3D)" begin
 
@@ -83,6 +83,28 @@
         @test ixv == 9:38
         @test iyv == 6:45
         @test size(Rv) == (30, 40, 2)
+    end
+
+    @testset "uneven padding with npad" begin
+        # x: 6 padding cells on one side, 22 on the other; y: even padding; nx != ny
+        dx = widths(npad_lo = 6, ncore = 20, npad_hi = 22, core_w = 1000.0, factor = 1.3)
+        dy = widths(npad_lo = 8, ncore = 30, npad_hi = 8, core_w = 1000.0, factor = 1.3)
+        cx, cy = centers(dx), centers(dy)
+
+        # One npad count per axis assumes even padding: (48 - 20) ÷ 2 = 14 would put the x core at 15:34
+        ix, iy = lateral_core_ranges((cx = cx, cy = cy, npad = (14, 8)))
+        @test ix == 7:26
+        @test iy == 9:38
+
+        # Through the file reader, which sets npad itself
+        path = joinpath(mktempdir(), "uneven.ws")
+        write_ws3d_model(path, dx, dy, fill(100.0, 3), fill(2.0, length(dx), length(dy), 3))
+        ws = load_ws3d_model(path)
+        ix, iy = lateral_core_ranges(ws)
+        @test ix == 7:26
+        @test iy == 9:38
+        Rv, _, _ = core_view(ws)
+        @test size(Rv) == (20, 30, 3)
     end
 end
 

@@ -154,7 +154,7 @@ of a function.
 | `edges_from_centers(c)` | Cell-edge coordinates from cell centres |
 | `core_indices(c; tol)` | Index range of the unpadded core cells |
 | `z_indices_for_max_depth(zc, d)` | Depth-limited vertical index range |
-| `lateral_core_ranges(m; tol)` | `(ix, iy)` core ranges for a model |
+| `lateral_core_ranges(m; tol)` | `(ix, iy)` core ranges for a model, also with uneven padding |
 | `core_view(m; tol)` | View into the core resistivity block |
 | `RBFMap` | Gaussian-RBF mapping structure |
 | `build_rbf_map(m, ix, iy, n, rng)` | Build a 3D RBF control-point map |

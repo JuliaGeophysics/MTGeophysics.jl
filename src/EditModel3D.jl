@@ -340,8 +340,7 @@ function get_scope_indices(M; replace_scope::Symbol = :core_only)
         iy = 1:M.ny
         scope_label = "full model including padding"
     elseif replace_scope == :core_only
-        ix = (M.npad[1] + 1):(M.nx - M.npad[1])
-        iy = (M.npad[2] + 1):(M.ny - M.npad[2])
+        ix, iy = lateral_core_ranges(M)
         scope_label = "core model only"
     else
         error("replace_scope must be :core_only or :full_model, got $(replace_scope)")
