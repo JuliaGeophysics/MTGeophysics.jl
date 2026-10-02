@@ -1270,18 +1270,18 @@ function draw_north_and_scale!(ax;
             x1 = x_north + arrow_len
             y1 = y_north
             ah = 0.025 * min(dx, dy)
-            lines!(ax, [x_north, x1], [y_north, y1], [z, z], color = color, linewidth = line_width)
-            lines!(ax, [x1 - ah, x1], [y1 - ah, y1], [z, z], color = color, linewidth = line_width)
-            lines!(ax, [x1 - ah, x1], [y1 + ah, y1], [z, z], color = color, linewidth = line_width)
-            text!(ax, [x1 + 0.02 * dx], [y1], [z], text = ["N"], color = color, fontsize = 16)
+            lines!(ax, [x_north, x1], [y_north, y1], [z, z], color = color, linewidth = line_width, overdraw = true)
+            lines!(ax, [x1 - ah, x1], [y1 - ah, y1], [z, z], color = color, linewidth = line_width, overdraw = true)
+            lines!(ax, [x1 - ah, x1], [y1 + ah, y1], [z, z], color = color, linewidth = line_width, overdraw = true)
+            text!(ax, [x1 + 0.02 * dx], [y1], [z], text = ["N"], color = color, fontsize = 16, overdraw = true)
         else
             x1 = x_north
             y1 = y_north + arrow_len
             ah = 0.025 * min(dx, dy)
-            lines!(ax, [x_north, x1], [y_north, y1], [z, z], color = color, linewidth = line_width)
-            lines!(ax, [x1 - ah, x1], [y1 - ah, y1], [z, z], color = color, linewidth = line_width)
-            lines!(ax, [x1 + ah, x1], [y1 - ah, y1], [z, z], color = color, linewidth = line_width)
-            text!(ax, [x1], [y1 + 0.02 * dy], [z], text = ["N"], color = color, fontsize = 16)
+            lines!(ax, [x_north, x1], [y_north, y1], [z, z], color = color, linewidth = line_width, overdraw = true)
+            lines!(ax, [x1 - ah, x1], [y1 - ah, y1], [z, z], color = color, linewidth = line_width, overdraw = true)
+            lines!(ax, [x1 + ah, x1], [y1 - ah, y1], [z, z], color = color, linewidth = line_width, overdraw = true)
+            text!(ax, [x1], [y1 + 0.02 * dy], [z], text = ["N"], color = color, fontsize = 16, overdraw = true)
         end
     end
 
@@ -1292,15 +1292,15 @@ function draw_north_and_scale!(ax;
         xb1 = xb0 + scale_len
         yb = y_scale
 
-        lines!(ax, [xb0, xb1], [yb, yb], [z, z], color = color, linewidth = line_width)
+        lines!(ax, [xb0, xb1], [yb, yb], [z, z], color = color, linewidth = line_width, overdraw = true)
 
         tick = 0.008 * dy
-        lines!(ax, [xb0, xb0], [yb - tick, yb + tick], [z, z], color = color, linewidth = line_width)
-        lines!(ax, [xb1, xb1], [yb - tick, yb + tick], [z, z], color = color, linewidth = line_width)
+        lines!(ax, [xb0, xb0], [yb - tick, yb + tick], [z, z], color = color, linewidth = line_width, overdraw = true)
+        lines!(ax, [xb1, xb1], [yb - tick, yb + tick], [z, z], color = color, linewidth = line_width, overdraw = true)
 
         unit_label = uppercase(strip(target_crs)) == "EPSG:4326" ? "deg" : "m"
         label_val = unit_label == "m" && scale_len >= 1000 ? "$(round(scale_len / 1000; digits = 2)) km" : "$(round(scale_len; sigdigits = 3)) $unit_label"
-        text!(ax, [0.5 * (xb0 + xb1)], [yb + 0.02 * dy], [z], text = [label_val], color = color, fontsize = 12)
+        text!(ax, [0.5 * (xb0 + xb1)], [yb + 0.02 * dy], [z], text = [label_val], color = color, fontsize = 12, overdraw = true)
     end
 end
 
@@ -1313,7 +1313,10 @@ function plot_shapefile_on_3d!(ax, shapefile_path;
     auto_reproject_to_wgs84 = true,
     post_transform = (x, y) -> (x, y),
     xlim::Union{Nothing, Tuple{<:Real, <:Real}} = nothing,
-    ylim::Union{Nothing, Tuple{<:Real, <:Real}} = nothing)
+    ylim::Union{Nothing, Tuple{<:Real, <:Real}} = nothing,
+    z_at = nothing)
+    # z_at(x, y) drapes the overlay on a surface (topography); otherwise everything sits at z_fixed
+    zs(xv, yv) = isnothing(z_at) ? fill(Float64(z_fixed), length(xv)) : Float64[z_at(x, y) for (x, y) in zip(xv, yv)]
     if isnothing(shapefile_path) || !isfile(shapefile_path)
         isnothing(shapefile_path) || @warn "Shapefile not found: $shapefile_path"
         return 0
@@ -1332,7 +1335,10 @@ function plot_shapefile_on_3d!(ax, shapefile_path;
 
     function plot_coords_recursive!(coords)
         if _is_xy(coords)
-            return 0
+            x, y = post_transform(coord_transform(Float64(coords[1]), Float64(coords[2]))...)
+            inside(x, y) || return 0
+            scatter!(ax, [x], [y], zs([x], [y]), color = point_color, markersize = point_size, overdraw = true)
+            return 1
         elseif coords isa AbstractVector
             isempty(coords) && return 0
             first_item = first(coords)
@@ -1355,7 +1361,7 @@ function plot_shapefile_on_3d!(ax, shapefile_path;
                         push!(run_y, y)
                     else
                         if length(run_x) >= 2
-                            lines!(ax, run_x, run_y, fill(z_fixed, length(run_x)), color = line_color, linewidth = line_width)
+                            lines!(ax, run_x, run_y, zs(run_x, run_y), color = line_color, linewidth = line_width, overdraw = true)
                             segments_plotted += 1
                         end
                         empty!(run_x)
@@ -1364,7 +1370,7 @@ function plot_shapefile_on_3d!(ax, shapefile_path;
                 end
 
                 if length(run_x) >= 2
-                    lines!(ax, run_x, run_y, fill(z_fixed, length(run_x)), color = line_color, linewidth = line_width)
+                    lines!(ax, run_x, run_y, zs(run_x, run_y), color = line_color, linewidth = line_width, overdraw = true)
                     segments_plotted += 1
                 end
 
@@ -1408,8 +1414,10 @@ function modem_3d_viewer(
     north_axis::Symbol = :y,
     site_e::Vector{Float64} = Float64[],
     site_n::Vector{Float64} = Float64[],
+    site_z::Vector{Float64} = Float64[],
+    surface_elev::Union{Nothing, AbstractMatrix} = nothing,
     shapefile_path = nothing,
-    overlay_z_fixed::Real = 0.0,
+    overlay_z_fixed::Union{Nothing, Real} = nothing,
     overlay_auto_reproject_to_wgs84::Bool = true,
     overlay_point_color = :black,
     overlay_line_color = :black,
@@ -1453,6 +1461,59 @@ function modem_3d_viewer(
 
     z = -z_all[kz]
     R = A_all[ix, iy, kz]
+
+    # Overlay elevations (z up). overlay_z_fixed puts every overlay on one plane; otherwise
+    # sites keep their own elevation, shapefiles drape on the earth surface (surface_elev on
+    # the x_all × y_all cell centres; flat models give 0) and annotations sit on its highest point.
+    model_top = isnothing(surface_elev) ? -first(edges_from_centers(z_all)) : Float64(maximum(surface_elev))
+    annot_z = isnothing(overlay_z_fixed) ? model_top : Float64(overlay_z_fixed)
+    overlay_z_at = if isnothing(overlay_z_fixed) && !isnothing(surface_elev)
+        (xq, yq) -> Float64(surface_elev[argmin(abs.(x_all .- xq)), argmin(abs.(y_all .- yq))])
+    else
+        nothing
+    end
+    site_zv = if !isnothing(overlay_z_fixed) || length(site_z) != length(site_e)
+        fill(annot_z, length(site_e))
+    else
+        site_z
+    end
+
+    # GLMakie draws plots in order of their z translation, so the XY slice (translated to its elevation) is drawn
+    # after overlays at translation 0 and covers them despite overdraw. Overlays are drawn `lift` lower and
+    # translated `lift` up: same place, drawn last.
+    lift = 2 * maximum(abs, z_all) + 1.0
+    function draw_overlays!(scene, xv, yv; annotations::Bool = true)
+        n0 = length(scene.plots)
+        if annotations
+            !isnothing(shapefile_path) && plot_shapefile_on_3d!(scene, shapefile_path;
+                z_fixed = annot_z - lift,
+                point_color = overlay_point_color,
+                line_color = overlay_line_color,
+                point_size = overlay_point_size,
+                line_width = overlay_line_width,
+                auto_reproject_to_wgs84 = overlay_auto_reproject_to_wgs84,
+                post_transform = overlay_transform,
+                xlim = extrema(xv),
+                ylim = extrema(yv),
+                z_at = isnothing(overlay_z_at) ? nothing : (xq, yq) -> overlay_z_at(xq, yq) - lift)
+            draw_north_and_scale!(scene;
+                xv = xv,
+                yv = yv,
+                z_fixed = annot_z - lift,
+                target_crs = target_crs,
+                north_axis = north_axis,
+                show_north = show_north_arrow,
+                show_scale = show_scale_bar,
+                color = annotation_color,
+                line_width = annotation_line_width)
+        end
+        isempty(site_e) || scatter!(scene, site_e, site_n, site_zv .- lift;
+            color = overlay_point_color, marker = :circle, markersize = overlay_point_size, overdraw = true)
+        for p in scene.plots[n0+1:end]
+            translate!(p, 0, 0, lift)
+        end
+        return nothing
+    end
 
     if isnothing(resistivity_range)
         vals = R[isfinite.(R)]
@@ -1504,27 +1565,7 @@ function modem_3d_viewer(
                         colormap = current_colormap[], 
                         colorrange = (cmin, cmax), 
                         bbox_visible = true)
-    !isnothing(shapefile_path) && plot_shapefile_on_3d!(ax.scene, shapefile_path;
-        z_fixed = overlay_z_fixed,
-        point_color = overlay_point_color,
-        line_color = overlay_line_color,
-        point_size = overlay_point_size,
-        line_width = overlay_line_width,
-        auto_reproject_to_wgs84 = overlay_auto_reproject_to_wgs84,
-        post_transform = overlay_transform,
-        xlim = extrema(current_x[]),
-        ylim = extrema(current_y[]))
-    draw_north_and_scale!(ax.scene;
-        xv = current_x[],
-        yv = current_y[],
-        z_fixed = overlay_z_fixed,
-        target_crs = target_crs,
-        north_axis = north_axis,
-        show_north = show_north_arrow,
-        show_scale = show_scale_bar,
-        color = annotation_color,
-        line_width = annotation_line_width)
-    isempty(site_e) || scatter!(ax.scene, site_e, site_n, fill(Float64(overlay_z_fixed), length(site_e)); color = :black, marker = :circle, markersize = 7)
+    draw_overlays!(ax.scene, current_x[], current_y[])
     current_plt[] = plt
     current_heatmaps[] = (yz=plt[:heatmap_yz][], xz=plt[:heatmap_xz][], xy=plt[:heatmap_xy][])
 
@@ -1679,27 +1720,7 @@ function modem_3d_viewer(
                                 colormap = new_cmap, 
                                 colorrange = (cmin, cmax), 
                                 bbox_visible = true)
-        !isnothing(shapefile_path) && plot_shapefile_on_3d!(ax.scene, shapefile_path;
-            z_fixed = overlay_z_fixed,
-            point_color = overlay_point_color,
-            line_color = overlay_line_color,
-            point_size = overlay_point_size,
-            line_width = overlay_line_width,
-            auto_reproject_to_wgs84 = overlay_auto_reproject_to_wgs84,
-            post_transform = overlay_transform,
-            xlim = extrema(new_x),
-            ylim = extrema(new_y))
-        draw_north_and_scale!(ax.scene;
-            xv = new_x,
-            yv = new_y,
-            z_fixed = overlay_z_fixed,
-            target_crs = target_crs,
-            north_axis = north_axis,
-            show_north = show_north_arrow,
-            show_scale = show_scale_bar,
-            color = annotation_color,
-            line_width = annotation_line_width)
-        isempty(site_e) || scatter!(ax.scene, site_e, site_n, fill(Float64(overlay_z_fixed), length(site_e)); color = :black, marker = :circle, markersize = 7)
+        draw_overlays!(ax.scene, new_x, new_y)
 
         current_plt[] = new_plt
         current_heatmaps[] = (yz=new_plt[:heatmap_yz][], xz=new_plt[:heatmap_xz][], xy=new_plt[:heatmap_xy][])
@@ -1841,7 +1862,7 @@ function modem_3d_viewer(
         export_plt[:heatmap_xz][].visible[] = tog_xz.active[]
         export_plt[:heatmap_xy][].visible[] = tog_xy.active[]
 
-        isempty(site_e) || scatter!(export_ax, site_e, site_n, fill(Float64(overlay_z_fixed), length(site_e)); color = :black, marker = :circle, markersize = 7)
+        draw_overlays!(export_ax.scene, cur_x, cur_y; annotations = false)
 
         cb_lbl = log10scale ? "log₁₀ ρ (Ω·m)" : "ρ (Ω·m)"
         Colorbar(export_fig[2, 2], export_plt[:heatmap_xy][], label = cb_lbl, labelsize = 14)
@@ -2163,7 +2184,7 @@ function PlotModelXYZ(model_file::AbstractString, data_file::AbstractString;
     viewer_figsize = (1800, 920),
     default_view_direction = Vec3f(-1.05f0, -0.80f0, 0.72f0),
     default_view_scale = 1.12f0,
-    overlay_z_fixed::Real = 0.0,
+    overlay_z_fixed::Union{Nothing, Real} = nothing,
     overlay_auto_reproject_to_wgs84::Bool = true,
     overlay_point_color = :black,
     overlay_line_color = :black,
@@ -2249,6 +2270,8 @@ function PlotModelXYZ(model_file::AbstractString, data_file::AbstractString;
         north_axis = north_axis,
         site_e = collect(Float64.(station_tx)),
         site_n = collect(Float64.(station_ty)),
+        site_z = collect(Float64.(-d.z)),
+        surface_elev = -permutedims(M.Z),
         shapefile_path = shapefile_path,
         overlay_z_fixed = overlay_z_fixed,
         overlay_auto_reproject_to_wgs84 = overlay_auto_reproject_to_wgs84,
