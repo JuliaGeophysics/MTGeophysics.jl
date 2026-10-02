@@ -17,7 +17,9 @@ viewer_figsize    = (1800, 920)
 default_view_direction = (-1.05, -0.80, 0.72)
 default_view_scale     = 1.12
 
-overlay_z_fixed                 = 0.0
+# nothing: sites at their data-file elevation, shapefile draped on the model surface
+# (works for flat and topography models); a number puts every overlay at that elevation (m, up)
+overlay_z_fixed                 = nothing
 overlay_auto_reproject_to_wgs84 = true
 overlay_point_color             = :black
 overlay_line_color              = :black
