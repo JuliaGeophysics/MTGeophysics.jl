@@ -449,15 +449,26 @@ function _mt2d_surface_fields_tm(
     Hmid1 = (magnetic_pair[1:end-1, 2] .+ magnetic_pair[2:end, 2]) ./ 2
     Eycell = (Hmid1 .- Hmid0) ./ (first_cell_thickness .* sigma_row) .-
              1im * ω * μ₀_2D .* (0.75 .* Hmid0 .+ 0.25 .* Hmid1) .* (0.5 * first_cell_thickness)
-    Eysurface, CT.(H), CT.(Eycell)
+    # nodal Jy, continuous across a lateral contrast where Ey jumps; a receiver reads Jy times its own cell's ρ
+    Jysurface = Eysurface ./ vcat(ρavg[1], ρavg, ρavg[end])
+    Eysurface, CT.(H), CT.(Eycell), Jysurface, 1.0 ./ sigma_row
 end
+
+# TM Ey at a receiver at y in the cell right of node k: Jy interpolated between the nodes, times the cell ρ
+_mt2d_tm_receiver_ey(Jy, ρcell, k, Δy1, Δy2) = ρcell[k] * (Jy[k] * Δy2 + Jy[k + 1] * Δy1)
 
 # TM: Ey and Hx at the receivers of one surface row
 function compute_fields_at_receivers_tm(ω::Float64, receiver_locations::Matrix{Float64}, y_nodes::Vector{Float64},
                                         first_cell_thickness::Float64, sigma_row::AbstractVector{<:Real},
                                         magnetic_pair::AbstractMatrix{<:Complex})
-    E, H = _mt2d_surface_fields_tm(ω, y_nodes, first_cell_thickness, sigma_row, magnetic_pair)
-    _mt2d_interpolate_receivers(receiver_locations, y_nodes, E, H)
+    _, H, _, Jy, ρcell = _mt2d_surface_fields_tm(ω, y_nodes, first_cell_thickness, sigma_row, magnetic_pair)
+    Erec, Hrec = _mt2d_interpolate_receivers(receiver_locations, y_nodes, Jy, H)
+    for i in axes(receiver_locations, 1)
+        y = receiver_locations[i, 1]
+        node = findfirst(v -> v > y, y_nodes)
+        Erec[i] = _mt2d_tm_receiver_ey(Jy, ρcell, node - 1, y - y_nodes[node - 1], y_nodes[node] - y)
+    end
+    Erec, Hrec
 end
 
 # fold phases into [0, 90] degrees
@@ -546,13 +557,12 @@ function _mt2d_station_plan(mesh::MT2DMesh, t::TensorMesh2D, locations::Matrix{F
 end
 
 # impedance at every receiver from the surface fields of each group: H and TE Ex from the nodes; TM Ey
-# from the tread-centre Ey of the cells, each from its own ρ, between the cell centres on flat ground,
-# since a nodal Ey averages the ρ of both cells beside the node and a station next to a lateral contrast
-# (a lake shore) then reads the neighbour's ρ; the dipole window next to a step
+# on flat ground from the nodal Jy, which is continuous across a lateral contrast, times the receiving
+# cell's own ρ, since an Ey interpolated across a contrast (a lake shore) mixes in the neighbour's ρ;
+# the dipole window next to a step
 function _mt2d_station_impedance(pol, plan, surface, locations, y_nodes)
     T = promote_type(eltype(surface[1][1]), eltype(surface[1][2]))
     Z = zeros(T, length(plan.stations))
-    yc = (y_nodes[1:end-1] .+ y_nodes[2:end]) ./ 2
     for (i, p) in enumerate(plan.stations)
         Es, Hs = surface[p.group]
         y = locations[i, 1]
@@ -565,10 +575,7 @@ function _mt2d_station_impedance(pol, plan, surface, locations, y_nodes)
             Ew = sum(w.width * surface[w.group][3][w.column] for w in p.window)
             E = (Δy1 + Δy2) * Ew / sum(w.width for w in p.window)
         elseif pol == :TM
-            Ec, k = surface[p.group][3], node - 1
-            j = clamp(y < yc[k] ? k - 1 : k + 1, 1, length(yc))
-            t = j == k ? 0.0 : (y - yc[k]) / (yc[j] - yc[k])
-            E = (Δy1 + Δy2) * (Ec[k] + (Ec[j] - Ec[k]) * t)
+            E = _mt2d_tm_receiver_ey(surface[p.group][4], surface[p.group][5], node - 1, Δy1, Δy2)
         end
         Z[i] = E / H
     end
