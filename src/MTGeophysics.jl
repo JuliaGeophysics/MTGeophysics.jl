@@ -88,6 +88,10 @@ include("MakeMesh2DGUI.jl")
 
 include("VFSA3DMT.jl")
 
+#----- 3-D ASA inversion --------------------------------------------------#
+
+include("Inv3D_ASA.jl")
+
 #----- Exports: 3-D ModEM ------------------------------------------------#
 
 export Data, Model, ModEMData, ModEMModel
@@ -141,6 +145,11 @@ export VFSA3DMT
 export AnalyseEnsemble3D
 export core_statistics
 export RBFMap, build_rbf_map, apply_rbf_map!
+
+#----- Exports: 3-D ASA inversion ----------------------------------------#
+
+export ASA3DMTConfig
+export ASA3DMT
 
 #----- Exports: 1-D / 2-D ------------------------------------------------#
 

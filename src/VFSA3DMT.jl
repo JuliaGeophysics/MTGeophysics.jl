@@ -175,7 +175,7 @@ function _sanitize_cfg!(cfg::VFSA3DMTConfig)
 end
 
 # δ = 503·sqrt(ρ_bg·T_max), ρ_bg = median finite off-diagonal apparent resistivity
-function _z_core_max_depth(dobs_abs::AbstractString, cfg::VFSA3DMTConfig)
+function _z_core_max_depth(dobs_abs::AbstractString, cfg)
     isfinite(cfg.z_core_skin_depths) || return Inf
     d = try
         load_data_modem(dobs_abs)
@@ -508,7 +508,7 @@ function forward_and_misfit!(m::WS3DModel;
                              dpred_filename::String,
                              origin::Vector{Float64},
                              rotation::Float64,
-                             cfg::VFSA3DMTConfig)
+                             cfg)
     model_abs = joinpath(run_dir, model_filename)
     dpred_abs = joinpath(run_dir, dpred_filename)
     dobs_abs  = joinpath(run_dir, dobs_filename)

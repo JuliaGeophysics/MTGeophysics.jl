@@ -21,6 +21,7 @@ include(joinpath(@__DIR__, "Helpers2D.jl"))
     include(joinpath(@__DIR__, "TestMask3D.jl"))
     include(joinpath(@__DIR__, "TestTopography3D.jl"))
     include(joinpath(@__DIR__, "TestRBFPadding3D.jl"))
+    include(joinpath(@__DIR__, "TestASA3D.jl"))
     include(joinpath(@__DIR__, "TestPhaseTensor.jl"))
     include(joinpath(@__DIR__, "TestShapefileOverlay.jl"))
 
