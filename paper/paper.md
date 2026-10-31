@@ -77,7 +77,7 @@ Several open-source codes support MT research. ModEM
 [@Egbert2012; @Kelbert2014] is widely used for deterministic 3D MT inversion
 on structured grids. [FEMTIC](https://github.com/yoshiya-usui/femtic) [@Usui2015; @Usui2017] performs 3D MT inversion on
 unstructured meshes, incorporating topography, bathymetry and galvanic
-distortion, and [FEMTIC-DABIC](https://github.com/hsong-28/FEMTIC-DABIC) [@Song2025] extends it with statistical selection
+distortion, and [FEMTIC-DABIC](https://github.com/hsong-28/FEMTIC-DABIC) [@Song2026] extends it with statistical selection
 of the regularisation parameter. [jif3D](https://sourceforge.net/projects/jif3d/) [@Moorkamp2011] is a multi-physics
 joint inversion framework that combines 3D MT with gravity, magnetic and
 seismic data. [MARE2DEM](https://mare2dem.bitbucket.io/master/) [@Key2016]
