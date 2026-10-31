@@ -4,6 +4,8 @@ using Dates
 
 # inputs in examples/cascadia (not tracked), absolute paths so the job runs from any directory
 const DATA_DIR = joinpath(@__DIR__, "cascadia")
+# CHANGE THIS: path to your own ModEM executable (the path below is the
+# author's build on CSC Mahti)
 const MODEM_EXECUTABLE = "/projappl/project_2011796/ModEM-GPU/bin/Mod3DMT_CPU"
 
 start_model = joinpath(DATA_DIR, "cascad_half_prior.ws")
@@ -14,11 +16,11 @@ seed = length(ARGS) >= 1 ? parse(Int, ARGS[1]) : 1911
 
 #---------- configure the inversion ----------
 cfg = VFSA3DMTConfig(
-    nprocs                = 21,         # MPI ranks for ModEM
-    mpirun_cmd            = "srun",     # MPI launcher
+    nprocs                = 21,         # MPI ranks for ModEM; CHANGE THIS to suit your machine
+    mpirun_cmd            = "srun",     # MPI launcher; CHANGE THIS to "mpirun" outside SLURM clusters
     modem_exe             = MODEM_EXECUTABLE,
-    # pins BICG: this binary's compiled-in default is QMR (the maintained
-    # ModEM tree defaults to BICG), and QMR is slower here
+    # CHANGE THIS: F.dat is not in ModEM-Examples; set fwd_ctrl = "" to use
+    # ModEM's default forward-solver settings
     fwd_ctrl              = joinpath(DATA_DIR, "F.dat"),
     out_root              = joinpath(DATA_DIR, "run"),
     n_ctrl                = 2500,        # RBF control points

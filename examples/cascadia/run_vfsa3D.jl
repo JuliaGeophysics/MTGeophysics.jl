@@ -9,8 +9,10 @@ using MTGeophysics
 using Dates
 
 const BASE_DIR = @__DIR__
-# CPU-only build of the ModEM-GPU tree: znver5 (AVX-512 + FMA) vs the SSE2-only
-# Mod3DMT_2026, so the forward solves run measurably faster on the Zen5 nodes
+# CHANGE THIS: path to your own ModEM executable. The path below is the
+# author's build on CSC Mahti: a CPU-only build of the ModEM-GPU tree, znver5
+# (AVX-512 + FMA) vs the SSE2-only Mod3DMT_2026, so the forward solves run
+# measurably faster on the Zen5 nodes
 const MODEM_EXECUTABLE = "/projappl/project_2011796/ModEM-GPU/bin/Mod3DMT_CPU"
 
 start_model = joinpath(BASE_DIR, "cascad_half_prior.ws")
@@ -21,11 +23,11 @@ seed = length(ARGS) >= 1 ? parse(Int, ARGS[1]) : 1911
 
 #---------- configure the inversion ----------
 cfg = VFSA3DMTConfig(
-    nprocs                = 21,         # MPI ranks for ModEM
-    mpirun_cmd            = "srun",     # MPI launcher
+    nprocs                = 21,         # MPI ranks for ModEM; CHANGE THIS to suit your machine
+    mpirun_cmd            = "srun",     # MPI launcher; CHANGE THIS to "mpirun" outside SLURM clusters
     modem_exe             = MODEM_EXECUTABLE,
-    # pins BICG: this binary's compiled-in default is QMR (the maintained
-    # ModEM tree defaults to BICG), and QMR is slower here
+    # CHANGE THIS: F.dat is not in ModEM-Examples; set fwd_ctrl = "" to use
+    # ModEM's default forward-solver settings
     fwd_ctrl              = joinpath(BASE_DIR, "F.dat"),
     out_root              = joinpath(BASE_DIR, "run"),
     n_ctrl                = 2500,        # RBF control points

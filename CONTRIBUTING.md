@@ -3,6 +3,10 @@
 Thank you for your interest in contributing! This guide covers how to
 report issues, suggest improvements, and submit code.
 
+## Getting help
+
+Ask usage questions in [GitHub Discussions](../../discussions).
+
 ## Reporting bugs
 
 Open a [GitHub issue](../../issues) with:

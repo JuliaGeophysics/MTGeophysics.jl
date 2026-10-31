@@ -89,4 +89,6 @@ run_<timestamp>/
 
 The Cascadia example is not included in the package. Download it from
 [ModEM-Examples](https://github.com/magnetotellurics/ModEM-Examples/tree/main/Magnetotelluric/3D_MT/Cascadia)
-and place it in `examples/cascadia/`.
+and place it in `examples/cascadia/`. The example also uses a bathymetry file,
+`cascad_bathymetry.dat`, which you can create from `cascad_half_prior.ws` with
+`extract_bathymetry` and `write_bathymetry` as shown in [3D meshes](../data/mesh3d.md).
