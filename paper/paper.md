@@ -186,7 +186,7 @@ collaborators, including at the EGU General Assembly 2026 [@Mishra2026], the 27t
 Electromagnetic Induction Workshop (EMIW 2026), and JuliaCon 2026.
 MTGeophysics.jl was also used to participate in the
 [MT3DINV-4 workshop](https://mt3dinv4.mtnet.info/Real_data.html)
-(Memorial University of Newfoundland, 2025), a community 3D MT inversion
+(Memorial University of Newfoundland, 2026), a community 3D MT inversion
 benchmarking exercise in which many groups inverted a common real field
 dataset acquired over the Raglan mining district in northern Quebec, Canada.
 
