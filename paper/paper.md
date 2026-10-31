@@ -36,8 +36,9 @@ MTGeophysics.jl is a Julia package developed to address this limitation. Its
 principal aim is the quantification of uncertainty in MT model building,
 advancing interpretation from a single deterministic model, through an
 ensemble of plausible models, towards the full posterior distribution
-(\autoref{fig:vision}). The package also provides forward modelling, inversion
-and visualisation tools for MT research and applications.
+(\autoref{fig:vision}). The package also provides tools for data analysis, mesh
+generation, masking, forward modelling, inversion, model analysis and
+visualisation for MT research and applications.
 
 ![The vision behind MTGeophysics.jl. Deterministic inversion yields a single
 regularised model $\hat{\mathbf{m}}$; an ensemble of plausible models
