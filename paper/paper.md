@@ -64,8 +64,8 @@ formats, so it slots into established MT practice without asking users to
 change their models, data, or solver.
 
 The package targets MT researchers and students who want an open-source
-toolkit that builds on Julia's [@Bezanson2017] strengths in numerical
-computing, composability, and interactive graphics. It is designed as a
+toolkit that builds on Julia's strengths in numerical
+computing, composability, and interactive graphics [@Bezanson2017]. It is designed as a
 research repository and as a core component of a broader JuliaGeophysics
 ecosystem: forward solvers, data structures, and inversion routines are meant
 to be reused and recombined, so that new ideas can be prototyped without
@@ -132,8 +132,8 @@ layered-earth impedance recursion exactly, with Fréchet derivatives by
 automatic differentiation; a 2D module that assembles sparse finite-difference
 operators for the TE and TM modes; and inversion modules for 1D, 2D and 3D:
 deterministic inversion, which in 3D is left to ModEM, and stochastic inversion
-by VFSA, with adaptive simulated annealing (ASA) as a further 3D option. Below
-3D the package uses its own forward solvers and runs chains in parallel
+by VFSA, with adaptive simulated annealing (ASA) as a further 3D option. For 1D
+and 2D problems, the package uses its own forward solvers and runs chains in parallel
 threads; in 3D it
 calls ModEM as a subprocess, runs each chain as an independent job and computes
 ensemble statistics across the completed runs. Because ModEM is reached only
@@ -153,8 +153,8 @@ neural representations, which have been applied to 3D gravity inversion
 [@Mishra2026INR], offer a further route to a compact, continuous model
 parameterisation.
 
-MTGeophysics.jl is intended to support the latest Julia release and the one
-before it, currently Julia 1.13 and 1.12. Continuous integration runs the test
+MTGeophysics.jl is intended to support the latest two Julia releases
+(currently versions 1.13 and 1.12). Continuous integration runs the test
 suite on both versions under a virtual display, so the visualisation layer is
 also exercised. The tests cover the 3D data structures and ModEM I/O, analytic
 checks of the 1D solver, physical-consistency and finite-difference Fréchet
